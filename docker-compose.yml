@@ -33,23 +33,6 @@ services:
       start_period: 15s
       retries: 3
 
-  runner-dind:
-    profiles:
-      - dind
-    image: docker:dind
-    privileged: true
-    environment:
-      DOCKER_TLS_CERTDIR: ""
-    command: ["--tls=false"]
-    volumes:
-      - dind-storage:/var/lib/docker
-    networks:
-      - runner-net
-    restart: unless-stopped
-
 networks:
   runner-net:
     name: runner-net
-
-volumes:
-  dind-storage:

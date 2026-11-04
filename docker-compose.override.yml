@@ -10,3 +10,20 @@ services:
     volumes:
       - ./config:/app/config
       - ./runners:/app/runners
+
+  runner-dind:
+    profiles:
+      - dind
+    image: docker:dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command: ["--tls=false"]
+    volumes:
+      - dind-storage:/var/lib/docker
+    networks:
+      - runner-net
+    restart: unless-stopped
+
+volumes:
+  dind-storage:
