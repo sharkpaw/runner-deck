@@ -27,7 +27,7 @@ body:
       description: |
         `GET /version`, the image tag, or `runner-manager -version`.
         From `GET /version`, the image tag, or `runner-manager -version`.
-      placeholder: v2.0.0
+      placeholder: v2.1.0
     validations:
       required: true
 

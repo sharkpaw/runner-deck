@@ -1,9 +1,6 @@
-## Runner Deck v2.0.0
+## Runner Deck v2.1.0
 
-First release of Runner Deck: add, stop and watch self-hosted GitHub Actions runners from one screen.
+- **Login page:** sign in from a page in the same design, with sign out. Scripts can keep using Basic Auth.
+- **Wrong passwords** are limited to 10 per address and 100 overall in 15 minutes.
 
-- **Images:** `ghcr.io/sharkpaw/runner-deck:v2.0.0` and `ghcr.io/sharkpaw/runner-deck:v2.0.0-runner`.
-- **Seven languages**, including Turkish.
-- **Interface:** sidebar, light and dark themes.
-- **System resources page:** CPU, memory and disk per runner, session charts and Docker disk usage.
-- **Coolify:** the root `docker-compose.yml` deploys as is.
+**Images:** `ghcr.io/sharkpaw/runner-deck:v2.1.0` and `ghcr.io/sharkpaw/runner-deck:v2.1.0-runner`.

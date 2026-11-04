@@ -2,8 +2,8 @@
 BINARY  := runner-manager
 VERSION ?= dev
 
-# Default tag for locally built runner image; when using the image pushed by CI, same repo name with tag suffixed -runner, e.g. ghcr.io/<owner>/<repo>:v2.0.0-runner
-RUNNER_IMAGE ?= ghcr.io/sharkpaw/runner-deck:v2.0.0-runner
+# Default tag for locally built runner image; when using the image pushed by CI, same repo name with tag suffixed -runner, e.g. ghcr.io/<owner>/<repo>:v2.1.0-runner
+RUNNER_IMAGE ?= ghcr.io/sharkpaw/runner-deck:v2.1.0-runner
 
 # GID of the docker group the app user joins inside the image; must match the host to access docker.sock (getent group docker | cut -d: -f3)
 DOCKER_GID ?= 999

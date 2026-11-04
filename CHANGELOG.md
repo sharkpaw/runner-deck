@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-05
+
+- Login page with a browser session and sign out. Scripts can keep using Basic Auth.
+- Wrong passwords are limited to 10 per address and 100 overall in 15 minutes.
+
 ## [2.0.0] - 2026-11-04
 
 First release of Runner Deck.
@@ -17,5 +22,6 @@ First release of Runner Deck.
 - System resources page: CPU, memory and disk per runner, session charts and Docker disk usage (`GET /api/system`).
 - The root `docker-compose.yml` deploys on Coolify as is.
 
-[Unreleased]: https://github.com/sharkpaw/runner-deck/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/sharkpaw/runner-deck/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/sharkpaw/runner-deck/releases/tag/v2.1.0
 [2.0.0]: https://github.com/sharkpaw/runner-deck/releases/tag/v2.0.0

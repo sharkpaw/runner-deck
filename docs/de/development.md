@@ -74,7 +74,7 @@ Vor Merge oder Release `make test-coverage` unter Linux bzw. im Linux-Container 
 go build -o runner-manager ./cmd/runner-manager
 
 # Mit Version (für /version und Debug)
-go build -ldflags "-X main.Version=v2.0.0" -o runner-manager ./cmd/runner-manager
+go build -ldflags "-X main.Version=v2.1.0" -o runner-manager ./cmd/runner-manager
 
 # Nur Runner Agent bauen (Containermodus)
 go build -o runner-agent ./cmd/runner-agent

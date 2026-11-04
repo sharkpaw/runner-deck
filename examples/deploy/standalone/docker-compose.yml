@@ -1,6 +1,6 @@
 services:
   runner-manager:
-    image: ${MANAGER_IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.0.0}
+    image: ${MANAGER_IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.1.0}
     container_name: runner-manager
     environment:
       DOCKER_HOST: ${DOCKER_HOST:-unix:///var/run/docker.sock}

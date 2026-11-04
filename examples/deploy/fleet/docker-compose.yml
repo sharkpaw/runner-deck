@@ -1,6 +1,6 @@
 services:
   runner-manager:
-    image: ${MANAGER_IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.0.0}
+    image: ${MANAGER_IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.1.0}
     container_name: runner-manager
     environment:
       DOCKER_HOST: unix:///var/run/docker.sock
@@ -36,12 +36,12 @@ services:
   runner-image:
     profiles:
       - build
-    image: ${RUNNER_IMAGE:-local/runner-deck-cached:v2.0.0-runner}
+    image: ${RUNNER_IMAGE:-local/runner-deck-cached:v2.1.0-runner}
     build:
       context: .
       dockerfile: Dockerfile.runner-cached
       args:
-        RUNNER_BASE_IMAGE: ${RUNNER_BASE_IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.0.0-runner}
+        RUNNER_BASE_IMAGE: ${RUNNER_BASE_IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.1.0-runner}
         NODE_VERSION: ${NODE_VERSION:-22.14.0}
 
   runner-dind:

@@ -34,7 +34,7 @@ runners:
     # container_mode: true
 
     # Left empty, the runner image is derived from FLEET_IMAGE_TAG, else the default tag.
-    # container_image: ghcr.io/sharkpaw/runner-deck:v2.0.0-runner
+    # container_image: ghcr.io/sharkpaw/runner-deck:v2.1.0-runner
     # container_network: runner-net
     # agent_port: 8081
 

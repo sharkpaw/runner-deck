@@ -75,7 +75,7 @@ Avant fusion ou publication, exécutez `make test-coverage` sous Linux (ou en co
 go build -o runner-manager ./cmd/runner-manager
 
 # Avec version (pour /version et débogage)
-go build -ldflags "-X main.Version=v2.0.0" -o runner-manager ./cmd/runner-manager
+go build -ldflags "-X main.Version=v2.1.0" -o runner-manager ./cmd/runner-manager
 
 # Construire uniquement le Runner Agent (mode conteneur)
 go build -o runner-agent ./cmd/runner-agent

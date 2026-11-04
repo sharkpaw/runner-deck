@@ -343,7 +343,7 @@ runners:
 }
 
 func TestLoad_ContainerImageWhitespaceUsesDefault(t *testing.T) {
-	// When FLEET_IMAGE_TAG is not set, v2.0.0-runner is used by default
+	// When FLEET_IMAGE_TAG is not set, v2.1.0-runner is used by default
 	restore := setEnvAndRestore(t, "FLEET_IMAGE_TAG", "")
 	defer restore()
 
@@ -364,7 +364,7 @@ runners:
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ghcr.io/sharkpaw/runner-deck:v2.0.0-runner"
+	want := "ghcr.io/sharkpaw/runner-deck:v2.1.0-runner"
 	if cfg.Runners.ContainerImage != want {
 		t.Fatalf("expected default container image %q, got %q", want, cfg.Runners.ContainerImage)
 	}

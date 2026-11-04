@@ -7,7 +7,7 @@
 #   WITH_DOCKER=0 sh run.sh         # Jobs don't need docker; host socket not mounted
 #
 # Variables:
-#   IMAGE                 Manager image, default ghcr.io/sharkpaw/runner-deck:v2.0.0
+#   IMAGE                 Manager image, default ghcr.io/sharkpaw/runner-deck:v2.1.0
 #   PORT                  Host listen address:port, default 127.0.0.1:8080
 #   DATA_DIR              Parent directory of config/ and runners/, default current directory
 #   BASIC_AUTH_USER       default admin
@@ -21,7 +21,7 @@
 
 set -e
 
-IMAGE="${IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.0.0}"
+IMAGE="${IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.1.0}"
 PORT="${PORT:-127.0.0.1:8080}"
 DATA_DIR="${DATA_DIR:-$(pwd)}"
 BASIC_AUTH_USER="${BASIC_AUTH_USER:-admin}"

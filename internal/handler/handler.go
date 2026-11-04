@@ -331,7 +331,24 @@ func viewData(c echo.Context) (map[string]any, error) {
 		"Lang":         lang,
 		"TJSON":        template.JS(tjson),
 		"AssetVersion": AssetVersion,
+		"AuthEnabled":  os.Getenv("BASIC_AUTH_PASSWORD") != "",
 	}, nil
+}
+
+// PageData is what a page without runner data needs: language, translations and asset version.
+func PageData(c echo.Context) map[string]any {
+	lang := resolveLang(c)
+	var T map[string]string
+	if I18nLoader != nil {
+		T, _ = I18nLoader(lang)
+		if T == nil {
+			T, _ = I18nLoader("en")
+		}
+	}
+	if T == nil {
+		T = make(map[string]string)
+	}
+	return map[string]any{"T": T, "Lang": lang, "AssetVersion": AssetVersion}
 }
 
 // Index serves the Manager home page. In container mode, the in-container Agent status overrides it.

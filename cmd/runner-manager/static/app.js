@@ -1,3 +1,13 @@
+// A session can end while the page is open: send the user to the login page.
+(function () {
+  var realFetch = window.fetch;
+  window.fetch = function () {
+    return realFetch.apply(this, arguments).then(function (res) {
+      if (res.status === 401) location.href = '/login';
+      return res;
+    });
+  };
+})();
 // Runner Deck management UI.
 //
 // This file was split out of the <script> block in templates/index.html. Previously CSS, HTML, and JS

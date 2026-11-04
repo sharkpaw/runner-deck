@@ -28,7 +28,6 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runner"
 	"github.com/sharkpaw/runner-deck/internal/runnerproc"
 	"github.com/sharkpaw/runner-deck/internal/secrets"
-	secure "github.com/soulteary/secure-kit/v2"
 )
 
 //go:embed templates/*.html
@@ -37,7 +36,7 @@ var templateFS embed.FS
 //go:embed i18n/*.json
 var i18nFS embed.FS
 
-//go:embed static/app.css static/app.js
+//go:embed static/app.css static/app.js static/login.js static/logo.svg
 var staticFS embed.FS
 
 // All three are injected at build time via -ldflags "-X main.Xxx=...".
@@ -424,39 +423,6 @@ func csrfGuardMiddleware(trusted []string) echo.MiddlewareFunc {
 	}
 }
 
-// basicAuthMiddleware builds the Basic Auth middleware from environment variables and also returns the effective username.
-//
-// It returns nil when BASIC_AUTH_PASSWORD is unset, in which case the whole auth middleware is not mounted,
-// and every endpoint (not just /health) is accessible without credentials. This default is intentional,
-// so that a LAN or localhost setup works with zero configuration; always set a password before exposing it.
-func basicAuthMiddleware() (echo.MiddlewareFunc, string) {
-	pw := os.Getenv("BASIC_AUTH_PASSWORD")
-	if pw == "" {
-		return nil, ""
-	}
-	expectedUser := strings.TrimSpace(os.Getenv("BASIC_AUTH_USER"))
-	if expectedUser == "" {
-		expectedUser = "admin"
-	}
-	return middleware.BasicAuthWithConfig(middleware.BasicAuthConfig{
-		// /health and /ready are used by Ingress / K8s probes and must skip auth:
-		// probe configurations usually cannot carry Basic Auth credentials
-		Skipper: func(c echo.Context) bool {
-			return c.Path() == "/health" || c.Path() == "/ready"
-		},
-		Validator: func(username, password string, c echo.Context) (bool, error) {
-			// Fixed-length comparison: using == would make the timing vary with the length of the matching prefix.
-			//
-			// Use secure.ConstantTimeEqual rather than subtle.ConstantTimeCompare:
-			// the latter returns 0 immediately when the two lengths differ, so timing would reveal whether the guessed length is correct
-			// vary with the real length, leaking the length of the secret. The former pads both sides to the same length first, then compares.
-			userOk := secure.ConstantTimeEqual(username, expectedUser)
-			passOk := secure.ConstantTimeEqual(password, pw)
-			return userOk && passOk, nil
-		},
-	}), expectedUser
-}
-
 // loadI18n reads the embedded language files
 func loadI18n(lang string) (map[string]string, error) {
 	data, err := i18nFS.ReadFile("i18n/" + lang + ".json")
@@ -492,7 +458,7 @@ func newEchoServer() *echo.Echo {
 	}
 	if mw, user := basicAuthMiddleware(); mw != nil {
 		e.Use(mw)
-		log.Printf("Basic Auth enabled (user: %s)", user)
+		log.Printf("Login enabled (user: %s)", user)
 	}
 	e.Renderer = newTemplateRenderer()
 	// Swapping the loader must also clear the cache: the bundle caches "not found" results too (when the loader is nil,
@@ -513,6 +479,9 @@ func registerRoutes(e *echo.Echo) {
 	// It is not in the Skipper, so once Basic Auth is configured, /metrics also requires credentials
 	e.GET(metricsPath, metricsHandler())
 	e.GET("/", handler.Index)
+	e.GET("/login", loginPage)
+	e.POST("/login", loginSubmit)
+	e.POST("/logout", logoutSubmit)
 	// Register HEAD too: if only GET is mounted, health-check scripts or proxies sending HEAD to static assets get a 405
 	staticH := staticHandler()
 	e.GET("/static/*", staticH)

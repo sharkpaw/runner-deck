@@ -9,7 +9,7 @@
 # setup-node downloads and caches to _work/_tool on its own. Preinstalling saves a download on every run,
 # and lets workflows without setup-node run directly.
 
-ARG RUNNER_IMAGE=ghcr.io/sharkpaw/runner-deck:v2.0.0-runner
+ARG RUNNER_IMAGE=ghcr.io/sharkpaw/runner-deck:v2.1.0-runner
 FROM ${RUNNER_IMAGE}
 
 ARG NODE_MAJOR=22

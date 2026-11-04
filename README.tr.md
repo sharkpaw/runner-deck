@@ -23,9 +23,12 @@ Her repo için ayrı compose dosyası tutmak yerine runner'larını tek arayüzd
 - **Her runner kendi konteynerinde:** work dizinleri ayrı, checkout'lar birbirini ezmez.
 - **Veritabanı yok:** tüm yapılandırma tek YAML dosyasında.
 - **Yedi dil:** Türkçe, English, 中文, Français, Deutsch, 한국어, 日本語.
+- **Giriş sayfası:** parolalı oturum. Scriptler için Basic Auth da çalışır.
 - **Açık ve koyu tema**, telefonda da çalışır.
 
 ![Runner listesi](docs/images/runners-tr.png)
+
+![Giriş sayfası](docs/images/login-tr.png)
 
 ## Coolify'a kurulum
 

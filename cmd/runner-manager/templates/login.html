@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="{{.Lang}}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>{{index .T "login.page_title"}}</title>
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+  <script>
+    (function () {
+      var mode = 'system';
+      try { mode = localStorage.getItem('runnerDeckTheme') || 'system'; } catch (_) {}
+      var dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/app.css?v={{.AssetVersion}}">
+</head>
+<body class="login-body">
+  <div class="login">
+    <aside class="login-hero">
+      <div class="login-grid" aria-hidden="true"></div>
+      <div class="login-brand">
+        <img src="/static/logo.svg" alt="" width="48" height="48">
+        <span>Runner Deck</span>
+      </div>
+      <div class="login-pitch">
+        <h1>{{index .T "login.headline"}}<em>.</em></h1>
+        <p>{{index .T "login.subhead"}}</p>
+      </div>
+      <div class="login-demo" aria-hidden="true">
+        <div class="login-demo-head">
+          <span><i class="dot"></i>{{index .T "login.demo_title"}}</span>
+          <span class="login-legend"><i class="s1"></i>CPU <i class="s2"></i>{{index .T "system.col_mem"}}</span>
+        </div>
+        <svg viewBox="0 0 420 150" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="loginArea" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stop-color="#3987e5" stop-opacity=".35"/>
+              <stop offset="1" stop-color="#3987e5" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path class="grid-line" d="M0 30H420M0 70H420M0 110H420"/>
+          <path class="login-fade" fill="url(#loginArea)" d="M0 118C50 112 70 62 110 66S170 118 215 92 280 26 325 44 390 86 420 66V150H0Z"/>
+          <path class="login-draw line1" d="M0 118C50 112 70 62 110 66S170 118 215 92 280 26 325 44 390 86 420 66"/>
+          <path class="login-draw line2" d="M0 100C70 98 120 96 180 90S300 78 420 62"/>
+        </svg>
+        <div class="login-demo-stats">
+          <div><span>{{index .T "system.running"}}</span><b>3</b></div>
+          <div><span>{{index .T "system.cpu_total"}}</span><b>42%</b></div>
+          <div><span>{{index .T "system.col_disk"}}</span><b class="ok">88 GB</b></div>
+        </div>
+      </div>
+      <div class="login-features" id="loginFeatures">
+        <ul>
+          <li><b>{{index .T "login.feature_repo_title"}}</b><span>{{index .T "login.feature_repo_text"}}</span></li>
+          <li><b>{{index .T "login.feature_resources_title"}}</b><span>{{index .T "login.feature_resources_text"}}</span></li>
+          <li><b>{{index .T "login.feature_isolated_title"}}</b><span>{{index .T "login.feature_isolated_text"}}</span></li>
+        </ul>
+        <div class="login-dots"></div>
+      </div>
+    </aside>
+    <main class="login-main">
+      <div class="login-tools">
+        <label class="sr-only" for="langSelect">{{index .T "page.lang_label"}}</label>
+        <select id="langSelect" class="lang-select" aria-label="{{index .T "page.lang_label"}}">
+          <option value="tr" {{if eq .Lang "tr"}}selected{{end}}>Türkçe</option>
+          <option value="en" {{if eq .Lang "en"}}selected{{end}}>English</option>
+          <option value="zh" {{if eq .Lang "zh"}}selected{{end}}>中文</option>
+          <option value="fr" {{if eq .Lang "fr"}}selected{{end}}>Français</option>
+          <option value="de" {{if eq .Lang "de"}}selected{{end}}>Deutsch</option>
+          <option value="ko" {{if eq .Lang "ko"}}selected{{end}}>한국어</option>
+          <option value="ja" {{if eq .Lang "ja"}}selected{{end}}>日本語</option>
+        </select>
+        <label class="sr-only" for="themeSelect">{{index .T "theme.label"}}</label>
+        <select id="themeSelect" class="lang-select" aria-label="{{index .T "theme.label"}}">
+          <option value="system">{{index .T "theme.system"}}</option>
+          <option value="light">{{index .T "theme.light"}}</option>
+          <option value="dark">{{index .T "theme.dark"}}</option>
+        </select>
+      </div>
+      <form class="login-form" method="post" action="/login">
+        <div class="login-form-brand"><img src="/static/logo.svg" alt="" width="40" height="40"></div>
+        <h2>{{index .T "login.title"}}</h2>
+        <p class="login-sub">{{index .T "login.subtitle"}}</p>
+        {{if .Error}}<div class="msg err" role="alert">{{index .T .Error}}</div>{{end}}
+        <label for="loginUser">{{index .T "login.username"}}</label>
+        <input id="loginUser" name="username" autocomplete="username" required autofocus>
+        <label for="loginPass">{{index .T "login.password"}}</label>
+        <div class="login-pass">
+          <input id="loginPass" name="password" type="password" autocomplete="current-password" required>
+          <button type="button" id="togglePass" aria-pressed="false" aria-label="{{index .T "login.show_password"}}" data-show="{{index .T "login.show_password"}}" data-hide="{{index .T "login.hide_password"}}">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+        <button type="submit" class="login-submit">{{index .T "login.submit"}} <span aria-hidden="true">→</span></button>
+      </form>
+    </main>
+  </div>
+  <script src="/static/login.js?v={{.AssetVersion}}" defer></script>
+</body>
+</html>

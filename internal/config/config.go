@@ -40,16 +40,16 @@ const DefaultJobDockerBackend = "dind"
 var JobDockerBackends = []string{"dind", "host-socket", "none"}
 
 // DefaultRunnerContainerImage returns the default Runner container image (used when container_image is not configured).
-// Tag is taken from the FLEET_IMAGE_TAG environment variable, defaulting to v2.0.0 when unset; the image name is {repo}:{tag}-runner.
+// Tag is taken from the FLEET_IMAGE_TAG environment variable, defaulting to v2.1.0 when unset; the image name is {repo}:{tag}-runner.
 func DefaultRunnerContainerImage() string {
-	// Deliberately not rewritten as env.GetTrimmed("FLEET_IMAGE_TAG", "v2.0.0"):
+	// Deliberately not rewritten as env.GetTrimmed("FLEET_IMAGE_TAG", "v2.1.0"):
 	// The version consistency check (ci-recipes runner-fleet check-version-consistency, regex written in
 	// version_baseline_regex in scripts/ci-recipes.conf) uses `tag = "vX.Y.Z"` to read the baseline version from this file
 	// across the repo; after switching to a function call that regex no longer matches, and the check would fail directly with
 	// 'cannot parse default image tag'. Keep this literal shape.
 	tag := strings.TrimSpace(os.Getenv("FLEET_IMAGE_TAG"))
 	if tag == "" {
-		tag = "v2.0.0"
+		tag = "v2.1.0"
 	}
 	return DefaultRunnerImageRepo + ":" + tag + "-runner"
 }
@@ -143,7 +143,7 @@ type RunnersConfig struct {
 
 	// Container mode: Runners run in separate containers, the Manager starts and stops them via the Docker API and gets status through the Agent
 	ContainerMode    bool   `yaml:"container_mode"`    // When true, start/stop and status all go through the container
-	ContainerImage   string `yaml:"container_image"`   // Runner container image; if unset, DefaultRunnerContainerImage() decides (FLEET_IMAGE_TAG or v2.0.0)
+	ContainerImage   string `yaml:"container_image"`   // Runner container image; if unset, DefaultRunnerContainerImage() decides (FLEET_IMAGE_TAG or v2.1.0)
 	ContainerNetwork string `yaml:"container_network"` // Network the container joins, same as the Manager so it can reach the Agent; default runner-net
 	AgentPort        int    `yaml:"agent_port"`        // Agent port inside the container; default 8081
 	// Job Docker backend: the backend used when jobs run docker commands inside the Runner container. dind=DinD service; host-socket=mount the host socket; none=no Docker provided

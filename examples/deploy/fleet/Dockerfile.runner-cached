@@ -12,7 +12,7 @@
 #
 # For extending languages and platform SDKs (Android, Flutter, etc.), see ../../runner-images/.
 
-ARG RUNNER_BASE_IMAGE=ghcr.io/sharkpaw/runner-deck:v2.0.0-runner
+ARG RUNNER_BASE_IMAGE=ghcr.io/sharkpaw/runner-deck:v2.1.0-runner
 FROM ${RUNNER_BASE_IMAGE}
 
 USER root

@@ -30,6 +30,7 @@ HTTP management UI built with Golang Echo to view and manage multiple self-hoste
 - **Config drift is repaired, not just reported**: image, network, mount directory, in-job Docker backend and the agent token are all fixed at `docker create` time, so editing the config never reached an existing container. The Manager compares each container against the current config — a **stopped** runner is rebuilt on its next start, a **running** one is flagged with the exact difference and rebuilt when you say so.
 - **Hosted-CLI baseline + custom images**: stock images align the CLI layer with GitHub-hosted `ubuntu-24.04`; extend with Android / Node and friends via [`examples/runner-images/`](examples/runner-images/) and per-runner `container_image`.
 - **Self-heals, and says why when it can't**: registered-but-stopped runners start ~15s after boot and are re-checked every 5 minutes; in container mode a failed probe returns a structured diagnosis — error type, a check command and a fix command — instead of a bare "unknown".
+- **Login page**: a password-protected session in the browser; scripts can keep using Basic Auth.
 - **Observable**: `/ready` and Prometheus `/metrics` for the deployment, the registration result per runner, and an optional PAT that keeps the UI in sync with what GitHub actually lists.
 
 ## Quick start
@@ -45,7 +46,7 @@ docker compose up -d
 
 > Self-hosted runners should serve **private repositories only** — a pull request to a public repository can run code on this machine. See [SECURITY.md](SECURITY.md).
 
-Open http://localhost:8080. The default image tag is the stable release (e.g. v2.0.0). For more options (docker run, DinD, container mode, using `main` or other tags) see the [User Guide](docs/guide.md). Probes, Prometheus metrics and logging: [Operations](docs/guide.md#5-operations) — `GET /health` (liveness), `GET /ready` (readiness), `GET /metrics`, `GET /version`.
+Open http://localhost:8080. The default image tag is the stable release (e.g. v2.1.0). For more options (docker run, DinD, container mode, using `main` or other tags) see the [User Guide](docs/guide.md). Probes, Prometheus metrics and logging: [Operations](docs/guide.md#5-operations) — `GET /health` (liveness), `GET /ready` (readiness), `GET /metrics`, `GET /version`.
 
 Two copy-and-go deployments live in [`examples/deploy/`](examples/deploy/): `standalone/` (single container, runner processes inside the Manager — `docker run` or Compose) and `fleet/` (one container per runner, image and toolchain caches shared, build caches isolated).
 
