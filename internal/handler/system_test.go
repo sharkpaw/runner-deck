@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -208,4 +209,41 @@ func TestRefreshDirSizes_RunsInBackground(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("the background scan never finished")
+}
+
+func TestSystemInfo_ServesTheConfiguredRunners(t *testing.T) {
+	stubDocker(t, func(...string) ([]byte, error) { return nil, errors.New("no daemon") })
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := "runners:\n  base_path: " + dir + "\n  items:\n    - {name: a, target_type: repo, target: o/r}\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := ConfigPath
+	ConfigPath = path
+	t.Cleanup(func() { ConfigPath = orig })
+
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/system", nil), rec)
+	if err := SystemInfo(c); err != nil {
+		t.Fatal(err)
+	}
+	var got SystemResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Runners) != 1 || got.Runners[0].Name != "a" || got.StatsError == "" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestPageData_HasTranslationsAndLanguage(t *testing.T) {
+	orig := I18nLoader
+	I18nLoader = func(string) (map[string]string, error) { return map[string]string{"k": "v"}, nil }
+	t.Cleanup(func() { I18nLoader = orig })
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/?lang=tr", nil), httptest.NewRecorder())
+	data := PageData(c)
+	if data["Lang"] != "tr" || data["T"].(map[string]string)["k"] != "v" {
+		t.Fatalf("data = %+v", data)
+	}
 }

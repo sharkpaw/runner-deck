@@ -164,3 +164,12 @@ func TestLoginRoutes_RedirectWhenAuthIsOff(t *testing.T) {
 		t.Errorf("POST /login = %d", rec.Code)
 	}
 }
+
+func TestLoginPage_SignedInUserGoesToThePanel(t *testing.T) {
+	h := loginServer(t)
+	cookies := postLogin(h, "admin", "s3cret").Result().Cookies()
+	rec := getWith(h, "/login", "text/html", cookies[0])
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
+		t.Fatalf("code=%d location=%q", rec.Code, rec.Header().Get("Location"))
+	}
+}
