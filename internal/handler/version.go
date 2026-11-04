@@ -5,31 +5,31 @@ import (
 	version "github.com/soulteary/version-kit/v4"
 )
 
-// 三个都由构建时 -ldflags "-X main.Xxx=..." 注入，再由 main 赋进来。
-// Commit 与 BuildDate 是本次新加的：在此之前，拿到一个 runner-manager 二进制
-// 是没办法知道它出自哪个提交的，线上排查只能靠版本号猜。
+// All three are injected at build time via -ldflags "-X main.Xxx=..." and then assigned by main.
+// Commit and BuildDate are newly added: before this, given a runner-manager binary
+// there was no way to tell which commit it came from, so production debugging could only guess from the version number.
 //
-// 注入的是 main 的变量，不是 version-kit 的包级变量，所以 kit 升大版本
-// （模块路径随之变化）不必跟着改 ldflags——那正是 kit 自己的升级说明反复
-// 警告、漏改时不报错、只会让二进制静默报 dev 的那一步。
+// We inject main's variables, not version-kit's package-level ones, so when the kit bumps a major version
+// (the module path changes with it) you need not touch ldflags. That is exactly the step the kit's own upgrade notes keep warning about;
+// if it is missed, nothing errors and the binary silently reports dev.
 var (
-	// Version 语义化版本号，未注入时 /version 与 -version 都报 dev
+	// Version semantic version number; /version and -version both report dev when not injected
 	Version string
-	// Commit 构建所用的 git 提交
+	// Commit git commit used for the build
 	Commit string
-	// BuildDate 构建时间（RFC3339）
+	// BuildDate build time (RFC3339)
 	BuildDate string
-	// AssetVersion 内嵌静态资源的内容指纹，拼进页面里 /static/*.css|js 的 ?v=。
-	// 由 main 在启动时算好赋进来。
+	// AssetVersion content fingerprint of the embedded static assets, appended as ?v= to /static/*.css|js in the page.
+	// computed by main at startup and assigned in.
 	AssetVersion string
 )
 
-// BuildInfo 按当前的 Version/Commit/BuildDate 组装一份版本信息。
-// GoVersion、Platform、Compiler 由 version-kit 从 runtime 填。
+// BuildInfo assembles version info from the current Version/Commit/BuildDate.
+// GoVersion, Platform, and Compiler are filled in by version-kit from the runtime.
 //
-// 每次调用重新组装，而不是在包初始化时算好一份：version-kit 的 HandlerConfig
-// 会在构造时把响应体固化下来，而这里的 Version 是允许运行时改的（main 在
-// flag.Parse 之后才赋值，用例也会改它）。/version 不是热路径，重算无所谓。
+// Assembled on every call rather than once at package init: version-kit's HandlerConfig
+// freezes the response body at construction time, but Version here may change at runtime (main sets it in
+// after flag.Parse, and test cases also modify it). /version is not a hot path, so recomputing is fine.
 func BuildInfo() *version.Info {
 	v := Version
 	if v == "" {
@@ -38,20 +38,20 @@ func BuildInfo() *version.Info {
 	return version.New(v, Commit, BuildDate)
 }
 
-// VersionInfo 返回版本信息（未注入时返回 dev）。
+// VersionInfo returns the version info (returns dev when not injected).
 //
-// 用 version-kit 的默认 HandlerConfig，也就是 Public() 那份精简取值——只有
-// version（Branch 我们没注入）。刻意**不**开 IncludeBuildDetails：Basic Auth
-// 没配置时这个端点是完全公开的，而 go_version 能让任何人把一条已公布的 Go
-// 运行时 CVE 对到确切的运行时版本上。kit 自己的注释写的就是这个理由。
+// Uses version-kit's default HandlerConfig, that is, the trimmed-down values from Public(): only
+// version (we do not inject Branch). Deliberately **not** enabling IncludeBuildDetails: with Basic Auth
+// unconfigured, this endpoint is fully public, and go_version would let anyone match a published Go
+// runtime CVE to the exact runtime version. The kit's own comment states this same reasoning.
 //
-// 于是响应体与改动前逐字节相同：{"version":"..."}。commit 与构建时间只走
-// -version 命令行，那是本机执行、不对外。
+// So the response body stays byte-for-byte identical to before the change: {"version":"..."}. Commit and build time go only through
+// the -version command line, which runs locally and is not exposed.
 //
-// 自己拿 ResolveConfig(...).JSONResponse() 写响应，而不是用 kit 的 HTTP handler：
-// v4 把 net/http 那一套搬进了 httpadapter 子包，根包只剩「决定 serve 什么」的配置
-// API，也就是 Echo、Gin、chi 这类框架该用的那一半。这个文件的代码因此在升 v4 时
-// 一行没动，只换了 import。
+// Write the response ourselves using ResolveConfig(...).JSONResponse(), rather than the kit's HTTP handler:
+// v4 moved the net/http pieces into the httpadapter subpackage, leaving the root package with only the config for deciding what to serve
+// API, the half frameworks like Echo, Gin, and chi use. So this file's code
+// did not change a single line when moving to v4; only the import changed.
 func VersionInfo(c echo.Context) error {
 	body, status := version.ResolveConfig(version.HandlerConfig{Info: BuildInfo()}).JSONResponse()
 	return c.JSONBlob(status, body)

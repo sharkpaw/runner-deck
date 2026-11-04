@@ -11,8 +11,8 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/config"
 )
 
-// fakeDocker 在 PATH 前面放一个假的 docker：记录每次调用，并对 inspect 返回指定 JSON。
-// 返回日志文件路径，供断言「到底执行了哪些 docker 命令」。
+// fakeDocker puts a fake docker in front of PATH: it records every call and returns the given JSON for inspect.
+// Returns the log file path, for asserting which docker commands were actually run.
 func fakeDocker(t *testing.T, inspectJSON string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -31,9 +31,9 @@ func fakeDocker(t *testing.T, inspectJSON string) string {
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
-	// 只把假 docker 放到最前面，不能整个替换 PATH：脚本里的 cat 等外部命令还得找得到
+	// Only put the fake docker first. Don't replace PATH entirely, because external commands like cat used by the script must still be found.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	// 等待 Agent 就绪的 sleep 在这里没有意义，调成 0 免得每个用例白等 5 秒
+	// The sleep that waits for the Agent to be ready is pointless here. Set it to 0 so each case doesn't wait 5 seconds for nothing.
 	origCreate, origStart := agentReadyDelayAfterCreate, agentReadyDelayAfterStart
 	agentReadyDelayAfterCreate, agentReadyDelayAfterStart = 0, 0
 	t.Cleanup(func() {
@@ -58,8 +58,8 @@ func driftTestConfig(t *testing.T, backend string) (*config.Config, string) {
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// 漂移只对已注册的 Runner 有意义：没有 .runner 的目录状态是 new，
-	// ContainerRunnerStatus 会如实回落到磁盘状态而不是 installed
+	// Drift only matters for a registered Runner. A directory without .runner has state new,
+	// ContainerRunnerStatus honestly falls back to the on-disk state instead of installed
 	if err := os.WriteFile(filepath.Join(installDir, ".runner"), []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func driftTestConfig(t *testing.T, backend string) (*config.Config, string) {
 	}}, installDir
 }
 
-// inspectJSON 造一个「已停止、按 host-socket 建出来」的容器
+// inspectJSON builds a container that is stopped and was created with host-socket
 func stoppedHostSocketInspect(mountSrc string) string {
 	return `[{
 	  "Image": "sha256:aaa",
@@ -96,28 +96,28 @@ func stoppedHostSocketInspect(mountSrc string) string {
 }
 
 // TestStartRunnerContainer_RecreatesStoppedContainerOnDrift
-// 容器按 host-socket 建出来，配置已改成 dind：启动时必须删掉重建，
-// 否则它会带着宿主机 socket 一起回来，等于切换从未发生。
+// The container was created with host-socket, but the config has changed to dind. On start it must be removed and recreated,
+// otherwise it would come back still holding the host socket, as if the switch never happened.
 func TestStartRunnerContainer_RecreatesStoppedContainerOnDrift(t *testing.T) {
 	cfg, installDir := driftTestConfig(t, "dind")
 	logPath := fakeDocker(t, stoppedHostSocketInspect(installDir))
 
-	// Agent 调用必然失败（容器名解析不了），这里只关心执行了哪些 docker 命令
+	// The Agent call is bound to fail (the container name can't be resolved). Here we only care which docker commands were run.
 	_ = StartRunnerContainer(context.Background(), cfg, "a", installDir)
 
 	calls := dockerCalls(t, logPath)
 	if !strings.Contains(calls, "rm -f github-runner-a") {
-		t.Fatalf("漂移时应先删除旧容器，实际调用:\n%s", calls)
+		t.Fatalf("On drift the old container should be removed first; actual calls:\n%s", calls)
 	}
 	if !strings.Contains(calls, "create --name github-runner-a") {
-		t.Fatalf("漂移时应重新创建容器，实际调用:\n%s", calls)
+		t.Fatalf("On drift the container should be recreated; actual calls:\n%s", calls)
 	}
 	if !strings.Contains(calls, "DOCKER_HOST=tcp://runner-dind:2375") {
-		t.Fatalf("重建时应按新后端注入 DOCKER_HOST，实际调用:\n%s", calls)
+		t.Fatalf("Rebuild should inject DOCKER_HOST for the new backend; actual calls:\n%s", calls)
 	}
 }
 
-// TestStartRunnerContainer_StartsStoppedContainerWhenInSync 配置没变就老实 start，不能白白重建
+// TestStartRunnerContainer_StartsStoppedContainerWhenInSync If the config is unchanged, just start it. Don't rebuild for nothing.
 func TestStartRunnerContainer_StartsStoppedContainerWhenInSync(t *testing.T) {
 	cfg, installDir := driftTestConfig(t, "host-socket")
 	cfg.Runners.DockerGID = 999
@@ -127,15 +127,15 @@ func TestStartRunnerContainer_StartsStoppedContainerWhenInSync(t *testing.T) {
 
 	calls := dockerCalls(t, logPath)
 	if !strings.Contains(calls, "start github-runner-a") {
-		t.Fatalf("配置一致时应直接启动，实际调用:\n%s", calls)
+		t.Fatalf("When the config matches, it should start directly; actual calls:\n%s", calls)
 	}
 	if strings.Contains(calls, "rm -f") || strings.Contains(calls, "create --name") {
-		t.Fatalf("配置一致时不该重建容器，实际调用:\n%s", calls)
+		t.Fatalf("When the config matches, the container should not be recreated; actual calls:\n%s", calls)
 	}
 }
 
 // TestStartRunnerContainer_RunningContainerIsNotRecreated
-// 正在运行的容器即便漂移也不能动：上面很可能正跑着 Job，删掉就是拦腰截断。
+// A running container must not be touched even if it has drifted. A Job is likely running in it above, and deleting it would cut that job off midway.
 func TestStartRunnerContainer_RunningContainerIsNotRecreated(t *testing.T) {
 	cfg, installDir := driftTestConfig(t, "dind")
 	running := strings.Replace(stoppedHostSocketInspect(installDir),
@@ -147,12 +147,12 @@ func TestStartRunnerContainer_RunningContainerIsNotRecreated(t *testing.T) {
 
 	calls := dockerCalls(t, logPath)
 	if strings.Contains(calls, "rm -f") || strings.Contains(calls, "create --name") {
-		t.Fatalf("运行中的容器不该被自动重建，实际调用:\n%s", calls)
+		t.Fatalf("A running container should not be rebuilt automatically; actual calls:\n%s", calls)
 	}
 }
 
 // TestRecreateRunnerContainer_ForcesRebuildOfRunningContainer
-// 显式点「重建」时才允许中断：运行中也删掉重建。
+// Interrupting is only allowed when "rebuild" is explicitly clicked. Even while running, remove and recreate.
 func TestRecreateRunnerContainer_ForcesRebuildOfRunningContainer(t *testing.T) {
 	cfg, installDir := driftTestConfig(t, "host-socket")
 	cfg.Runners.DockerGID = 999
@@ -161,19 +161,19 @@ func TestRecreateRunnerContainer_ForcesRebuildOfRunningContainer(t *testing.T) {
 		`"State": {"Status": "running", "Running": true}`, 1)
 	logPath := fakeDocker(t, running)
 
-	// 配置与容器完全一致，强制重建仍应执行
+	// Config matches the container exactly; a forced rebuild should still run
 	_ = RecreateRunnerContainer(context.Background(), cfg, "a", installDir)
 
 	calls := dockerCalls(t, logPath)
 	if !strings.Contains(calls, "rm -f github-runner-a") {
-		t.Fatalf("强制重建应删除旧容器，实际调用:\n%s", calls)
+		t.Fatalf("A forced rebuild should remove the old container; actual calls:\n%s", calls)
 	}
 	if !strings.Contains(calls, "create --name github-runner-a") {
-		t.Fatalf("强制重建应创建新容器，实际调用:\n%s", calls)
+		t.Fatalf("A forced rebuild should create a new container; actual calls:\n%s", calls)
 	}
 }
 
-// TestContainerRunnerStatus_ReportsDrift 状态查询顺带带出漂移说明，界面据此提示
+// TestContainerRunnerStatus_ReportsDrift The status query also returns a drift explanation, which the UI uses for its hint
 func TestContainerRunnerStatus_ReportsDrift(t *testing.T) {
 	cfg, installDir := driftTestConfig(t, "dind")
 	fakeDocker(t, stoppedHostSocketInspect(installDir))
@@ -183,18 +183,18 @@ func TestContainerRunnerStatus_ReportsDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	if running {
-		t.Fatal("容器未运行时 running 应为 false")
+		t.Fatal("running should be false when the container is not running")
 	}
 	if status != StatusInstalled {
 		t.Fatalf("status = %v, want installed", status)
 	}
 	if !strings.Contains(drift, "dind") {
-		t.Fatalf("drift = %q, 应指出后端已改为 dind", drift)
+		t.Fatalf("drift = %q, should point out that the backend has changed to dind", drift)
 	}
 }
 
-// TestLockRunnerOps_SerializesSameRunner 同一个 Runner 的启停必须串行：
-// 重建会先 docker rm 再 create，两路交叉执行就可能删掉对方刚建好的容器。
+// TestLockRunnerOps_SerializesSameRunner Start and stop operations on the same Runner must be serialized:
+// A rebuild runs docker rm and then create. If two paths interleave, one may delete the container the other just created.
 func TestLockRunnerOps_SerializesSameRunner(t *testing.T) {
 	unlock := lockRunnerOps("github-runner-a")
 
@@ -206,7 +206,7 @@ func TestLockRunnerOps_SerializesSameRunner(t *testing.T) {
 
 	select {
 	case <-acquired:
-		t.Fatal("同名 Runner 的第二次操作不该在持锁期间拿到锁")
+		t.Fatal("The second operation on the same-named Runner should not acquire the lock while it is held")
 	case <-time.After(50 * time.Millisecond):
 	}
 
@@ -214,11 +214,11 @@ func TestLockRunnerOps_SerializesSameRunner(t *testing.T) {
 	select {
 	case <-acquired:
 	case <-time.After(2 * time.Second):
-		t.Fatal("释放后第二次操作仍未拿到锁")
+		t.Fatal("The second operation still did not acquire the lock after release")
 	}
 }
 
-// TestLockRunnerOps_DifferentRunnersRunInParallel 不同 Runner 之间不该互相排队
+// TestLockRunnerOps_DifferentRunnersRunInParallel Different Runners should not queue behind each other
 func TestLockRunnerOps_DifferentRunnersRunInParallel(t *testing.T) {
 	defer lockRunnerOps("github-runner-a")()
 
@@ -231,13 +231,13 @@ func TestLockRunnerOps_DifferentRunnersRunInParallel(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("不同 Runner 被无谓地串行了")
+		t.Fatal("Different Runners were needlessly serialized")
 	}
 }
 
 // TestImageIDCache_StatusPathCachesStartPathDoesNot
-// 列表页每个 Runner 都要比一次镜像，缓存省掉重复的 docker image inspect；
-// 但启停路径必须读实时值——刚 build 完就点「启动」，读到旧 ID 就不会重建了。
+// The list page compares the image once per Runner, so a cache avoids repeated docker image inspect calls;
+// but the start/stop path must read live values. Right after a build, clicking "start" with a stale ID would skip the rebuild.
 func TestImageIDCache_StatusPathCachesStartPathDoesNot(t *testing.T) {
 	logPath := fakeDocker(t, `[]`)
 	resetImageIDCache()
@@ -250,19 +250,19 @@ func TestImageIDCache_StatusPathCachesStartPathDoesNot(t *testing.T) {
 	cachedImageID(context.Background(), "img:cache-test")
 	cachedImageID(context.Background(), "img:cache-test")
 	if got := countInspects(); got != 1 {
-		t.Fatalf("带缓存的查询执行了 %d 次 docker image inspect，应为 1 次", got)
+		t.Fatalf("The cached query ran docker image inspect %d times; it should be 1", got)
 	}
 
 	resolveImageID(context.Background(), "img:cache-test")
 	resolveImageID(context.Background(), "img:cache-test")
 	if got := countInspects(); got != 3 {
-		t.Fatalf("实时查询应每次都执行，累计应为 3 次，实际 %d 次", got)
+		t.Fatalf("Live queries should run every time, totaling 3; actual %d", got)
 	}
 }
 
 // TestStartRunnerContainer_RecreatesContainerWithoutAgentToken
-// 本特性之前建的容器没有 AGENT_TOKEN，Agent 不鉴权——同网络里的其它容器就能控制这个 Runner。
-// 启动时应当自动重建补上，而不是等人手动 docker rm。
+// Containers created before this feature have no AGENT_TOKEN, and the Agent does not authenticate. Any other container on the same network can control this Runner.
+// On startup it should be rebuilt automatically to fix this, rather than waiting for someone to run docker rm by hand.
 func TestStartRunnerContainer_RecreatesContainerWithoutAgentToken(t *testing.T) {
 	cfg, installDir := driftTestConfig(t, "host-socket")
 	cfg.Runners.DockerGID = 999
@@ -274,50 +274,50 @@ func TestStartRunnerContainer_RecreatesContainerWithoutAgentToken(t *testing.T) 
 
 	calls := dockerCalls(t, logPath)
 	if !strings.Contains(calls, "rm -f github-runner-a") || !strings.Contains(calls, "create --name github-runner-a") {
-		t.Fatalf("没有 AGENT_TOKEN 的旧容器应被重建，实际调用:\n%s", calls)
+		t.Fatalf("An old container without AGENT_TOKEN should be rebuilt; actual calls:\n%s", calls)
 	}
 	if !strings.Contains(calls, "-e AGENT_TOKEN=") {
-		t.Fatalf("重建时应注入 AGENT_TOKEN，实际调用:\n%s", calls)
+		t.Fatalf("Rebuild should inject AGENT_TOKEN; actual calls:\n%s", calls)
 	}
 }
 
 // TestContainerRunnerStatus_RunningPreTokenContainerReportsDrift
-// 升级时最要命的一类容器：本特性之前建的，而且**正在运行**。
-// 它的目录里没有 .agent_token，而两处自动拉起都只管没在跑的（info.Running 为假才拉），
-// 所以谁也不会去生成令牌。早先状态路径直接 ReadAgentToken，读到空就把整条检查跳过——
-// 界面上不出「配置已变更」，人不知道该点「重建容器」，容器就一直不鉴权地跑下去。
-// 状态路径必须自己把令牌 Ensure 出来，才谈得上发现这件事。
+// The most dangerous kind of container during an upgrade: created before this feature, and **currently running**.
+// Its directory has no .agent_token, and both auto-start paths only handle containers that aren't running (they start only when info.Running is false),
+// so nobody ever generates the token. The old status path called ReadAgentToken directly, and when it read an empty value it skipped the whole check.
+// The UI never shows "config changed", so the user has no reason to click "rebuild container", and the container keeps running without auth.
+// The status path must Ensure the token itself before it can detect this.
 func TestContainerRunnerStatus_RunningPreTokenContainerReportsDrift(t *testing.T) {
 	cfg, installDir := driftTestConfig(t, "host-socket")
 	cfg.Runners.DockerGID = 999
 
-	// 前提：目录里没有令牌文件，正如升级前的样子
+	// Precondition: the directory has no token file, as it did before the upgrade
 	tokenPath := filepath.Join(installDir, AgentTokenFile)
 	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
-		t.Fatal("用例前提不成立：不该已有令牌文件")
+		t.Fatal("test precondition violated: no token file should exist yet")
 	}
 
 	running := strings.Replace(stoppedHostSocketInspect(installDir),
 		`"State": {"Status": "exited", "Running": false}`,
 		`"State": {"Status": "running", "Running": true}`, 1)
-	// 旧容器没有被注入过 AGENT_TOKEN
+	// The old container was never injected with AGENT_TOKEN
 	running = strings.Replace(running, `, "AGENT_TOKEN=already-injected"`, "", 1)
 	fakeDocker(t, running)
 
-	// Agent 探测必然失败（容器名解析不了），这里只关心 drift 与令牌文件
+	// The agent probe always fails (the container name doesn't resolve); here we only care about drift and the token file
 	_, _, drift, _ := ContainerRunnerStatus(context.Background(), cfg, "a", installDir)
 
 	if !strings.Contains(drift, "agent_token") {
-		t.Fatalf("运行中的旧容器缺少 AGENT_TOKEN 未被检出，drift=%q", drift)
+		t.Fatalf("running old container missing AGENT_TOKEN was not detected, drift=%q", drift)
 	}
 	if _, err := os.Stat(tokenPath); err != nil {
-		t.Fatalf("状态查询应顺带把令牌生成出来，否则下次还是读到空: %v", err)
+		t.Fatalf("status query should also generate the token, otherwise the next read is still empty: %v", err)
 	}
 }
 
 // TestContainerRunnerStatus_TokenlessDirStaysQuiet
-// 反面：令牌实在生成不出来（这里用一个不存在的目录模拟不可写）时要保持沉默。
-// 否则「报漂移 → 重建 → 仍然没有令牌可注入 → 再报漂移」会变成每次启动都删容器重建。
+// Negative case: when the token truly can't be generated (simulated here with a nonexistent directory, which can't be written to), stay silent.
+// Otherwise "report drift -> rebuild -> still no token to inject -> report drift again" becomes a container delete-and-rebuild on every startup.
 func TestContainerRunnerStatus_TokenlessDirStaysQuiet(t *testing.T) {
 	cfg, installDir := driftTestConfig(t, "host-socket")
 	cfg.Runners.DockerGID = 999
@@ -332,6 +332,6 @@ func TestContainerRunnerStatus_TokenlessDirStaysQuiet(t *testing.T) {
 	_, _, drift, _ := ContainerRunnerStatus(context.Background(), cfg, "a", missingDir)
 
 	if strings.Contains(drift, "agent_token") {
-		t.Fatalf("生成不出令牌时不该报 agent_token 漂移（会变成反复重建），drift=%q", drift)
+		t.Fatalf("agent_token drift must not be reported when the token can't be generated (it would cause repeated rebuilds), drift=%q", drift)
 	}
 }

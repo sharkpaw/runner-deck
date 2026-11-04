@@ -13,10 +13,10 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/config"
 )
 
-// noContainers 宿主机上没有任何同名容器
+// noContainers no container with the same name exists on the host
 func noContainers(string) (bool, string, bool) { return false, "", true }
 
-// containerNamed 指定容器名存在
+// containerNamed the named container exists
 func containerNamed(name, status string) containerLookup {
 	return func(cn string) (bool, string, bool) {
 		if cn == name {
@@ -50,14 +50,14 @@ func TestCollectRunnerConflicts_NameTaken(t *testing.T) {
 	}}
 	conflicts := collectRunnerConflicts(cfg, "droiddesk", "", noContainers, false)
 	if !hasType(conflicts, ConflictNameTaken) {
-		t.Fatalf("同名 Runner 未被检出: %v", conflictTypes(conflicts))
+		t.Fatalf("same-name Runner not detected: %v", conflictTypes(conflicts))
 	}
 	if !hasErrorConflict(conflicts) {
-		t.Fatal("同名应为 error 级")
+		t.Fatal("same name should be error level")
 	}
-	// 同名 Runner 自己的目录与容器不该再报一遍
+	// a same-name Runner's own directory and container should not be reported again
 	if len(conflicts) != 1 {
-		t.Fatalf("同名时只该有一条冲突，得到 %v", conflictTypes(conflicts))
+		t.Fatalf("with the same name there should be only one conflict, got %v", conflictTypes(conflicts))
 	}
 }
 
@@ -68,15 +68,15 @@ func TestCollectRunnerConflicts_ContainerNameCollision(t *testing.T) {
 		ContainerMode: true,
 		Items:         []config.RunnerItem{{Name: "build.1", TargetType: "org", Target: "o"}},
 	}}
-	// build.1 与 build-1 都会规范化成 github-runner-build-1
+	// build.1 and build-1 both normalize to github-runner-build-1
 	conflicts := collectRunnerConflicts(cfg, "build-1", "", noContainers, false)
 	if !hasType(conflicts, ConflictContainerName) {
-		t.Fatalf("容器名冲突未被检出: %v", conflictTypes(conflicts))
+		t.Fatalf("container name conflict not detected: %v", conflictTypes(conflicts))
 	}
-	// 非容器模式下容器名无所谓，不该报
+	// in non-container mode the container name does not matter and should not be reported
 	cfg.Runners.ContainerMode = false
 	if got := collectRunnerConflicts(cfg, "build-1", "", noContainers, false); hasType(got, ConflictContainerName) {
-		t.Fatalf("非容器模式不该报容器名冲突: %v", conflictTypes(got))
+		t.Fatalf("non-container mode should not report a container name conflict: %v", conflictTypes(got))
 	}
 }
 
@@ -88,7 +88,7 @@ func TestCollectRunnerConflicts_InstallDirTaken(t *testing.T) {
 	}}
 	conflicts := collectRunnerConflicts(cfg, "b", "shared", noContainers, false)
 	if !hasType(conflicts, ConflictInstallDir) {
-		t.Fatalf("安装目录冲突未被检出: %v", conflictTypes(conflicts))
+		t.Fatalf("install directory conflict not detected: %v", conflictTypes(conflicts))
 	}
 }
 
@@ -96,7 +96,7 @@ func TestCollectRunnerConflicts_DirState(t *testing.T) {
 	base := t.TempDir()
 	cfg := &config.Config{Runners: config.RunnersConfig{BasePath: base}}
 
-	// 已注册的残留目录：再次注册会失败，按 error 处理
+	// a leftover directory that is already registered: registering again would fail, so treat as error
 	registered := filepath.Join(base, "leftover")
 	if err := os.MkdirAll(registered, 0755); err != nil {
 		t.Fatal(err)
@@ -104,21 +104,21 @@ func TestCollectRunnerConflicts_DirState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(registered, ".runner"), []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// 带注册 token：config.sh 会拒绝重复配置，属于硬失败
+	// with a registration token: config.sh rejects duplicate configuration, a hard failure
 	conflicts := collectRunnerConflicts(cfg, "leftover", "", noContainers, true)
 	if !hasType(conflicts, ConflictDirRegistered) || !hasErrorConflict(conflicts) {
-		t.Fatalf("已注册的残留目录未按 error 检出: %v", conflictTypes(conflicts))
+		t.Fatalf("leftover directory already registered was not detected as error: %v", conflictTypes(conflicts))
 	}
-	// 不带 token：这是「把已有 Runner 接管进配置」的正常用法，不能挡
+	// without a token: this is the normal way to take over an existing Runner into configuration, must not be blocked
 	adopt := collectRunnerConflicts(cfg, "leftover", "", noContainers, false)
 	if !hasType(adopt, ConflictDirAdopt) {
-		t.Fatalf("接管已注册目录未给出提示: %v", conflictTypes(adopt))
+		t.Fatalf("no hint given when taking over an already registered directory: %v", conflictTypes(adopt))
 	}
 	if hasErrorConflict(adopt) {
-		t.Fatalf("不带 token 接管已注册目录不该被阻塞: %v", conflictTypes(adopt))
+		t.Fatalf("taking over a registered directory without a token should not be blocked: %v", conflictTypes(adopt))
 	}
 
-	// 非空但未注册：可以继续，只提示
+	// non-empty but unregistered: can continue, warning only
 	halfInstalled := filepath.Join(base, "half")
 	if err := os.MkdirAll(halfInstalled, 0755); err != nil {
 		t.Fatal(err)
@@ -128,15 +128,15 @@ func TestCollectRunnerConflicts_DirState(t *testing.T) {
 	}
 	conflicts = collectRunnerConflicts(cfg, "half", "", noContainers, false)
 	if !hasType(conflicts, ConflictDirExists) {
-		t.Fatalf("非空目录未被检出: %v", conflictTypes(conflicts))
+		t.Fatalf("non-empty directory not detected: %v", conflictTypes(conflicts))
 	}
 	if hasErrorConflict(conflicts) {
-		t.Fatal("非空但未注册的目录不该阻塞添加")
+		t.Fatal("adding should not be blocked by a non-empty but unregistered directory")
 	}
 
-	// 空目录与不存在的目录都不算冲突
+	// an empty directory and a nonexistent directory are not conflicts
 	if got := collectRunnerConflicts(cfg, "fresh", "", noContainers, false); len(got) != 0 {
-		t.Fatalf("全新名称不该有冲突: %v", conflictTypes(got))
+		t.Fatalf("fresh name should have no conflicts: %v", conflictTypes(got))
 	}
 }
 
@@ -146,17 +146,17 @@ func TestCollectRunnerConflicts_ExistingContainer(t *testing.T) {
 
 	conflicts := collectRunnerConflicts(cfg, "droiddesk", "", lookup, false)
 	if !hasType(conflicts, ConflictContainerExists) || !hasErrorConflict(conflicts) {
-		t.Fatalf("宿主机上的同名残留容器未按 error 检出: %v", conflictTypes(conflicts))
+		t.Fatalf("leftover container with the same name on the host not detected as error: %v", conflictTypes(conflicts))
 	}
 
-	// docker 不可用时（known=false）不能把添加流程挡住
+	// when docker is unavailable (known=false), the add flow must not be blocked
 	unknown := func(string) (bool, string, bool) { return false, "", false }
 	if got := collectRunnerConflicts(cfg, "droiddesk", "", unknown, false); len(got) != 0 {
-		t.Fatalf("docker 不可用时应跳过容器检查: %v", conflictTypes(got))
+		t.Fatalf("should skip container check when docker is unavailable: %v", conflictTypes(got))
 	}
-	// lookup 为 nil 同理
+	// same for a nil lookup
 	if got := collectRunnerConflicts(cfg, "droiddesk", "", nil, false); len(got) != 0 {
-		t.Fatalf("无 lookup 时应跳过容器检查: %v", conflictTypes(got))
+		t.Fatalf("should skip container check without lookup: %v", conflictTypes(got))
 	}
 }
 
@@ -205,7 +205,7 @@ func TestPrecheckRunner_ReportsConflictAndSuggestion(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.Available {
-		t.Fatal("已存在同名 Runner，available 应为 false")
+		t.Fatal("a same-name Runner already exists, available should be false")
 	}
 	if !hasType(resp.Conflicts, ConflictNameTaken) {
 		t.Fatalf("conflicts = %v", conflictTypes(resp.Conflicts))
@@ -240,10 +240,10 @@ func TestPrecheckRunner_AvailableName(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !resp.Available || len(resp.Conflicts) != 0 {
-		t.Fatalf("全新名称应可用: %+v", resp)
+		t.Fatalf("a fresh name should be available: %+v", resp)
 	}
 	if resp.SuggestedName != "" {
-		t.Fatalf("可用时不该给建议名，得到 %q", resp.SuggestedName)
+		t.Fatalf("a suggested name should not be given when available, got %q", resp.SuggestedName)
 	}
 }
 
@@ -260,8 +260,8 @@ func TestPrecheckRunner_RejectsUnsafeName(t *testing.T) {
 	}
 }
 
-// TestAddRunner_ConflictInsteadOfSilentRename 同名时必须明确报冲突并给出建议名，
-// 而不是像以前那样静默建出 droiddesk-ab12cd —— 用户以为自己在操作 droiddesk。
+// TestAddRunner_ConflictInsteadOfSilentRename a same-name conflict must explicitly report the conflict and give a suggested name,
+// rather than silently creating droiddesk-ab12cd as before — the user thinks they are operating on droiddesk.
 func TestAddRunner_ConflictInsteadOfSilentRename(t *testing.T) {
 	base := t.TempDir()
 	cfgPath := filepath.Join(base, "config.yaml")
@@ -304,17 +304,17 @@ func TestAddRunner_ConflictInsteadOfSilentRename(t *testing.T) {
 		t.Fatalf("conflicts = %v", conflictTypes(resp.Conflicts))
 	}
 
-	// 配置不该被改动
+	// configuration must not be changed
 	after, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(after.Runners.Items) != 1 {
-		t.Fatalf("冲突时不该写入新 Runner，当前 %d 个", len(after.Runners.Items))
+		t.Fatalf("a new Runner should not be written on conflict, currently %d", len(after.Runners.Items))
 	}
 }
 
-// TestAddRunner_AutoRenameKeepsOldBehavior 显式要求时仍可自动改名（兼容既有脚本）
+// TestAddRunner_AutoRenameKeepsOldBehavior still auto-renames when explicitly requested (compatible with existing scripts)
 func TestAddRunner_AutoRenameKeepsOldBehavior(t *testing.T) {
 	base := t.TempDir()
 	cfgPath := filepath.Join(base, "config.yaml")

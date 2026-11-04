@@ -12,12 +12,12 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runnerproc"
 )
 
-// Start 起的是 run.sh，而 run.sh 起的是 Job。默认模式下 Runner 是 Manager 的子进程，
-// 于是 docker-compose.yml 用 environment: 注入 Manager 的 BASIC_AUTH_PASSWORD 会一路
-// 传到 Job 的环境里——workflow 里任何一个 env / printenv 步骤，或者某个会打印环境变量的
-// 第三方 Action，都会把管理后台密码写进 Job 日志。它不是 Actions secret，GitHub 不打码。
+// Start launches run.sh, and run.sh launches the Job. In default mode the Runner is a child process of the Manager,
+// so BASIC_AUTH_PASSWORD, which docker-compose.yml injects into the Manager via environment:, passes all the way
+// down into the Job's environment, where any env / printenv step in the workflow or any
+// third-party Action that prints environment variables will write the admin password into the Job log. It is not an Actions secret, so GitHub does not mask it.
 //
-// 这条用例盯的就是那条路径：真的把 run.sh 拉起来，让它把自己拿到的环境落盘，再看里面有什么。
+// This test case targets exactly that path: it really launches run.sh, has it write the environment it receives to disk, and then checks what is in it.
 func TestStart_DoesNotLeakCredentials(t *testing.T) {
 	requireEnvDumpOS(t)
 	t.Setenv("BASIC_AUTH_PASSWORD", "x")
@@ -28,43 +28,43 @@ func TestStart_DoesNotLeakCredentials(t *testing.T) {
 	killRunnerProcsOnCleanup(t, dir)
 
 	if err := Start(dir); err != nil {
-		t.Fatalf("Start 失败: %v", err)
+		t.Fatalf("Start failed: %v", err)
 	}
 	dump := waitForEnvDump(t, dir)
 
-	// 凭据不该在里面
+	// Credentials should not be in there
 	if v, ok := envDumpLookup(dump, "BASIC_AUTH_PASSWORD"); ok {
-		t.Errorf("run.sh 的环境里有 BASIC_AUTH_PASSWORD=%q；一个 env 步骤就能把它打进 Job 日志", v)
+		t.Errorf("the run.sh environment contains BASIC_AUTH_PASSWORD=%q; an env step is enough to leak it into the Job log", v)
 	}
-	// 其余变量照常透传：DinD 就靠继承来的 DOCKER_HOST 找到 daemon，
-	// 把它一起滤掉会静默地让容器模式下的 Job 连不上 Docker。
+	// All other variables are passed through as usual: DinD relies on the inherited DOCKER_HOST to find the daemon,
+	// filtering it out too would silently stop Jobs in container mode from connecting to Docker.
 	if v, ok := envDumpLookup(dump, "DOCKER_HOST"); !ok || v != "tcp://d:2375" {
-		t.Errorf("DOCKER_HOST = %q（存在: %v），期望原样透传的 tcp://d:2375", v, ok)
+		t.Errorf("DOCKER_HOST = %q (present: %v), expected to be passed through unchanged as tcp://d:2375", v, ok)
 	}
 }
 
-// ---- 下面几个是本文件与 agent 侧那条同名用例共用的做法，两处各有一份 ----
+// ---- The helpers below are shared with the same-named test case on the agent side; each side keeps its own copy ----
 
 func requireEnvDumpOS(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("用例依赖 bash 与 FIFO")
+		t.Skip("test case depends on bash and a FIFO")
 	}
 }
 
-// writeEnvDumpingRunScript 写一个先把自己的环境落盘、再一直挂住的 run.sh。
+// writeEnvDumpingRunScript writes a run.sh that first dumps its own environment to disk, then blocks indefinitely.
 //
-// 挂住的写法与 writeBlockingRunScript 一致，理由见那里的注释：read 是 builtin，
-// 打开一个没有写端的 FIFO 会就地阻塞，全程不 fork，进程数因此是确定的。
-// 多出来的只有第一行——env 是本用例唯一要看的东西。
+// The blocking part matches writeBlockingRunScript; see the comment there for why: read is a builtin,
+// opening a FIFO with no writer blocks in place without forking, so the process count is deterministic.
+// The only addition is the first line; env is the only thing this test case checks.
 func writeEnvDumpingRunScript(t *testing.T, dir string) {
 	t.Helper()
 	fifo := filepath.Join(dir, ".test-block")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatalf("创建 FIFO 失败: %v", err)
+		t.Fatalf("failed to create FIFO: %v", err)
 	}
-	// cmd.Dir 就是安装目录，所以 $PWD 即 dir。先写临时文件再 mv，
-	// 免得轮询正好读到写了一半的内容。
+	// cmd.Dir is the install directory, so $PWD equals dir. Write a temp file first and then mv it,
+	// so that a poll cannot read a half-written file.
 	script := "#!/bin/bash\nenv > \"$PWD/" + envDumpFile + ".tmp\"\n" +
 		"mv \"$PWD/" + envDumpFile + ".tmp\" \"$PWD/" + envDumpFile + "\"\n" +
 		"read -r -t 120 < \"" + fifo + "\"\n"
@@ -75,8 +75,8 @@ func writeEnvDumpingRunScript(t *testing.T, dir string) {
 
 const envDumpFile = ".env.out"
 
-// killRunnerProcsOnCleanup 用例结束时收掉 run.sh。
-// 脚本自带 read -t 120 兜底，但那 120 秒里进程是留着的，不该指望它。
+// killRunnerProcsOnCleanup kills run.sh when the test case ends.
+// The script has a read -t 120 fallback, but the process stays alive for those 120 seconds, so do not rely on it.
 func killRunnerProcsOnCleanup(t *testing.T, dir string) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -87,8 +87,8 @@ func killRunnerProcsOnCleanup(t *testing.T, dir string) {
 	})
 }
 
-// waitForEnvDump 等 run.sh 把环境落盘。Start 只负责 fork，写文件是子进程的事，
-// 所以这里只能轮询。
+// waitForEnvDump waits for run.sh to dump the environment. Start only forks; writing the file is the child's job,
+// so the only option here is polling.
 func waitForEnvDump(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, envDumpFile)
@@ -99,17 +99,17 @@ func waitForEnvDump(t *testing.T, dir string) string {
 			return string(b)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("等不到 %s，run.sh 可能没被拉起来: %v", path, err)
+			t.Fatalf("gave up waiting for %s, run.sh may not have been launched: %v", path, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-// envDumpLookup 在 env(1) 的输出里按变量名取值。
+// envDumpLookup looks up a variable's value by name in the output of env(1).
 //
-// 不能用 strings.Contains(dump, "BASIC_AUTH_PASSWORD")：那样 BASIC_AUTH_PASSWORD_FILE
-// 也算命中，于是一个本该保留的变量会让用例误报；反过来，值里带换行的变量也会把
-// 整块输出搅乱。按行取 KEY= 前缀是这里唯一说得准的读法。
+// Do not use strings.Contains(dump, "BASIC_AUTH_PASSWORD"): that would also match BASIC_AUTH_PASSWORD_FILE,
+// so a variable that should have been kept would produce a false report; conversely, a variable whose value contains a newline would also
+// scramble the whole output. Reading by line with the KEY= prefix is the only reliable approach here.
 func envDumpLookup(dump, name string) (string, bool) {
 	for _, line := range strings.Split(dump, "\n") {
 		k, v, ok := strings.Cut(line, "=")

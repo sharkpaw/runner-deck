@@ -10,22 +10,22 @@ import (
 	logkit "github.com/soulteary/logger-kit/v3"
 )
 
-// serviceName 会写进每条日志的 service 字段。
+// serviceName is written into the service field of every log line.
 const serviceName = "runner-deck"
 
-// setupLogging 装配日志：按环境变量决定级别与格式，并把标准库 log 的输出接过来。
+// setupLogging sets up logging: environment variables choose the level and format, and it takes over the standard library log output.
 //
-// 接管 log 是关键一步。仓库里还有 34 处 log.Printf，如果只把请求日志换成
-// logger-kit，两种格式会交替出现在同一份输出里——人读着别扭，机器更没法解析。
-// zerolog.Logger 本身实现了 io.Writer，交给 log.SetOutput 即可，
-// 那 34 处调用一行都不用改就自动走同一套格式与级别。
+// Taking over log is the key step. The repo still has 34 log.Printf calls; if only the request log were switched to
+// logger-kit, the two formats would alternate in the same output: awkward for people to read and even harder for machines to parse.
+// zerolog.Logger itself implements io.Writer, so passing it to log.SetOutput is enough,
+// and those 34 calls would use the same format and level without changing a single line.
 //
-// 默认 console 而不是 kit 的默认 JSON：现在的输出是人读的，
-// 默认切成 JSON 等于让所有在终端里看日志的人先吃一记退化。
-// 要 JSON 的场合（采集到 ELK/Loki）设 LOG_FORMAT=json。
+// Default to console instead of kit's default JSON: the current output is meant for people to read,
+// switching the default to JSON would first degrade the experience for everyone reading logs in a terminal.
+// Where JSON is needed (collected into ELK/Loki), set LOG_FORMAT=json.
 func setupLogging() *logkit.Logger { return setupLoggingTo(os.Stderr) }
 
-// setupLoggingTo 是 setupLogging 的可测形式：输出目标由调用方给。
+// setupLoggingTo is the testable form of setupLogging: the caller supplies the output target.
 func setupLoggingTo(out io.Writer) *logkit.Logger {
 	cfg := logkit.Config{
 		Level:       parseLogLevel(os.Getenv("LOG_LEVEL")),
@@ -36,22 +36,22 @@ func setupLoggingTo(out io.Writer) *logkit.Logger {
 	lg := logkit.New(cfg)
 	logkit.SetDefault(lg)
 
-	// 标准库 log 自己会加时间戳前缀，zerolog 也会加一个——去掉前者，
-	// 否则每行都是「时间 时间 内容」。
+	// The standard log package adds its own timestamp prefix, and zerolog adds one too. Drop the former,
+	// otherwise every line reads "time time message".
 	log.SetFlags(0)
 	log.SetOutput(stdlogWriter{lg})
 	return lg
 }
 
-// stdlogWriter 把标准库 log 写来的每一行当作一条 Info 记录。
+// stdlogWriter treats each line written by the standard log package as one Info record.
 //
-// 不直接把 lg.Zerolog() 交给 log.SetOutput：zerolog.Logger 确实实现了 io.Writer，
-// 但那条路径不带级别，console 格式下打出来是 "???"，JSON 里则没有 level 字段——
-// 按级别过滤日志的地方会整段漏掉这 34 行。
+// Don't pass lg.Zerolog() directly to log.SetOutput: zerolog.Logger does implement io.Writer,
+// but that path carries no level. In console format it prints "???", and JSON output has no level field,
+// so any place that filters logs by level would silently drop all 34 lines.
 type stdlogWriter struct{ lg *logkit.Logger }
 
 func (w stdlogWriter) Write(p []byte) (int, error) {
-	// log.Printf 带着结尾换行来，zerolog 会自己加，留着就是空行
+	// log.Printf messages come with a trailing newline, and zerolog adds its own, so keeping it produces blank lines
 	w.lg.Info().Msg(strings.TrimRight(string(p), "\n"))
 	return len(p), nil
 }
@@ -63,7 +63,7 @@ func parseLogLevel(v string) logkit.Level {
 	return logkit.InfoLevel
 }
 
-// 取值不认识时回落 console，而不是报错退出：日志格式配错了不该让服务起不来。
+// An unrecognized value falls back to console instead of exiting with an error: a misconfigured log format should not keep the service from starting.
 func parseLogFormat(v string) logkit.Format {
 	if strings.EqualFold(strings.TrimSpace(v), "json") {
 		return logkit.FormatJSON
@@ -71,19 +71,19 @@ func parseLogFormat(v string) logkit.Format {
 	return logkit.FormatConsole
 }
 
-// requestLogger 请求日志中间件。
+// requestLogger is the request logging middleware.
 //
-// 换掉 Echo 自带的 middleware.RequestLogger()，换来的是：每条请求日志带一个
-// 真实的 request_id（Echo 那个一直打印 request_id=""），以及查询串与请求头里的
-// 敏感字段会被 logger-kit 按既定规则脱敏。
+// Replacing Echo's built-in middleware.RequestLogger() gives us: each request log carries a
+// real request_id (Echo's version always prints request_id=""), and the query string and request headers
+// sensitive fields are redacted by logger-kit according to its established rules.
 //
-// logger-kit v3 根包只认 net/http，所以这里走 echo.WrapMiddleware 适配。
+// The logger-kit v3 root package only accepts net/http, so here it is adapted via echo.WrapMiddleware.
 func requestLogger() echo.MiddlewareFunc {
 	cfg := logkit.DefaultMiddlewareConfig()
 	cfg.Logger = logkit.Default()
-	// 探针与抓取每几秒一次，进日志只会把真正有用的行淹掉。
-	// metricsPath 是本 PR 新增的 /metrics——Prometheus 默认 15s 抓一次，
-	// 不跳过的话请求日志里绝大多数行都是它。
+	// Probes and scrapes run every few seconds; logging them would only bury the genuinely useful lines.
+	// metricsPath is the /metrics endpoint added in this PR. Prometheus scrapes it every 15s by default,
+	// so unless it is skipped, most lines in the request log would come from it.
 	cfg.SkipPaths = []string{"/health", "/ready", metricsPath}
 	return echo.WrapMiddleware(logkit.Middleware(cfg))
 }

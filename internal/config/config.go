@@ -13,40 +13,40 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/atomicfile"
 	"github.com/soulteary/cli-kit/env"
 	"github.com/soulteary/cli-kit/validator"
-	// go.yaml.in/yaml/v3 是 gopkg.in/yaml.v3 的延续：同一份代码、同一套 API、同样的
-	// yaml 包名与 struct tag，而后者停在 2022 年的最后一版不再发布。换过来之后
-	// Marshal 的输出逐字节未变（满配、空配、config.yaml.example 往返三种都比过），
-	// 所以线上已有的 config.yaml 不需要动一个字节。i18n-kit 的 yamlloader 同期做的
-	// 是同一件事。
+	// go.yaml.in/yaml/v3 is the continuation of gopkg.in/yaml.v3: same code, same API, same
+	// yaml package name and struct tags, while the latter stopped at its last release in 2022 and is no longer published. After switching
+	// Marshal output is unchanged byte for byte (full config, empty config, and config.yaml.example round-trip all pass),
+	// so the existing config.yaml in production needs no byte changed. i18n-kit's yamlloader did the same
+	// the same thing.
 	"go.yaml.in/yaml/v3"
 )
 
-// mu 保护配置文件的读写，避免并发写导致覆盖。
+// mu guards reads and writes of the config file, preventing overwrites from concurrent writes.
 //
-// 只串行化写者，Load 刻意不加锁：Save 经 atomicfile 以 rename 发布，目标这个名字
-// 要么是旧内容要么是新内容，读者不会撞见半截文件，加读锁挡不住的崩溃场景它也一并解决了。
+// Only writers are serialized; Load deliberately takes no lock: Save publishes via atomicfile using rename, so the target name
+// is either the old or the new content, readers never see a partial file, and it also covers crash scenarios that a read lock could not block.
 var mu sync.Mutex
 var runnerContainerNameSanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
-// DefaultRunnerImageRepo 默认 Runner 镜像仓库名，与 Manager 同仓库
+// DefaultRunnerImageRepo is the default Runner image repository name, same repository as the Manager
 const DefaultRunnerImageRepo = "ghcr.io/sharkpaw/runner-deck"
 
-// DefaultJobDockerBackend 未配置 job_docker_backend 时的默认后端
+// DefaultJobDockerBackend is the default backend when job_docker_backend is not configured
 const DefaultJobDockerBackend = "dind"
 
-// JobDockerBackends 是 job_docker_backend 的全部合法取值。
-// 提成包级变量而不是散在 Validate 里的局部 map：全局配置与 items[] 两处都要校验，
-// 错误信息也由它拼出来，改动一处即可，不会出现「多了一个取值但报错还是老三样」。
+// JobDockerBackends is the full set of valid values for job_docker_backend.
+// Kept as a package-level variable rather than a local map scattered in Validate: both the global config and items[] must be validated,
+// the error message is also built from it, so a change in one place suffices and you never get 'a value was added but the error still lists the old set'.
 var JobDockerBackends = []string{"dind", "host-socket", "none"}
 
-// DefaultRunnerContainerImage 返回默认 Runner 容器镜像（未配置 container_image 时使用）。
-// Tag 取自环境变量 FLEET_IMAGE_TAG，未设置时为 v2.0.0；镜像名为 {repo}:{tag}-runner。
+// DefaultRunnerContainerImage returns the default Runner container image (used when container_image is not configured).
+// Tag is taken from the FLEET_IMAGE_TAG environment variable, defaulting to v2.0.0 when unset; the image name is {repo}:{tag}-runner.
 func DefaultRunnerContainerImage() string {
-	// 这里刻意不改写成 env.GetTrimmed("FLEET_IMAGE_TAG", "v2.0.0")：
-	// 版本号一致性检查（ci-recipes runner-fleet check-version-consistency，正则写在
-	// scripts/ci-recipes.conf 的 version_baseline_regex）用 `tag = "vX.Y.Z"` 从本文件里
-	// 取全仓库的基准版本号，换成函数调用后那条正则匹配不到，检查会直接以
-	// 「无法解析默认镜像 tag」失败。保持这个字面形状。
+	// Deliberately not rewritten as env.GetTrimmed("FLEET_IMAGE_TAG", "v2.0.0"):
+	// The version consistency check (ci-recipes runner-fleet check-version-consistency, regex written in
+	// version_baseline_regex in scripts/ci-recipes.conf) uses `tag = "vX.Y.Z"` to read the baseline version from this file
+	// across the repo; after switching to a function call that regex no longer matches, and the check would fail directly with
+	// 'cannot parse default image tag'. Keep this literal shape.
 	tag := strings.TrimSpace(os.Getenv("FLEET_IMAGE_TAG"))
 	if tag == "" {
 		tag = "v2.0.0"
@@ -54,8 +54,8 @@ func DefaultRunnerContainerImage() string {
 	return DefaultRunnerImageRepo + ":" + tag + "-runner"
 }
 
-// containerImageFromManagerImage 从 MANAGER_IMAGE 推导 Runner 镜像（image:tag -> image:tag-runner）。
-// 无 tag 时返回 image:latest-runner；空或解析失败时返回空字符串。
+// containerImageFromManagerImage derives the Runner image from MANAGER_IMAGE (image:tag -> image:tag-runner).
+// Without a tag it returns image:latest-runner; when empty or parsing fails it returns an empty string.
 func containerImageFromManagerImage() string {
 	raw := env.GetTrimmed("MANAGER_IMAGE", "")
 	if raw == "" {
@@ -72,13 +72,13 @@ func containerImageFromManagerImage() string {
 	return image + ":" + tag + "-runner"
 }
 
-// applyEnvOverrides 用环境变量覆盖配置字段（仅当 env 非空时覆盖）。
-// 应在 Load 中默认值处理之后、Validate 之前调用。
+// applyEnvOverrides overrides config fields with environment variables (only when env is non-empty).
+// It should be called in Load after default handling and before Validate.
 func applyEnvOverrides(c *Config) {
-	// env.GetTrimmed 的语义与这里要的完全一致：变量未设置、或 trim 后为空时返回传入的原值。
-	// 于是「只在环境变量非空时覆盖」不必再逐个写成 if 块，读起来就是一张覆盖表。
+	// The semantics of env.GetTrimmed match what is needed here exactly: it returns the passed-in original value when the variable is unset or empty after trimming.
+	// So 'override only when the env var is non-empty' need not be written as separate if blocks; it reads as an override table.
 	//
-	// 同一字段出现两个变量名时，顺序即优先级——后一行覆盖前一行。
+	// When one field has two variable names, order is priority: the later line overrides the earlier one.
 	c.Server.Addr = env.GetTrimmed("SERVER_ADDR", c.Server.Addr)
 	c.Runners.BasePath = env.GetTrimmed("RUNNERS_BASE_PATH", c.Runners.BasePath)
 	c.Runners.ContainerImage = env.GetTrimmed("RUNNER_IMAGE", c.Runners.ContainerImage)
@@ -87,10 +87,10 @@ func applyEnvOverrides(c *Config) {
 	c.Runners.VolumeHostPath = env.GetTrimmed("VOLUME_HOST_PATH", c.Runners.VolumeHostPath)
 	c.Runners.VolumeHostPath = env.GetTrimmed("RUNNERS_VOLUME_HOST_PATH", c.Runners.VolumeHostPath)
 
-	// 端口刻意不用 env.GetInt：它不做 trim，而 .env 与 compose 的 environment 里
-	// 带一个尾随空格是常事，那样 MANAGER_PORT=9090 会被静默丢弃、继续听 8080。
-	// 这里仍按原样「trim 后再解析」，范围校验交给 Validate——在这里悄悄忽略一个
-	// 越界端口，比让它一路走到 Validate 报出明确错误更难排查。
+	// The port deliberately does not use env.GetInt: it does not trim, and in .env and compose environment
+	// a trailing space is common, in which case MANAGER_PORT=9090 would be silently dropped and it would keep listening on 8080.
+	// Here it still does 'trim then parse' as-is, and range checking is left to Validate; silently ignoring an
+	// out-of-range port here is harder to debug than letting it reach Validate and report a clear error.
 	for _, key := range []string{"MANAGER_PORT", "SERVER_PORT"} {
 		if v := env.GetTrimmed(key, ""); v != "" {
 			if port, err := strconv.Atoi(v); err == nil && port > 0 {
@@ -104,9 +104,9 @@ func applyEnvOverrides(c *Config) {
 		}
 	}
 
-	// 同样不用 env.GetBool：它走 strconv.ParseBool，既不 trim，也会让
-	// CONTAINER_MODE=false 反过来关掉配置文件里已开启的容器模式。
-	// 这个变量从来只能开、不能关，保持原样，免得一次部署改动静默换掉运行形态。
+	// Likewise, not env.GetBool: it goes through strconv.ParseBool, which does not trim, and also lets
+	// CONTAINER_MODE=false turn off container mode that is already enabled in the config file.
+	// This variable has only ever been able to enable, never disable; keep it as is, so one deployment change does not silently alter the run mode.
 	if v := strings.ToLower(env.GetTrimmed("CONTAINER_MODE", "")); v == "true" || v == "1" {
 		c.Runners.ContainerMode = true
 	}
@@ -114,7 +114,7 @@ func applyEnvOverrides(c *Config) {
 		c.Runners.JobDockerBackend = v
 	}
 
-	// 容器模式且未设 container_image 时，优先从 MANAGER_IMAGE 推导
+	// When container mode is on and container_image is not set, derive from MANAGER_IMAGE first
 	if c.Runners.ContainerMode && strings.TrimSpace(c.Runners.ContainerImage) == "" {
 		if derived := containerImageFromManagerImage(); derived != "" {
 			c.Runners.ContainerImage = derived
@@ -124,56 +124,56 @@ func applyEnvOverrides(c *Config) {
 	}
 }
 
-// Config 应用配置
+// Config application configuration
 type Config struct {
 	Server  ServerConfig  `yaml:"server"`
 	Runners RunnersConfig `yaml:"runners"`
 }
 
-// ServerConfig HTTP 服务配置
+// ServerConfig HTTP server configuration
 type ServerConfig struct {
 	Port int    `yaml:"port"`
 	Addr string `yaml:"addr"`
 }
 
-// RunnersConfig Runner 根配置
+// RunnersConfig root Runner configuration
 type RunnersConfig struct {
-	BasePath string       `yaml:"base_path"` // 所有 runner 安装的根目录
+	BasePath string       `yaml:"base_path"` // root directory where all runners are installed
 	Items    []RunnerItem `yaml:"items"`
 
-	// 容器模式：Runner 运行在独立容器中，Manager 通过 Docker API 启停并透过 Agent 获取状态
-	ContainerMode    bool   `yaml:"container_mode"`    // 为 true 时启停与状态均走容器
-	ContainerImage   string `yaml:"container_image"`   // Runner 容器镜像，未填时由 DefaultRunnerContainerImage() 决定（FLEET_IMAGE_TAG 或 v2.0.0）
-	ContainerNetwork string `yaml:"container_network"` // 容器所在网络，与 Manager 同网以便访问 Agent，默认 runner-net
-	AgentPort        int    `yaml:"agent_port"`        // 容器内 Agent 端口，默认 8081
-	// Job Docker 后端：Runner 容器内 Job 执行 docker 命令时的后端。dind=DinD 服务；host-socket=挂载宿主机 socket；none=不提供 Docker
-	JobDockerBackend string `yaml:"job_docker_backend"` // dind | host-socket | none，默认 dind
-	DindHost         string `yaml:"dind_host"`          // 仅 job_docker_backend=dind 时有效，DinD 主机名，默认 runner-dind
-	VolumeHostPath   string `yaml:"volume_host_path"`   // 容器模式下宿主机上 runners 根路径，供 docker create -v 使用；Manager 自身在容器内时必填（如 /data/runners）
-	// Resources 容器模式下创建 Runner 容器时施加的资源上限。
-	// 不限制时单个失控 Job（如 Gradle daemon）可耗尽整机内存，把 Manager 自身一并拖垮。
+	// Container mode: Runners run in separate containers, the Manager starts and stops them via the Docker API and gets status through the Agent
+	ContainerMode    bool   `yaml:"container_mode"`    // When true, start/stop and status all go through the container
+	ContainerImage   string `yaml:"container_image"`   // Runner container image; if unset, DefaultRunnerContainerImage() decides (FLEET_IMAGE_TAG or v2.0.0)
+	ContainerNetwork string `yaml:"container_network"` // Network the container joins, same as the Manager so it can reach the Agent; default runner-net
+	AgentPort        int    `yaml:"agent_port"`        // Agent port inside the container; default 8081
+	// Job Docker backend: the backend used when jobs run docker commands inside the Runner container. dind=DinD service; host-socket=mount the host socket; none=no Docker provided
+	JobDockerBackend string `yaml:"job_docker_backend"` // dind | host-socket | none; default dind
+	DindHost         string `yaml:"dind_host"`          // Only used when job_docker_backend=dind; DinD hostname; default runner-dind
+	VolumeHostPath   string `yaml:"volume_host_path"`   // Host-side root path for runners in container mode, used by docker create -v; required when the Manager itself runs in a container (e.g. /data/runners)
+	// Resources are the resource limits applied when creating Runner containers in container mode.
+	// Without limits, a single runaway job (such as a Gradle daemon) can exhaust the machine's memory and take the Manager down with it.
 	Resources ResourceLimits `yaml:"resources,omitempty"`
-	// DockerGID 仅 job_docker_backend=host-socket 时有效：创建 Runner 容器时追加的 docker 组 GID（--group-add），
-	// 使容器内 app(UID 1001) 可访问挂载进来的 docker.sock；0 表示自动探测 docker.sock 所属组
+	// DockerGID is only used when job_docker_backend=host-socket: the docker group GID added when creating the Runner container (--group-add),
+	// so the in-container app (UID 1001) can access the mounted docker.sock; 0 means auto-detect the group that owns docker.sock
 	DockerGID int `yaml:"docker_gid"`
 }
 
-// ResourceLimits Runner 容器的资源上限，字段留空表示不限制。
-// 取值直接透传给 docker create，语义与 docker 官方一致。
+// ResourceLimits are the Runner container resource limits; leaving a field empty means no limit.
+// Values are passed straight through to docker create, with the same semantics as Docker's.
 type ResourceLimits struct {
-	CPUs       string `yaml:"cpus,omitempty"`        // --cpus，如 "2" 或 "1.5"
-	Memory     string `yaml:"memory,omitempty"`      // --memory，如 "4g"、"512m"
-	MemorySwap string `yaml:"memory_swap,omitempty"` // --memory-swap，如 "4g"；设为 "-1" 表示不限 swap
-	PidsLimit  int    `yaml:"pids_limit,omitempty"`  // --pids-limit，正数生效，-1 表示不限
+	CPUs       string `yaml:"cpus,omitempty"`        // --cpus, e.g. "2" or "1.5"
+	Memory     string `yaml:"memory,omitempty"`      // --memory, e.g. "4g", "512m"
+	MemorySwap string `yaml:"memory_swap,omitempty"` // --memory-swap, e.g. "4g"; set to "-1" for unlimited swap
+	PidsLimit  int    `yaml:"pids_limit,omitempty"`  // --pids-limit; positive values apply, -1 means unlimited
 }
 
-// dockerCPUsRe 匹配 docker --cpus 接受的正数（如 2、1.5、0.25）
+// dockerCPUsRe matches the positive numbers docker --cpus accepts (e.g. 2, 1.5, 0.25)
 var dockerCPUsRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 
-// dockerSizeRe 匹配 docker 的内存大小写法：纯字节数，或带 b/k/m/g 单位
+// dockerSizeRe matches Docker's memory size formats: a plain byte count, or one with a b/k/m/g unit
 var dockerSizeRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[bkmgBKMG]?$`)
 
-// Args 将资源上限转为 docker create 参数，未设置的字段不产生参数
+// Args converts the resource limits into docker create arguments; unset fields produce no arguments
 func (r ResourceLimits) Args() []string {
 	var args []string
 	if v := strings.TrimSpace(r.CPUs); v != "" {
@@ -191,10 +191,10 @@ func (r ResourceLimits) Args() []string {
 	return args
 }
 
-// Validate 校验取值格式，避免把非法值传给 docker 后才在创建容器时报错
+// Validate checks value formats, so invalid values fail here instead of being passed to docker and only erroring when the container is created
 func (r ResourceLimits) Validate() error {
 	if v := strings.TrimSpace(r.CPUs); v != "" {
-		// 正则挡掉 1e3/NaN 等 ParseFloat 能接受但 docker 不接受的写法，再要求数值为正
+		// The regex rejects forms like 1e3 or NaN that ParseFloat accepts but docker does not, then requires the value to be positive
 		f, err := strconv.ParseFloat(v, 64)
 		if !dockerCPUsRe.MatchString(v) || err != nil || f <= 0 {
 			return fmt.Errorf("runners.resources.cpus must be a positive number (for example \"2\" or \"1.5\"), got %q", r.CPUs)
@@ -214,7 +214,7 @@ func (r ResourceLimits) Validate() error {
 	if swap != "" && memory == "" {
 		return fmt.Errorf("runners.resources.memory_swap needs memory set as well, or docker refuses to create the container")
 	}
-	// docker 要求 memory-swap（内存+swap 总量）不小于 memory，否则创建容器时才报错
+	// docker requires memory-swap (total memory plus swap) to be at least memory, otherwise it only errors when the container is created
 	if swap != "" && swap != "-1" && memory != "" {
 		memBytes, memErr := parseDockerSize(memory)
 		swapBytes, swapErr := parseDockerSize(swap)
@@ -225,8 +225,8 @@ func (r ResourceLimits) Validate() error {
 	return nil
 }
 
-// parseDockerSize 将 docker 的内存写法解析为字节数，供跨单位比较使用。
-// 接受纯字节数或带 b/k/m/g 后缀（大小写均可），与 dockerSizeRe 保持一致。
+// parseDockerSize parses Docker's memory format into a byte count, for comparing across units.
+// Accepts a plain byte count or one with a b/k/m/g suffix (case-insensitive), consistent with dockerSizeRe.
 func parseDockerSize(v string) (int64, error) {
 	v = strings.TrimSpace(v)
 	if !dockerSizeRe.MatchString(v) {
@@ -250,22 +250,22 @@ func parseDockerSize(v string) (int64, error) {
 	return int64(n * float64(mult)), nil
 }
 
-// RunnerItem 单个 Runner 配置
+// RunnerItem is the configuration for a single Runner
 type RunnerItem struct {
-	Name       string   `yaml:"name"`        // 显示名称，也用作目录名
-	Path       string   `yaml:"path"`        // 相对 base_path 的目录，空则用 name
+	Name       string   `yaml:"name"`        // Display name, also used as the directory name
+	Path       string   `yaml:"path"`        // Directory relative to base_path; if empty, name is used
 	TargetType string   `yaml:"target_type"` // org | repo
-	Target     string   `yaml:"target"`      // org 名或 owner/repo
-	Labels     []string `yaml:"labels"`      // 自定义标签
+	Target     string   `yaml:"target"`      // org name or owner/repo
+	Labels     []string `yaml:"labels"`      // Custom labels
 
-	// 以下仅容器模式有效，留空则回落到 runners 下的全局同名配置。
-	// 一台机器上不同项目往往需要不同工具链（如 Flutter+Android 与 Node），
-	// 全局单一镜像无法覆盖，故允许按 Runner 覆盖。
-	ContainerImage   string `yaml:"container_image,omitempty"`    // 该 Runner 使用的容器镜像
+	// The following apply only in container mode; if left empty, fall back to the global config of the same name under runners.
+	// Different projects on one machine often need different toolchains (e.g. Flutter+Android vs Node),
+	// a single global image cannot cover them all, so each Runner may override it.
+	ContainerImage   string `yaml:"container_image,omitempty"`    // Container image used by this Runner
 	JobDockerBackend string `yaml:"job_docker_backend,omitempty"` // dind | host-socket | none
 }
 
-// FindItem 按名称查找 Runner 配置项
+// FindItem looks up a Runner config item by name
 func (c *Config) FindItem(name string) (RunnerItem, bool) {
 	for _, item := range c.Runners.Items {
 		if item.Name == name {
@@ -275,7 +275,7 @@ func (c *Config) FindItem(name string) (RunnerItem, bool) {
 	return RunnerItem{}, false
 }
 
-// ContainerImageFor 返回该 Runner 实际使用的容器镜像，优先级：
+// ContainerImageFor returns the container image this Runner actually uses, in priority order:
 // items[].container_image > runners.container_image > DefaultRunnerContainerImage()
 func (c *Config) ContainerImageFor(runnerName string) string {
 	if item, ok := c.FindItem(runnerName); ok {
@@ -289,7 +289,7 @@ func (c *Config) ContainerImageFor(runnerName string) string {
 	return DefaultRunnerContainerImage()
 }
 
-// JobDockerBackendFor 返回该 Runner 实际使用的 Job Docker 后端，优先级：
+// JobDockerBackendFor returns the Job Docker backend this Runner actually uses, in priority order:
 // items[].job_docker_backend > runners.job_docker_backend > dind
 func (c *Config) JobDockerBackendFor(runnerName string) string {
 	if item, ok := c.FindItem(runnerName); ok {
@@ -303,12 +303,12 @@ func (c *Config) JobDockerBackendFor(runnerName string) string {
 	return DefaultJobDockerBackend
 }
 
-// normalizeJobDockerBackend 去空白并转小写，空值返回空字符串供调用方回落
+// normalizeJobDockerBackend trims whitespace and lowercases the value; an empty value returns an empty string so the caller can fall back
 func normalizeJobDockerBackend(v string) string {
 	return strings.ToLower(strings.TrimSpace(v))
 }
 
-// InstallPath 返回该 runner 的完整安装路径
+// InstallPath returns the full install path of this runner
 func (r RunnerItem) InstallPath(basePath string) string {
 	dir := r.Path
 	if dir == "" {
@@ -317,7 +317,7 @@ func (r RunnerItem) InstallPath(basePath string) string {
 	return filepath.Join(basePath, filepath.Clean(dir))
 }
 
-// defaultConfig 返回与 Load 中默认值一致的配置（不读文件、不应用环境变量），用于文件不存在时从 env 生成配置。
+// defaultConfig returns the config matching the defaults in Load (reads no file, applies no env vars), used to build config from env when the file does not exist.
 func defaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -334,12 +334,12 @@ func defaultConfig() *Config {
 			JobDockerBackend: DefaultJobDockerBackend,
 			DindHost:         "runner-dind",
 			VolumeHostPath:   "",
-			DockerGID:        0, // 0 = 自动探测 docker.sock 所属组
+			DockerGID:        0, // 0 = auto-detect the group that owns docker.sock
 		},
 	}
 }
 
-// Load 从文件加载配置。若文件不存在，则基于默认配置与环境变量生成配置并写入 path，然后返回。
+// Load loads the config from file. If the file does not exist, it builds the config from the defaults and env vars, writes it to path, then returns it.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -363,7 +363,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, err
 	}
-	// 默认值
+	// Defaults
 	c.Server.Addr = strings.TrimSpace(c.Server.Addr)
 	c.Runners.BasePath = strings.TrimSpace(c.Runners.BasePath)
 	if c.Server.Port == 0 {
@@ -400,7 +400,7 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// Validate 校验配置：同名 Runner 冲突等
+// Validate checks the config: runner name conflicts, etc.
 func Validate(c *Config) error {
 	seen := make(map[string]bool)
 	seenContainerNames := make(map[string]string)
@@ -414,9 +414,9 @@ func Validate(c *Config) error {
 		return fmt.Errorf("runners.job_docker_backend only supports %s, got %q",
 			strings.Join(JobDockerBackends, "/"), c.Runners.JobDockerBackend)
 	}
-	// Port 为 0 表示「没写」，由 Load 填默认值，这里不管；非 0 才校验范围。
-	// 原先各处只要求 > 0，于是 MANAGER_PORT=70000 能一路写进配置，直到
-	// ListenAndServe 才以一句不提配置项的 "invalid port" 失败。
+	// Port 0 means "not set"; Load fills in the default, so it is not checked here. Only non-zero values are range-checked.
+	// Previously each site only required > 0, so MANAGER_PORT=70000 would flow all the way into the config until
+	// ListenAndServe failed with a bare "invalid port" that did not mention any config key.
 	if c.Server.Port != 0 {
 		if err := validator.ValidatePort(c.Server.Port); err != nil {
 			return fmt.Errorf("server.port must be between 1 and 65535, got %d (it may also come from MANAGER_PORT/SERVER_PORT)", c.Server.Port)
@@ -469,8 +469,8 @@ func Validate(c *Config) error {
 				i, strings.Join(JobDockerBackends, "/"), item.JobDockerBackend)
 		}
 		if !c.Runners.ContainerMode {
-			// 与 runners.volume_host_path 的处理一致：容器模式专属字段不允许在非容器模式下设置，
-			// 避免配置看起来生效、实际被忽略
+			// Consistent with how runners.volume_host_path is handled: container-only fields may not be set outside container mode,
+			// so the config does not appear to take effect while actually being ignored
 			if itemImage != "" {
 				return fmt.Errorf("runners.items[%d].container_image can only be set when container_mode=true", i)
 			}
@@ -499,7 +499,7 @@ func Validate(c *Config) error {
 	return nil
 }
 
-// NormalizedContainerName 将 runner 名称转为合法容器名（仅保留字母数字横线，并加前缀），供 config 与 runner 包共用
+// NormalizedContainerName converts a runner name into a valid container name (keeps only letters, digits and hyphens, and adds a prefix), shared by the config and runner packages
 func NormalizedContainerName(name string) string {
 	safe := runnerContainerNameSanitizeRe.ReplaceAllString(name, "-")
 	safe = strings.Trim(safe, "-")
@@ -509,7 +509,7 @@ func NormalizedContainerName(name string) string {
 	return "github-runner-" + safe
 }
 
-// IsSafeRunnerNameOrPath 校验 name/path 不含路径穿越或非法字符（禁止 .. / \）
+// IsSafeRunnerNameOrPath checks that name/path has no path traversal or illegal characters (forbids .. / \)
 func IsSafeRunnerNameOrPath(s string) bool {
 	if s == "" {
 		return false
@@ -517,7 +517,7 @@ func IsSafeRunnerNameOrPath(s string) bool {
 	return !strings.Contains(s, "..") && !strings.Contains(s, "/") && !strings.Contains(s, "\\")
 }
 
-// ValidateTarget 校验 target 格式：org 为组织名（不含 /），repo 为 owner/repo（恰好一个斜杠且两端非空）
+// ValidateTarget checks the target format: org is an organization name (no /), repo is owner/repo (exactly one slash, non-empty on both sides)
 func ValidateTarget(targetType, target string) error {
 	t := strings.TrimSpace(target)
 	if t == "" {
@@ -544,7 +544,7 @@ func ValidateTarget(targetType, target string) error {
 	}
 }
 
-// Save 将配置写回文件（调用方需自行加锁，写操作请使用 LoadAndSave）
+// Save writes the config back to file. The caller must take the lock itself; for writes, use LoadAndSave
 func (c *Config) Save(path string) error {
 	if err := Validate(c); err != nil {
 		return err
@@ -553,13 +553,13 @@ func (c *Config) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	// 原子替换而不是 os.WriteFile：每个 API 请求、前端 15 秒一次的轮询和后台循环
-	// 都在读这个文件，就地截断重写会让它们读到空的或半截的 YAML（读空时
-	// yaml.Unmarshal 不报错，界面上会短暂出现「一个 Runner 都没有」）。
+	// Replace atomically instead of os.WriteFile: every API request, the frontend's 15-second poll, and the background loops
+	// all read this file, so truncating and rewriting it in place would let them read an empty or half-written YAML (when reading empty,
+	// yaml.Unmarshal reports no error, and the UI briefly shows "no runners at all").
 	return atomicfile.WriteFile(path, data, 0644)
 }
 
-// LoadAndSave 在持锁下加载配置、执行 fn、写回；用于所有修改配置的写操作，避免并发覆盖
+// LoadAndSave loads the config under the lock, runs fn, then writes it back. Used by every write that modifies the config, to avoid concurrent overwrites
 func LoadAndSave(path string, fn func(*Config) error) error {
 	mu.Lock()
 	defer mu.Unlock()

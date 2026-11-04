@@ -9,8 +9,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// serveWithCSRF 把 csrfGuardMiddleware 挂在一个必定 200 的处理器前，返回实际状态码。
-// headers 传 nil 表示请求不带任何来源标记（curl / 脚本的形态）。
+// serveWithCSRF wraps csrfGuardMiddleware around a handler that always returns 200, and returns the actual status code.
+// Passing nil for headers means the request carries no origin markers (the shape of curl or a script).
 func serveWithCSRF(t *testing.T, method, host string, headers map[string]string, trusted []string) int {
 	t.Helper()
 	e := echo.New()
@@ -32,7 +32,7 @@ func serveWithCSRF(t *testing.T, method, host string, headers map[string]string,
 }
 
 func TestCSRFGuardSafeMethodsAlwaysPass(t *testing.T) {
-	// 读接口不改变状态，跨站读取本就受同源策略约束，不该被这里挡掉
+	// Read endpoints don't change state, and cross-site reads are already bound by the same-origin policy, so this should not block them
 	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodOptions} {
 		t.Run(method, func(t *testing.T) {
 			got := serveWithCSRF(t, method, "localhost:8080", map[string]string{
@@ -40,7 +40,7 @@ func TestCSRFGuardSafeMethodsAlwaysPass(t *testing.T) {
 				"Origin":         "https://evil.example",
 			}, nil)
 			if got != http.StatusOK {
-				t.Fatalf("%s 被拒绝（%d），安全方法应始终放行", method, got)
+				t.Fatalf("%s was rejected (%d), safe methods should always be allowed", method, got)
 			}
 		})
 	}
@@ -52,10 +52,10 @@ func TestCSRFGuardSecFetchSite(t *testing.T) {
 		wantCode int
 	}{
 		{"same-origin", http.StatusOK},
-		// same-site 是同注册域的另一个源（子域、别的端口）——对内网管理端一律不认
+		// same-site is another origin on the same registrable domain (a subdomain or different port); the internal admin side never trusts it
 		{"same-site", http.StatusForbidden},
 		{"cross-site", http.StatusForbidden},
-		// none 表示用户直接导航（地址栏、书签），写请求不该以这种方式发起
+		// none means the user navigated directly (address bar, bookmark); write requests should not originate this way
 		{"none", http.StatusForbidden},
 	}
 	for _, tc := range cases {
@@ -63,25 +63,25 @@ func TestCSRFGuardSecFetchSite(t *testing.T) {
 			got := serveWithCSRF(t, http.MethodPost, "localhost:8080",
 				map[string]string{"Sec-Fetch-Site": tc.site}, nil)
 			if got != tc.wantCode {
-				t.Fatalf("Sec-Fetch-Site=%s 得到 %d，期望 %d", tc.site, got, tc.wantCode)
+				t.Fatalf("Sec-Fetch-Site=%s got %d, expected %d", tc.site, got, tc.wantCode)
 			}
 		})
 	}
 }
 
-// Sec-Fetch-Site 比 Origin 可靠（浏览器本地计算，不受反代改写 Host 影响），
-// 所以它在场时说了算：哪怕 Origin 看上去同源，cross-site 也要拒。
+// Sec-Fetch-Site is more reliable than Origin (computed locally by the browser, unaffected by a reverse proxy rewriting Host),
+// so when it is present it decides: even if Origin looks same-origin, reject cross-site.
 func TestCSRFGuardSecFetchSiteWinsOverOrigin(t *testing.T) {
 	got := serveWithCSRF(t, http.MethodPost, "localhost:8080", map[string]string{
 		"Sec-Fetch-Site": "cross-site",
 		"Origin":         "http://localhost:8080",
 	}, nil)
 	if got != http.StatusForbidden {
-		t.Fatalf("得到 %d，期望 403：Sec-Fetch-Site 在场时应以它为准", got)
+		t.Fatalf("got %d, expected 403: when Sec-Fetch-Site is present it should be authoritative", got)
 	}
 }
 
-// 老浏览器（Safari 16.4 以前）不发 Sec-Fetch-Site，但跨站 POST 一定带 Origin
+// Older browsers (before Safari 16.4) don't send Sec-Fetch-Site, but cross-site POSTs always carry Origin
 func TestCSRFGuardOriginFallback(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -93,12 +93,12 @@ func TestCSRFGuardOriginFallback(t *testing.T) {
 		{"同源带末尾斜杠", "localhost:8080", "http://localhost:8080/", http.StatusOK},
 		{"端口不同即跨源", "localhost:8080", "http://localhost:9090", http.StatusForbidden},
 		{"主机不同", "localhost:8080", "https://evil.example", http.StatusForbidden},
-		// 子域不算同源：evil 可以在 sub.localhost 上落脚
+		// A subdomain is not same-origin: evil can get a foothold on sub.localhost
 		{"子域", "localhost:8080", "http://sub.localhost:8080", http.StatusForbidden},
 		{"Origin 无法解析", "localhost:8080", "://not a url", http.StatusForbidden},
-		// 浏览器对不透明来源发 "null"，不该当成同源
+		// Browsers send "null" for opaque origins; it should not be treated as same-origin
 		{"null 来源", "localhost:8080", "null", http.StatusForbidden},
-		// 协议不参与比较：反代做 TLS 终止时 Host 里没有 scheme 可比
+		// The protocol is not part of the comparison: when a reverse proxy terminates TLS, Host has no scheme to compare
 		{"仅协议不同", "localhost:8080", "https://localhost:8080", http.StatusOK},
 	}
 	for _, tc := range cases {
@@ -106,19 +106,19 @@ func TestCSRFGuardOriginFallback(t *testing.T) {
 			got := serveWithCSRF(t, http.MethodPost, tc.host,
 				map[string]string{"Origin": tc.origin}, nil)
 			if got != tc.wantCode {
-				t.Fatalf("Host=%s Origin=%s 得到 %d，期望 %d", tc.host, tc.origin, got, tc.wantCode)
+				t.Fatalf("Host=%s Origin=%s got %d, expected %d", tc.host, tc.origin, got, tc.wantCode)
 			}
 		})
 	}
 }
 
-// 既无 Sec-Fetch-Site 也无 Origin 的请求不是浏览器发的：它不持有用户的
-// Basic Auth 缓存，构不成 CSRF。挡掉它只会让 API 无法脚本化。
+// A request with neither Sec-Fetch-Site nor Origin was not sent by a browser: it does not hold the user's
+// Basic Auth cache, so it cannot form a CSRF. Blocking it would only make the API unscriptable.
 func TestCSRFGuardNonBrowserRequestPasses(t *testing.T) {
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
 			if got := serveWithCSRF(t, method, "localhost:8080", nil, nil); got != http.StatusOK {
-				t.Fatalf("%s 无来源标记时得到 %d，期望放行", method, got)
+				t.Fatalf("%s without origin markers got %d, expected allow", method, got)
 			}
 		})
 	}
@@ -145,17 +145,17 @@ func TestCSRFGuardTrustedOriginsEscapeHatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := serveWithCSRF(t, http.MethodPost, "localhost:8080", tc.headers, trusted)
 			if got != tc.wantCode {
-				t.Fatalf("得到 %d，期望 %d", got, tc.wantCode)
+				t.Fatalf("got %d, expected %d", got, tc.wantCode)
 			}
 		})
 	}
 }
 
-// 403 要走统一的错误格式，界面才能把原因显示出来。
+// The 403 must use the unified error format so the UI can display the reason.
 //
-// 走 newEchoServer 而不是手搭一个 echo：拒绝原因现在是查表出来的（handler.Trf），
-// 手搭的服务器没装 I18nLoader，tr 会回落成键本身，这条用例就会去断言
-// "api.csrf_cross_site" 这种给不了人任何信息的字符串，还断言得很开心。
+// Use newEchoServer instead of hand-building an echo: the rejection reason is now looked up from a table (handler.Trf),
+// a hand-built server has no I18nLoader installed, so tr falls back to the key itself, and this case would end up asserting
+// "api.csrf_cross_site", a string that tells a reader nothing, and assert against it with no complaint.
 func TestCSRFGuardRejectionBodyNamesTheCause(t *testing.T) {
 	t.Setenv("TRUSTED_ORIGINS", "")
 	e := newEchoServer()
@@ -166,14 +166,14 @@ func TestCSRFGuardRejectionBodyNamesTheCause(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("状态码 %d，期望 403", rec.Code)
+		t.Fatalf("status code %d, expected 403", rec.Code)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, `"message"`) {
-		t.Fatalf("响应应为 {\"message\": ...}: %s", body)
+		t.Fatalf("response should be {\"message\": ...}: %s", body)
 	}
 	if !strings.Contains(body, "TRUSTED_ORIGINS") {
-		t.Fatalf("拒绝原因里应指出逃生舱 TRUSTED_ORIGINS: %s", body)
+		t.Fatalf("rejection reason should point to the escape hatch TRUSTED_ORIGINS: %s", body)
 	}
 }
 
@@ -196,22 +196,22 @@ func TestTrustedOrigins(t *testing.T) {
 			t.Setenv("TRUSTED_ORIGINS", tc.env)
 			got := trustedOrigins()
 			if len(got) != len(tc.want) {
-				t.Fatalf("trustedOrigins() = %v，期望 %v", got, tc.want)
+				t.Fatalf("trustedOrigins() = %v, expected %v", got, tc.want)
 			}
 			for i := range got {
 				if got[i] != tc.want[i] {
-					t.Fatalf("trustedOrigins() = %v，期望 %v", got, tc.want)
+					t.Fatalf("trustedOrigins() = %v, expected %v", got, tc.want)
 				}
 			}
 		})
 	}
 }
 
-// ---- 中间件是否真的挂上了 ----
+// ---- Is the middleware actually attached ----
 
-// writeRoutes 是所有会改变状态、且不触发 CORS 预检的路由。
-// 预检方法（PUT / DELETE）浏览器本就发不出跨站的简单请求，但一并盯着，
-// 免得哪天有人把它们改成 POST 又忘了这层。
+// writeRoutes are all the routes that change state and do not trigger a CORS preflight.
+// Preflighted methods (PUT / DELETE) browsers cannot send as cross-site simple requests anyway, but watch them too,
+// so nobody changes them to POST later and forgets this layer.
 var writeRoutes = []struct {
 	method string
 	path   string
@@ -224,8 +224,8 @@ var writeRoutes = []struct {
 	{http.MethodDelete, "/api/runners/demo"},
 }
 
-// newEchoServer 会改 handler 包的全局量（ConfigPath 之外的 I18nLoader），
-// 测试之间互不干扰即可，不必还原。
+// newEchoServer mutates package-level globals in handler (other than ConfigPath, I18nLoader),
+// it is enough that tests do not interfere with each other; no need to restore.
 func serveThroughRealServer(t *testing.T, method, path string, headers map[string]string) int {
 	t.Helper()
 	e := newEchoServer()
@@ -240,7 +240,7 @@ func serveThroughRealServer(t *testing.T, method, path string, headers map[strin
 	return rec.Code
 }
 
-// 这是这一层真正要守住的东西：中间件写对了不等于挂上了。
+// This is the thing this layer really has to guard: a correct middleware does not mean it is attached.
 func TestCSRFGuardIsMountedOnWriteRoutes(t *testing.T) {
 	t.Setenv("TRUSTED_ORIGINS", "")
 	for _, r := range writeRoutes {
@@ -250,15 +250,15 @@ func TestCSRFGuardIsMountedOnWriteRoutes(t *testing.T) {
 				"Origin":         "https://evil.example",
 			})
 			if got != http.StatusForbidden {
-				t.Fatalf("%s %s 跨站调用得到 %d，期望 403——CSRF 中间件没挡住这条路由",
+				t.Fatalf("%s %s cross-site call returned %d, expected 403 — CSRF middleware did not block this route",
 					r.method, r.path, got)
 			}
 		})
 	}
 }
 
-// 反过来：同源调用不该被这层挡掉。走到处理器之后因为没有真实配置多半会失败，
-// 那是另一回事，这里只断言「不是被 CSRF 挡的」。
+// Conversely: same-origin calls should not be blocked by this layer. Past the handler it will likely fail without real config,
+// that is a different matter; here we only assert "not blocked by CSRF".
 func TestCSRFGuardLetsSameOriginThrough(t *testing.T) {
 	t.Setenv("TRUSTED_ORIGINS", "")
 	for _, r := range writeRoutes {
@@ -268,13 +268,13 @@ func TestCSRFGuardLetsSameOriginThrough(t *testing.T) {
 				"Origin":         "http://localhost:8080",
 			})
 			if got == http.StatusForbidden {
-				t.Fatalf("%s %s 同源调用被 403 挡掉了", r.method, r.path)
+				t.Fatalf("%s %s same-origin call was blocked with 403", r.method, r.path)
 			}
 		})
 	}
 }
 
-// 读接口不受影响，/health 也要一直可探活
+// Read endpoints are unaffected, /health must also stay reachable for probes
 func TestReadRoutesUnaffectedByCSRFGuard(t *testing.T) {
 	t.Setenv("TRUSTED_ORIGINS", "")
 	for _, path := range []string{"/health", "/ready", "/version"} {
@@ -283,7 +283,7 @@ func TestReadRoutesUnaffectedByCSRFGuard(t *testing.T) {
 				"Sec-Fetch-Site": "cross-site",
 			})
 			if got != http.StatusOK {
-				t.Fatalf("GET %s 得到 %d，期望 200", path, got)
+				t.Fatalf("GET %s returned %d, expected 200", path, got)
 			}
 		})
 	}

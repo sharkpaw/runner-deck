@@ -9,33 +9,33 @@ import (
 	"unicode"
 )
 
-// docLang 一份文档的语言策略。
+// docLang is the language policy for a document.
 type docLang int
 
 const (
-	// langZhOnly 只有中文，且刻意不做译文。
+	// langZhOnly is Chinese only, deliberately without a translation.
 	langZhOnly docLang = iota
-	// langTranslated 英文为原文，docs_languages 里每种语言都要有对应译文。
+	// langTranslated is English as the original, with a translation for every language in docs_languages.
 	langTranslated
 )
 
-// examplesPolicy examples/ 下每份 README 的语言策略。
+// examplesPolicy is the language policy for each README under examples/.
 //
-// 这张表是「被决定过」的凭据，不是清单的副本。docs/ 下的三份文档有 ci-recipes 的
-// 结构检查和本包的内容检查盯着，examples/ 一直没有任何东西盯——而它那两份 README
-// 恰恰是全仓库排障密度最高的内容（15 条带根因，英文 guide.md 的排障只有 9 条），
-// 却只有中文，且根 README 的英文入口直接往那儿送人。
+// This table is a record of decisions, not a copy of the list. The three docs under docs/ are watched by ci-recipes'
+// structure check and this package's content check, but examples/ has never had anything watching it, and its two READMEs
+// are the densest troubleshooting content in the repo (15 root-cause entries, versus 9 in the English guide.md),
+// yet they are Chinese only, and the root README's English entry point sends people straight there.
 //
-// 中文单语是**决定过的**：docs-improvement-plan.md 第 7 节的三个选项里选了 B——
-// 只把两个 .example 模板改成双语（每个用户都会复制走它们），examples/ 维持中文。
-// 这张表保证新增一份 examples README 时必须在这里补一行，也就是必须重新想一下
-// 那个取舍对它还成不成立。
+// Chinese-only is a **decided** choice. Of the three options in section 7 of docs-improvement-plan.md, B was chosen:
+// only the two .example templates were made bilingual (every user copies them), and examples/ stays Chinese.
+// This table makes sure that adding an examples README requires a row here, so you have to reconsider
+// whether that trade-off still holds for it.
 var examplesPolicy = map[string]docLang{
 	"examples/deploy/README.md":        langZhOnly,
 	"examples/runner-images/README.md": langZhOnly,
 }
 
-// TestExamplesPolicy_EveryReadmeHasADecision examples/ 下的每份 README 都要在策略表里有一行。
+// TestExamplesPolicy_EveryReadmeHasADecision requires every README under examples/ to have a row in the policy table.
 func TestExamplesPolicy_EveryReadmeHasADecision(t *testing.T) {
 	repo := repoRoot(t)
 
@@ -48,8 +48,8 @@ func TestExamplesPolicy_EveryReadmeHasADecision(t *testing.T) {
 		rel = filepath.ToSlash(rel)
 		found[rel] = true
 		if _, ok := examplesPolicy[rel]; !ok {
-			t.Errorf("%s 没有语言策略。在 examplesPolicy 里补一行，"+
-				"顺便决定它要不要译文（docs/docs-improvement-plan.md 第 7 节）", rel)
+			t.Errorf("%s has no language policy. Add a row in examplesPolicy,"+
+				"and decide whether it needs a translation (docs/docs-improvement-plan.md section 7)", rel)
 		}
 		return nil
 	})
@@ -59,16 +59,16 @@ func TestExamplesPolicy_EveryReadmeHasADecision(t *testing.T) {
 
 	for rel := range examplesPolicy {
 		if !found[rel] {
-			t.Errorf("examplesPolicy 里的 %s 已经不存在了，删掉这一行", rel)
+			t.Errorf("%s in examplesPolicy no longer exists, delete this row", rel)
 		}
 	}
 }
 
-// TestExamplesPolicy_DeclaredPolicyMatchesReality 声明的策略要和磁盘上的事实一致。
+// TestExamplesPolicy_DeclaredPolicyMatchesReality requires the declared policies to match the facts on disk.
 //
-// 光有一张表只是备忘录。这条让它变成检查：声称中文单语的，得确实是中文、且确实没有
-// 译文副本；声称要翻译的，五种语言一份都不能少。改了策略却没动文件，或者动了文件
-// 却没改策略，两个方向都会红。
+// A table alone is just a memo. This check makes it enforceable: a README declared Chinese-only must really be Chinese, and must really have no
+// translated copy; one declared as translated must have every one of its five languages. Changing the policy without touching the files, or touching the files
+// without changing the policy, both directions fail.
 func TestExamplesPolicy_DeclaredPolicyMatchesReality(t *testing.T) {
 	repo := repoRoot(t)
 	conf := loadDocsConf(t, repo)
@@ -76,30 +76,30 @@ func TestExamplesPolicy_DeclaredPolicyMatchesReality(t *testing.T) {
 	for rel, policy := range examplesPolicy {
 		b, err := os.ReadFile(filepath.Join(repo, rel))
 		if err != nil {
-			continue // 上一条用例已经报过它不存在
+			continue // The previous case already reports that it does not exist.
 		}
 		dir := filepath.Dir(rel)
 
 		switch policy {
 		case langZhOnly:
 			if !hasHan(string(b)) {
-				t.Errorf("%s 声明为中文单语，内容里却没有汉字", rel)
+				t.Errorf("%s is declared Chinese-only, but its content has no Chinese characters", rel)
 			}
 			for _, lang := range conf.langs {
 				sib := filepath.Join(repo, dir, lang, "README.md")
 				if _, err := os.Stat(sib); err == nil {
-					t.Errorf("%s 声明为中文单语，却存在 %s/%s/README.md；"+
-						"要么改策略为 langTranslated，要么删掉那份译文", rel, dir, lang)
+					t.Errorf("%s is declared Chinese-only, but %s/%s/README.md exists;"+
+						"either change the policy to langTranslated, or delete that translation", rel, dir, lang)
 				}
 			}
 		case langTranslated:
 			if hasHan(string(b)) {
-				t.Errorf("%s 声明为英文原文 + 译文，正文里却有汉字", rel)
+				t.Errorf("%s is declared as English original + translation, but its body contains Chinese characters", rel)
 			}
 			for _, lang := range conf.langs {
 				sib := filepath.Join(repo, dir, lang, "README.md")
 				if _, err := os.Stat(sib); err != nil {
-					t.Errorf("%s 声明为英文原文 + 译文，缺 %s/%s/README.md", rel, dir, lang)
+					t.Errorf("%s is declared as English original + translation, but %s/%s/README.md is missing", rel, dir, lang)
 				}
 			}
 		}

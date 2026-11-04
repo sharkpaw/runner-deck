@@ -11,10 +11,10 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runner"
 )
 
-// renderIndex 用真实的 index.html 渲染一行 runner，返回 HTML。
-// 直接跑模板而不是只测 RunnerInfo 上的辅助方法：这个 bug 的根在模板写法上，
-// 有人把 {{if .GitHubYes}} 改回 {{if .RegisteredOnGitHub}} 就会原样复发，
-// 只测辅助方法的用例对此一无所知。
+// renderIndex renders one runner row using the real index.html and returns HTML.
+// Run the template directly instead of only testing the helper methods on RunnerInfo: the root of this bug is in how the template is written,
+// If someone changes {{if .GitHubYes}} back to {{if .RegisteredOnGitHub}}, the bug recurs as-is,
+// and tests that only cover the helper methods know nothing about it.
 func renderIndex(t *testing.T, info runner.RunnerInfo) string {
 	t.Helper()
 	T := map[string]string{}
@@ -36,18 +36,18 @@ func renderIndex(t *testing.T, info runner.RunnerInfo) string {
 		"Version": "test",
 	}
 	if err := r.Render(&buf, "index.html", data, echo.New().NewContext(nil, nil)); err != nil {
-		t.Fatalf("渲染失败: %v", err)
+		t.Fatalf("render failed: %v", err)
 	}
 	return buf.String()
 }
 
 func boolPtr(b bool) *bool { return &b }
 
-// 这是本次修复的核心回归用例。
+// This is the core regression case for this fix.
 //
-// {{if .RegisteredOnGitHub}} 作用在 *bool 上时，html/template 只看指针是否为 nil——
-// 指向 false 的指针同样为真。于是「GitHub 上查不到这个 Runner」被渲染成「GitHub ✓」，
-// 列表列结构上就不可能显示「未显示」。
+// When {{if .RegisteredOnGitHub}} is applied to a *bool, html/template only checks whether the pointer is nil --
+// a pointer to false is also truthy. So "not found on GitHub" renders as "GitHub ✓",
+// so the list column can never show "not shown".
 func TestIndexTemplate_GitHubStatusThreeStates(t *testing.T) {
 	T := map[string]string{}
 	b, _ := i18nFS.ReadFile("i18n/zh.json")
@@ -96,29 +96,29 @@ func TestIndexTemplate_GitHubStatusThreeStates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			html := renderIndex(t, tc.info)
 			if !strings.Contains(html, tc.want) {
-				t.Fatalf("页面里应出现 %q", tc.want)
+				t.Fatalf("page should contain %q", tc.want)
 			}
 			for _, nw := range tc.notWant {
 				if nw != "" && strings.Contains(html, nw) {
-					t.Fatalf("页面里不应出现 %q（实际渲染成了它）", nw)
+					t.Fatalf("page should not contain %q (it was actually rendered)", nw)
 				}
 			}
 		})
 	}
 }
 
-// 「公开仓库」徽标只在确知公开时出现。
+// The "public repo" badge only appears when the repo is known to be public.
 //
-// 和上面那条同源：GitHubPublic 也是 *bool，模板里写 {{if .GitHubPublic}} 会让指向
-// false 的指针同样为真，于是每个私有仓库都挂上「公开仓库」。这个徽标的全部意义
-// 就是把公开仓库挑出来，见谁都喊一遍等于没喊。nil 也不能喊：没查出来不是公开。
+// Same root as the case above: GitHubPublic is also a *bool, so writing {{if .GitHubPublic}} in the template makes a pointer to
+// false also truthy, so every private repo gets the "public repo" badge. The whole point of this badge
+// is to single out public repos; flagging everything makes it useless. nil must not trigger it either: not found is not public.
 func TestIndexTemplate_PublicRepoBadgeOnlyWhenKnownPublic(t *testing.T) {
 	T := map[string]string{}
 	b, _ := i18nFS.ReadFile("i18n/zh.json")
 	_ = json.Unmarshal(b, &T)
 	label := T["badge.public_repo"]
 	if label == "" {
-		t.Fatal("zh.json 里没有 badge.public_repo")
+		t.Fatal("zh.json has no badge.public_repo")
 	}
 
 	for _, tc := range []struct {
@@ -137,20 +137,20 @@ func TestIndexTemplate_PublicRepoBadgeOnlyWhenKnownPublic(t *testing.T) {
 			})
 			got := strings.Contains(html, `class="badge public-repo`)
 			if got != tc.want {
-				t.Fatalf("渲染出徽标 = %v，期望 %v", got, tc.want)
+				t.Fatalf("rendered badge = %v, expected %v", got, tc.want)
 			}
-			// 提示文案跟着徽标走：只有徽标没有 .tip，用户看不到「为什么这是个问题」
+			// The hint text goes with the badge: a badge without .tip leaves users unable to see "why this is a problem"
 			if tc.want && !strings.Contains(html, T["badge.public_repo_title"]) {
-				t.Fatal("徽标应带上说明为什么公开仓库有风险的 .tip")
+				t.Fatal("badge should have a .tip explaining why public repos are risky")
 			}
 			if !tc.want && strings.Contains(html, label) {
-				t.Fatalf("页面里不应出现 %q", label)
+				t.Fatalf("page should not contain %q", label)
 			}
 		})
 	}
 }
 
-// 查询失败的原因要能在界面上看到，否则「查询失败」四个字没法照着做
+// The reason for a failed lookup must be visible in the UI, otherwise "lookup failed" gives no way to act on it
 func TestIndexTemplate_ShowsCheckErrorAsTooltip(t *testing.T) {
 	html := renderIndex(t, runner.RunnerInfo{
 		Name: "a", Status: runner.StatusInstalled, RegistrationMessage: "ok",
@@ -158,19 +158,19 @@ func TestIndexTemplate_ShowsCheckErrorAsTooltip(t *testing.T) {
 		GitHubCheckError: "GitHub 返回 401：令牌无效或已过期",
 	})
 	if !strings.Contains(html, "令牌无效或已过期") {
-		t.Fatal("失败原因应出现在页面上（title 提示）")
+		t.Fatal("failure reason should appear on the page (title tooltip)")
 	}
 }
 
-// Runner 名字里的尖括号必须被转义，服务端渲染这一侧不能出洞
+// Angle brackets in runner names must be escaped; the server-side rendering must not open a hole
 func TestIndexTemplate_EscapesRunnerName(t *testing.T) {
 	html := renderIndex(t, runner.RunnerInfo{
 		Name: `<img src=x onerror=alert(1)>`, Status: runner.StatusNew,
 	})
 	if strings.Contains(html, "<img src=x onerror=alert(1)>") {
-		t.Fatal("Runner 名未转义，列表页存在 XSS")
+		t.Fatal("runner name not escaped, list page has XSS")
 	}
 	if !strings.Contains(html, "&lt;img src=x onerror=alert(1)&gt;") {
-		t.Fatal("应以转义形式出现")
+		t.Fatal("should appear in escaped form")
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/config"
 )
 
-// hostSocketSpec 一个典型的 host-socket 容器形态
+// hostSocketSpec is a typical host-socket container form
 func hostSocketSpec() containerSpec {
 	return containerSpec{
 		ContainerName: "github-runner-a",
@@ -20,7 +20,7 @@ func hostSocketSpec() containerSpec {
 	}
 }
 
-// factsFor 按 spec 造出「一致」的 inspect 结果（带创建标签，即新版本建的容器）
+// factsFor builds an inspect result that matches the spec (with creation labels, i.e. a container made by the new version)
 func factsFor(s containerSpec) *containerFacts {
 	f := legacyFactsFor(s)
 	f.Labels = map[string]string{
@@ -30,7 +30,7 @@ func factsFor(s containerSpec) *containerFacts {
 	return f
 }
 
-// legacyFactsFor 不带标签，模拟旧版本建出来的容器
+// legacyFactsFor has no labels, simulating a container created by an old version
 func legacyFactsFor(s containerSpec) *containerFacts {
 	f := &containerFacts{
 		Running:     true,
@@ -56,17 +56,17 @@ func legacyFactsFor(s containerSpec) *containerFacts {
 func TestDriftReason_NoDriftWhenMatching(t *testing.T) {
 	spec := hostSocketSpec()
 	if got := spec.driftReason(factsFor(spec), "sha256:aaa"); got != "" {
-		t.Fatalf("一致的容器不该报漂移: %s", got)
+		t.Fatalf("a consistent container should not report drift: %s", got)
 	}
-	// 容器不存在时同样不该报
+	// Should not report drift either when the container does not exist
 	if got := spec.driftReason(nil, "sha256:aaa"); got != "" {
-		t.Fatalf("nil facts 不该报漂移: %s", got)
+		t.Fatalf("nil facts should not report drift: %s", got)
 	}
 }
 
 func TestDriftReason_BackendSwitch(t *testing.T) {
-	// 真实场景：容器按 host-socket 建出来，配置改成了 dind。
-	// 不重建的话它依旧挂着宿主机 socket，切换等于没发生。
+	// Real scenario: the container was created with host-socket, and the config was changed to dind.
+	// Without a rebuild it still mounts the host socket, so the switch has no effect.
 	old := hostSocketSpec()
 	facts := factsFor(old)
 
@@ -74,25 +74,25 @@ func TestDriftReason_BackendSwitch(t *testing.T) {
 	want.JobBackend = "dind"
 	got := want.driftReason(facts, "sha256:aaa")
 	if !strings.Contains(got, "dind") {
-		t.Fatalf("host-socket → dind 未被检出: %q", got)
+		t.Fatalf("host-socket → dind not detected: %q", got)
 	}
 
-	// 反向：按 dind 建的容器，配置改回 host-socket
+	// Reverse: container created with dind, config changed back to host-socket
 	dindSpec := old
 	dindSpec.JobBackend = "dind"
 	dindFacts := factsFor(dindSpec)
 	if got := old.driftReason(dindFacts, "sha256:aaa"); !strings.Contains(got, "host-socket") {
-		t.Fatalf("dind → host-socket 未被检出: %q", got)
+		t.Fatalf("dind → host-socket not detected: %q", got)
 	}
 
-	// 切到 none：既不该有 DOCKER_HOST 也不该有 socket 挂载
+	// Switch to none: there should be neither DOCKER_HOST nor a socket mount
 	noneSpec := old
 	noneSpec.JobBackend = "none"
 	if got := noneSpec.driftReason(facts, "sha256:aaa"); !strings.Contains(got, "none") {
-		t.Fatalf("host-socket → none 未被检出: %q", got)
+		t.Fatalf("host-socket → none not detected: %q", got)
 	}
 	if got := noneSpec.driftReason(factsFor(noneSpec), "sha256:aaa"); got != "" {
-		t.Fatalf("none 容器与 none 配置不该报漂移: %q", got)
+		t.Fatalf("none container with none config should not report drift: %q", got)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestDriftReason_DindHostChanged(t *testing.T) {
 	moved.DindHost = "other-dind"
 	got := moved.driftReason(facts, "sha256:aaa")
 	if !strings.Contains(got, "other-dind") {
-		t.Fatalf("DinD 地址变化未被检出: %q", got)
+		t.Fatalf("DinD address change not detected: %q", got)
 	}
 }
 
@@ -113,21 +113,21 @@ func TestDriftReason_ImageRefAndRebuild(t *testing.T) {
 	spec := hostSocketSpec()
 	facts := factsFor(spec)
 
-	// 换了镜像引用
+	// Image reference changed
 	newImage := spec
 	newImage.Image = "img:v2"
 	if got := newImage.driftReason(facts, "sha256:aaa"); !strings.Contains(got, "img:v2") {
-		t.Fatalf("镜像引用变化未被检出: %q", got)
+		t.Fatalf("image reference change not detected: %q", got)
 	}
 
-	// 同名 tag 重新构建：引用没变、镜像 ID 变了，同样要重建
+	// Same tag rebuilt: the reference is unchanged but the image ID changed, so it still requires a rebuild
 	if got := spec.driftReason(facts, "sha256:bbb"); !strings.Contains(got, "rebuilt") {
-		t.Fatalf("同名 tag 重新构建未被检出: %q", got)
+		t.Fatalf("same-tag rebuild not detected: %q", got)
 	}
 
-	// 镜像不在本地（拿不到 ID）时不能误报
+	// Must not false-positive when the image is not local (no ID available)
 	if got := spec.driftReason(facts, ""); got != "" {
-		t.Fatalf("拿不到镜像 ID 时不该报漂移: %q", got)
+		t.Fatalf("should not report drift when image ID is unavailable: %q", got)
 	}
 }
 
@@ -138,61 +138,61 @@ func TestDriftReason_NetworkAndMount(t *testing.T) {
 	otherNet := spec
 	otherNet.Network = "other-net"
 	if got := otherNet.driftReason(facts, "sha256:aaa"); !strings.Contains(got, "other-net") {
-		t.Fatalf("网络变化未被检出: %q", got)
+		t.Fatalf("network change not detected: %q", got)
 	}
 
-	// volume_host_path 改了，挂载目录跟着变
+	// volume_host_path changed, so the mount directory follows
 	moved := spec
 	moved.MountSrc = "/data/runners/a"
 	if got := moved.driftReason(facts, "sha256:aaa"); !strings.Contains(got, "/data/runners/a") {
-		t.Fatalf("挂载目录变化未被检出: %q", got)
+		t.Fatalf("mount directory change not detected: %q", got)
 	}
 }
 
 // TestDriftReason_NetworkUsesCreationNotAttachment
-// docker create --network 只设一个网络，但容器可以事后被 docker network connect
-// 接进别的网络。所以「它连着目标网络吗」回答不了「它是按哪个网络建的」：
-// 配置从 runner-net 改到 net-b、而容器两个都连着时，按「连着就算数」会放行，
-// 于是它继续连着 runner-net——恰恰是这次改配置想断掉的那条。
+// docker create --network sets only one network, but a container can be attached later with docker network connect
+// to other networks. So 'is it connected to the target network?' cannot answer 'which network was it created with?':
+// When the config changes from runner-net to net-b and the container is connected to both, the check 'connected means it counts' would let it pass,
+// so it stays connected to runner-net, the very link this change was meant to sever.
 func TestDriftReason_NetworkUsesCreationNotAttachment(t *testing.T) {
 	spec := hostSocketSpec() // Network = runner-net
 
-	// 新版本建的容器：以创建标签为准
+	// Containers created by the new version: the creation label is authoritative
 	labeled := factsFor(spec)
-	labeled.Networks = []string{"runner-net", "net-b"} // 手工 connect 了 net-b
+	labeled.Networks = []string{"runner-net", "net-b"} // Manually connected to net-b
 
-	// 配置仍是 runner-net：多连一个网络是运维自己接的，不该因此重建
+	// Config is still runner-net: the extra network was attached by ops themselves, so it should not trigger a rebuild
 	if got := spec.driftReason(labeled, "sha256:aaa"); got != "" {
-		t.Fatalf("多连一个网络不该触发重建: %q", got)
+		t.Fatalf("an extra attached network should not trigger a rebuild: %q", got)
 	}
 
-	// 配置改成 net-b：标签记的还是 runner-net，必须报
+	// Config changed to net-b: the label still records runner-net, so it must be reported
 	moved := spec
 	moved.Network = "net-b"
 	if got := moved.driftReason(labeled, "sha256:aaa"); got != "container_network: runner-net → net-b" {
-		t.Fatalf("配置改网络后仍连着旧网络，未被检出: %q", got)
+		t.Fatalf("still attached to the old network after config change, not detected: %q", got)
 	}
 
-	// 旧版本建的容器没有标签，退回 NetworkMode 推断（它才是 create 时那个参数）
+	// Containers created by an old version have no label, so fall back to inferring from NetworkMode (it is the parameter used at create time)
 	legacy := legacyFactsFor(spec)
 	legacy.Networks = []string{"runner-net", "net-b"}
 	if got := moved.driftReason(legacy, "sha256:aaa"); got != "container_network: runner-net → net-b" {
-		t.Fatalf("旧容器按 NetworkMode 推断未被检出: %q", got)
+		t.Fatalf("old container NetworkMode inference not detected: %q", got)
 	}
 	if got := spec.driftReason(legacy, "sha256:aaa"); got != "" {
-		t.Fatalf("旧容器 NetworkMode 与配置一致时不该报: %q", got)
+		t.Fatalf("old container with NetworkMode matching config should not report: %q", got)
 	}
 
-	// 连 NetworkMode 都拿不到时保持原先的「连着就算数」，宁可漏报也不凭空重建
+	// When NetworkMode is also unavailable, keep the original 'connected counts' check; better to miss a drift than rebuild without cause
 	blind := legacyFactsFor(spec)
 	blind.NetworkMode = ""
 	blind.Networks = []string{"runner-net", "net-b"}
 	if got := moved.driftReason(blind, "sha256:aaa"); got != "" {
-		t.Fatalf("信息不全时不该报漂移: %q", got)
+		t.Fatalf("should not report drift when info is incomplete: %q", got)
 	}
 }
 
-// TestCreateArgs_RecordsNetworkLabel 创建时必须把网络记进标签，否则后续只能靠推断
+// TestCreateArgs_RecordsNetworkLabel: creation must record the network in a label, otherwise later checks can only rely on inference
 func TestCreateArgs_RecordsNetworkLabel(t *testing.T) {
 	spec := hostSocketSpec()
 	args, err := spec.createArgs()
@@ -201,7 +201,7 @@ func TestCreateArgs_RecordsNetworkLabel(t *testing.T) {
 	}
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, labelNetwork+"=runner-net") {
-		t.Fatalf("create 参数缺少网络标签: %s", joined)
+		t.Fatalf("create parameter is missing network label: %s", joined)
 	}
 }
 
@@ -212,19 +212,19 @@ func TestDriftReason_DockerGID(t *testing.T) {
 	changed := spec
 	changed.DockerGID = 983
 	if got := changed.driftReason(facts, "sha256:aaa"); !strings.Contains(got, "983") {
-		t.Fatalf("docker 组 GID 变化未被检出: %q", got)
+		t.Fatalf("docker group GID change not detected: %q", got)
 	}
 
-	// 探测不到 GID 时不追加 --group-add，也就无从比对，不该误报
+	// When the GID can't be probed, don't append --group-add; with nothing to compare against, it must not raise a false alarm
 	unknown := spec
 	unknown.DockerGID = unknownDockerGID
 	if got := unknown.driftReason(facts, "sha256:aaa"); got != "" {
-		t.Fatalf("GID 未知时不该报漂移: %q", got)
+		t.Fatalf("drift must not be reported when GID is unknown: %q", got)
 	}
 }
 
-// TestDriftReason_LegacyContainerWithoutNetworkInfo 旧容器或 inspect 缺字段时保持沉默，
-// 宁可漏报也不能凭空把容器删了重建。
+// TestDriftReason_LegacyContainerWithoutNetworkInfo An old container or one whose inspect lacks fields stays silent,
+// better to miss a drift than to delete and recreate a container on no evidence.
 func TestDriftReason_MissingFieldsStaySilent(t *testing.T) {
 	spec := hostSocketSpec()
 	facts := factsFor(spec)
@@ -232,7 +232,7 @@ func TestDriftReason_MissingFieldsStaySilent(t *testing.T) {
 	facts.ImageRef = ""
 	facts.ImageID = ""
 	if got := spec.driftReason(facts, "sha256:aaa"); got != "" {
-		t.Fatalf("字段缺失时不该报漂移: %q", got)
+		t.Fatalf("drift must not be reported when fields are missing: %q", got)
 	}
 }
 
@@ -253,29 +253,29 @@ func TestParseInspect(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !facts.Running || facts.Status != "running" {
-		t.Fatalf("状态解析错误: %+v", facts)
+		t.Fatalf("status parse error: %+v", facts)
 	}
 	if facts.ImageRef != "img:tag" || facts.ImageID != "sha256:abc" {
-		t.Fatalf("镜像解析错误: %+v", facts)
+		t.Fatalf("image parse error: %+v", facts)
 	}
 	if !containsString(facts.Networks, "runner-net") {
-		t.Fatalf("网络解析错误: %+v", facts.Networks)
+		t.Fatalf("network parse error: %+v", facts.Networks)
 	}
 	if src, ok := bindSource(facts.Binds, runnerMountDest); !ok || src != "/host/runners/a" {
-		t.Fatalf("挂载解析错误: %v", facts.Binds)
+		t.Fatalf("mount parse error: %v", facts.Binds)
 	}
 	if v, ok := envValue(facts.Env, "DOCKER_HOST"); !ok || v != "unix:///var/run/docker.sock" {
-		t.Fatalf("环境变量解析错误: %v", facts.Env)
+		t.Fatalf("environment variable parse error: %v", facts.Env)
 	}
 
-	// 空数组表示容器不存在
+	// An empty array means the container does not exist
 	empty, err := parseInspect([]byte(`[]`))
 	if err != nil || empty != nil {
-		t.Fatalf("空结果应返回 nil, nil，得到 %v, %v", empty, err)
+		t.Fatalf("empty result should return nil, nil, got %v, %v", empty, err)
 	}
 }
 
-// TestDesiredContainerSpec_UsesVolumeHostPath Manager 在容器内时，挂载源必须换算成宿主机路径
+// TestDesiredContainerSpec_UsesVolumeHostPath When the Manager runs inside a container, mount sources must be translated to host paths
 func TestDesiredContainerSpec_UsesVolumeHostPath(t *testing.T) {
 	cfg := &config.Config{Runners: config.RunnersConfig{
 		BasePath:         "/app/runners",
@@ -298,26 +298,26 @@ func TestDesiredContainerSpec_UsesVolumeHostPath(t *testing.T) {
 	}
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "/data/runners/a:/runner") {
-		t.Fatalf("create 参数未使用宿主机路径: %s", joined)
+		t.Fatalf("create parameters do not use host path: %s", joined)
 	}
 }
 
-// TestDriftFromFacts_SkipsNonContainerMode 非容器模式下没有 Runner 容器可言，不该谈漂移
+// TestDriftFromFacts_SkipsNonContainerMode In non-container mode there is no Runner container, so drift should not be discussed
 func TestDriftFromFacts_SkipsNonContainerMode(t *testing.T) {
 	cfg := &config.Config{Runners: config.RunnersConfig{BasePath: "/app/runners"}}
 	spec := hostSocketSpec()
 	if got := driftFromFacts(t.Context(), cfg, "a", "/app/runners/a", "tok", factsFor(spec), resolveImageID); got != "" {
-		t.Fatalf("非容器模式不该报漂移: %q", got)
+		t.Fatalf("drift must not be reported in non-container mode: %q", got)
 	}
 	if got := driftFromFacts(t.Context(), nil, "a", "/app/runners/a", "tok", factsFor(spec), resolveImageID); got != "" {
-		t.Fatalf("配置为空不该报漂移: %q", got)
+		t.Fatalf("drift must not be reported when config is empty: %q", got)
 	}
 }
 
 // TestDriftReason_ImageProvidedDockerHostIsNotOurs
-// 自定义 Runner 镜像在 Dockerfile 里写了 ENV DOCKER_HOST 时，docker inspect 的 Config.Env
-// 里也会有它。若把它当成我们注入的，backend=none 会被反复判成漂移，每次启动都删容器重建。
-// 标签是正解：带标签的容器一律按标签判，镜像自带的 ENV 再也干扰不到。
+// A custom Runner image that sets ENV DOCKER_HOST in its Dockerfile will also show it in Config.Env
+// from docker inspect. If that is mistaken for one we injected, backend=none is repeatedly judged as drift, and the container is deleted and recreated on every start.
+// Labels are the right answer: containers with labels are always judged by their labels, and the image's own ENV can no longer interfere.
 func TestDriftReason_ImageProvidedDockerHostIsNotOurs(t *testing.T) {
 	spec := hostSocketSpec()
 	spec.JobBackend = "none"
@@ -325,20 +325,20 @@ func TestDriftReason_ImageProvidedDockerHostIsNotOurs(t *testing.T) {
 	withLabel := factsFor(spec)
 	withLabel.Env = append(withLabel.Env, "DOCKER_HOST=tcp://my-own-dind:2375")
 	if got := spec.driftReason(withLabel, "sha256:aaa"); got != "" {
-		t.Fatalf("有标签时不该被镜像自带的 DOCKER_HOST 干扰: %q", got)
+		t.Fatalf("drift must not be affected by the image's built-in DOCKER_HOST when labels are present: %q", got)
 	}
 
-	// 真正由我们注入的值要认出来：之前是 host-socket，现在配置成 none
+	// Values we actually injected must be recognized: previously host-socket, now configured as none
 	wasHostSocket := legacyFactsFor(hostSocketSpec())
 	if got := spec.driftReason(wasHostSocket, "sha256:aaa"); got == "" {
-		t.Fatal("host-socket → none 漏报")
+		t.Fatal("host-socket → none missed drift")
 	}
 }
 
 // TestDriftReason_LegacyImageDockerHostSettlesAfterOneRebuild
-// 没有标签的旧容器分不出 DOCKER_HOST 是我们注入的还是镜像自带的（见 looksInjectedDockerHost），
-// 这里选择宁可多重建一次也不漏报。这一次的代价必须是有界的：重建后容器带上标签，
-// 从此走标签比对，不能变成每次启动都重建。
+// Old containers without labels cannot tell whether DOCKER_HOST was injected by us or came from the image (see looksInjectedDockerHost),
+// so we choose to recreate once more rather than miss a drift. The cost of this must be bounded: after recreation the container carries labels,
+// and from then on is compared by labels, so it must not turn into a recreation on every start.
 func TestDriftReason_LegacyImageDockerHostSettlesAfterOneRebuild(t *testing.T) {
 	spec := hostSocketSpec()
 	spec.JobBackend = "none"
@@ -346,51 +346,51 @@ func TestDriftReason_LegacyImageDockerHostSettlesAfterOneRebuild(t *testing.T) {
 	legacy := legacyFactsFor(spec)
 	legacy.Env = append(legacy.Env, "DOCKER_HOST=tcp://my-own-dind:2375")
 	if got := spec.driftReason(legacy, "sha256:aaa"); got == "" {
-		t.Fatal("旧容器上的 tcp://…:2375 一律当作可能是我们注入的，应报漂移")
+		t.Fatal("a tcp://…:2375 on an old container should always be treated as possibly injected by us and reported as drift")
 	}
 
-	// 重建之后：同样的 ENV 还在（none 不会去掉镜像自带的变量），但标签在了
+	// After recreation: the same ENV is still there (none does not strip variables the image sets), but the labels are present
 	rebuilt := factsFor(spec)
 	rebuilt.Env = append(rebuilt.Env, "DOCKER_HOST=tcp://my-own-dind:2375")
 	if got := spec.driftReason(rebuilt, "sha256:aaa"); got != "" {
-		t.Fatalf("重建一次后应当安静下来，否则就是反复重建: %q", got)
+		t.Fatalf("after one recreation it should settle down, otherwise it is repeated recreation: %q", got)
 	}
 }
 
 // TestDriftReason_LegacyDindHostChangedThenNone
-// 旧容器按 dind + dind_host=old-dind 建出来，之后配置改成 none 并且把 dind_host 也换了
-// （不用 dind 了顺手改掉，很自然）。若只认当前的 dind_host，tcp://old-dind:2375 会被当成
-// 与我们无关而漏报，容器于是带着通往旧 DinD 的 DOCKER_HOST 继续跑——none 想断的正是这个。
+// An old container was created with dind and dind_host=old-dind; the config was later changed to none and dind_host was also replaced
+// (dropping dind is a natural thing to change along with it). If only the current dind_host is checked, tcp://old-dind:2375 is treated as
+// unrelated to us and the drift is missed, so the container keeps running with a DOCKER_HOST pointing to the old DinD, which is exactly what none is meant to cut off.
 func TestDriftReason_LegacyDindHostChangedThenNone(t *testing.T) {
 	old := hostSocketSpec()
 	old.JobBackend = "dind"
 	old.DindHost = "old-dind"
-	legacy := legacyFactsFor(old) // DOCKER_HOST=tcp://old-dind:2375，无 socket 挂载
+	legacy := legacyFactsFor(old) // DOCKER_HOST=tcp://old-dind:2375, no socket mount
 
 	for _, nowHost := range []string{"new-dind", "runner-dind"} {
 		now := hostSocketSpec()
 		now.JobBackend = "none"
-		now.DindHost = nowHost // 改成别的地址 / 删掉后回落默认值
+		now.DindHost = nowHost // Changed to another address / falls back to default after removal
 		if got := now.driftReason(legacy, "sha256:aaa"); got == "" {
-			t.Fatalf("dind_host=%s 时漏报：容器仍可达 old-dind，配置却是 none", nowHost)
+			t.Fatalf("dind_host=%s drift missed: container can still reach old-dind while config is none", nowHost)
 		}
 	}
 }
 
-// TestDriftReason_LabelWins 标签与配置不一致即漂移，不必再看 DOCKER_HOST
+// TestDriftReason_LabelWins When labels and config disagree, it is drift; there is no need to look at DOCKER_HOST
 func TestDriftReason_LabelWins(t *testing.T) {
 	spec := hostSocketSpec()
-	facts := factsFor(spec) // 标签记的是 host-socket
+	facts := factsFor(spec) // The label records host-socket
 
 	want := spec
 	want.JobBackend = "dind"
 	got := want.driftReason(facts, "sha256:aaa")
 	if got != "job_docker_backend: host-socket → dind" {
-		t.Fatalf("标签比对结果不对: %q", got)
+		t.Fatalf("label comparison result is wrong: %q", got)
 	}
 }
 
-// TestCreateArgs_RecordsBackendLabel 创建时必须打上标签，否则后续只能靠推断
+// TestCreateArgs_RecordsBackendLabel Labels must be set at create time; otherwise later code can only infer the backend.
 func TestCreateArgs_RecordsBackendLabel(t *testing.T) {
 	for _, backend := range []string{"dind", "host-socket", "none"} {
 		spec := hostSocketSpec()
@@ -401,43 +401,43 @@ func TestCreateArgs_RecordsBackendLabel(t *testing.T) {
 		}
 		want := labelJobBackend + "=" + backend
 		if !containsString(args, want) {
-			t.Fatalf("backend=%s 的 create 参数缺少标签 %s: %v", backend, want, args)
+			t.Fatalf("create args for backend=%s are missing label %s: %v", backend, want, args)
 		}
 	}
 }
 
 // TestDriftReason_MissingAgentToken
-// 本特性之前建的容器没有 AGENT_TOKEN，Agent 退化为不鉴权——同网络里的其它容器就能控制它。
-// 这种容器应当被判为漂移，下次启动时自动补上。
+// Containers created before this feature have no AGENT_TOKEN, so the agent falls back to no auth. Any other container on the same network can control it.
+// Such containers should be flagged as drifted and get the token added automatically on the next start.
 func TestDriftReason_MissingAgentToken(t *testing.T) {
 	spec := hostSocketSpec()
 	spec.AgentToken = "tok-abc"
-	facts := factsFor(spec) // factsFor 不注入 AGENT_TOKEN，正是旧容器的样子
+	facts := factsFor(spec) // factsFor does not inject AGENT_TOKEN, which is exactly what old containers look like
 
 	if got := spec.driftReason(facts, "sha256:aaa"); got != "agent_token: (none) → set" {
-		t.Fatalf("缺少 AGENT_TOKEN 未被检出: %q", got)
+		t.Fatalf("missing AGENT_TOKEN was not detected: %q", got)
 	}
 
-	// 已注入过就不管取值是否相同：令牌轮换属于运行期故障，由探测暴露，不该删容器
+	// Once injected, the value is not compared, whether or not it matches. Token rotation is a runtime failure that probing surfaces; it should not delete the container.
 	withToken := factsFor(spec)
 	withToken.Env = append(withToken.Env, "AGENT_TOKEN=tok-old")
 	if got := spec.driftReason(withToken, "sha256:aaa"); got != "" {
-		t.Fatalf("已注入令牌的容器不该报漂移: %q", got)
+		t.Fatalf("container with an injected token should not be reported as drifted: %q", got)
 	}
 
-	// 手头没有令牌时（读不到文件）不做判断
+	// Make no judgment when no token is available (the file cannot be read)
 	noToken := spec
 	noToken.AgentToken = ""
 	if got := noToken.driftReason(facts, "sha256:aaa"); got != "" {
-		t.Fatalf("没有令牌可注入时不该报漂移: %q", got)
+		t.Fatalf("should not report drift when no token is available to inject: %q", got)
 	}
 }
 
 // TestDriftReason_EmptyAgentTokenCountsAsMissing
-// 「有这个变量」不等于「有令牌」。镜像里一句 ENV AGENT_TOKEN= 就会让变量存在而取值为空，
-// Agent 侧 TrimSpace 后当作未配置，转去读挂载的 .agent_token；读不到（root 拥有的 0600，
-// 正是本项要修的迁移场景）就完全不鉴权，而且没有任何 401 能暴露它。
-// 只看键在不在的话，这种容器会永远绕过重建，本项的修复对它等于没做。
+// Having the variable is not the same as having a token. An ENV AGENT_TOKEN= line in the image makes the variable exist with an empty value,
+// The agent side TrimSpaces it and treats it as unconfigured, then falls back to reading the mounted .agent_token. If that cannot be read (root-owned 0600,
+// exactly the migration case this change fixes), auth is skipped entirely, and no 401 exposes it.
+// If only key presence is checked, such containers would bypass recreation forever, and this fix would do nothing for them.
 func TestDriftReason_EmptyAgentTokenCountsAsMissing(t *testing.T) {
 	spec := hostSocketSpec()
 	spec.AgentToken = "tok-abc"
@@ -446,14 +446,14 @@ func TestDriftReason_EmptyAgentTokenCountsAsMissing(t *testing.T) {
 		facts := factsFor(spec)
 		facts.Env = append(facts.Env, "AGENT_TOKEN="+v)
 		if got := spec.driftReason(facts, "sha256:aaa"); got != "agent_token: (none) → set" {
-			t.Fatalf("AGENT_TOKEN=%q（Agent 判定为未配置）未被检出: %q", v, got)
+			t.Fatalf("AGENT_TOKEN=%q (agent treats it as unconfigured) was not detected: %q", v, got)
 		}
 	}
 
-	// 对照：非空取值仍然只看「有」，不比对是否与当前令牌相同
+	// Contrast: a non-empty value still only checks presence and does not compare whether it matches the current token
 	ok := factsFor(spec)
 	ok.Env = append(ok.Env, "AGENT_TOKEN=tok-old")
 	if got := spec.driftReason(ok, "sha256:aaa"); got != "" {
-		t.Fatalf("非空令牌不该因取值不同而报漂移: %q", got)
+		t.Fatalf("non-empty token should not be reported as drifted just because its value differs: %q", got)
 	}
 }

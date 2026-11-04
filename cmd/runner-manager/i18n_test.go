@@ -20,7 +20,7 @@ func i18nLangs(t *testing.T) []string {
 	}
 	sort.Strings(langs)
 	if len(langs) < 2 {
-		t.Fatalf("内嵌语言文件只有 %v，嵌入声明可能没生效", langs)
+		t.Fatalf("Embedded language file only has %v, so the embed declaration may not have taken effect", langs)
 	}
 	return langs
 }
@@ -29,27 +29,27 @@ func TestLoadI18n_AllEmbeddedFilesParse(t *testing.T) {
 	for _, lang := range i18nLangs(t) {
 		m, err := loadI18n(lang)
 		if err != nil {
-			t.Errorf("%s.json 解析失败: %v", lang, err)
+			t.Errorf("%s.json failed to parse: %v", lang, err)
 			continue
 		}
 		if len(m) == 0 {
-			t.Errorf("%s.json 里没有任何键", lang)
+			t.Errorf("%s.json has no keys at all", lang)
 		}
 	}
 }
 
 func TestLoadI18n_UnknownLangErrors(t *testing.T) {
 	if _, err := loadI18n("does-not-exist"); err == nil {
-		t.Fatal("未知语言应报错，由调用方回落到 en")
+		t.Fatal("Unknown language should error so the caller falls back to en")
 	}
-	// 路径拼接不该被 .. 带出 i18n 目录
+	// Path joining must not let .. escape the i18n directory
 	if _, err := loadI18n("../go"); err == nil {
-		t.Fatal("带 .. 的语言名不应读到 i18n 之外的文件")
+		t.Fatal("A language name containing .. must not read files outside i18n")
 	}
 }
 
-// 少一个键在界面上是一处空白，不会报错，所以只能靠用例守。
-// 新增文案时漏掉某个语言正是最容易发生的疏忽。
+// A missing key shows up as a blank spot in the UI without any error, so only the test cases can catch it.
+// Forgetting a language when adding new copy is the most likely slip.
 func TestLoadI18n_AllLanguagesHaveSameKeys(t *testing.T) {
 	en, err := loadI18n("en")
 	if err != nil {
@@ -77,15 +77,15 @@ func TestLoadI18n_AllLanguagesHaveSameKeys(t *testing.T) {
 		sort.Strings(missing)
 		sort.Strings(extra)
 		if len(missing) > 0 {
-			t.Errorf("%s.json 相对 en.json 缺少: %v", lang, missing)
+			t.Errorf("%s.json is missing these keys relative to en.json: %v", lang, missing)
 		}
 		if len(extra) > 0 {
-			t.Errorf("%s.json 有 en.json 里没有的键: %v", lang, extra)
+			t.Errorf("%s.json has keys that en.json does not: %v", lang, extra)
 		}
 	}
 }
 
-// 空值和缺失一样是一处空白
+// An empty value is a blank spot, same as a missing one
 func TestLoadI18n_NoBlankValues(t *testing.T) {
 	for _, lang := range i18nLangs(t) {
 		m, err := loadI18n(lang)
@@ -94,7 +94,7 @@ func TestLoadI18n_NoBlankValues(t *testing.T) {
 		}
 		for k, v := range m {
 			if strings.TrimSpace(v) == "" {
-				t.Errorf("%s.json 的 %q 是空值", lang, k)
+				t.Errorf("%s.json has an empty value for %q", lang, k)
 			}
 		}
 	}
@@ -102,14 +102,14 @@ func TestLoadI18n_NoBlankValues(t *testing.T) {
 
 var (
 	tplKeyRe = regexp.MustCompile(`\{\{index \$?\.T "([^"]+)"\}\}`)
-	// JS 侧的 t('xxx.yyy')：要求带点，免得把 createElement('div') 这类误当成键
+	// JS-side t('xxx.yyy'): require a dot so that things like createElement('div') are not mistaken for keys
 	jsKeyRe = regexp.MustCompile(`\bt\('([a-z][a-z_]*\.[a-zA-Z_0-9]+)'\)`)
 )
 
-// 模板里引用了却不存在的键，渲染出来就是一段空白，不会有任何报错。
+// A key referenced in the template but not defined renders as a blank spot, with no error at all.
 //
-// 脚本已从 index.html 拆到 static/app.js，两边都要扫：只扫模板的话，
-// app.js 里写错一个键同样不会报错，界面上就是一处空白。
+// The script has been split out of index.html into static/app.js, so both must be scanned. Scanning only the template,
+// A wrong key in app.js likewise produces no error, just a blank spot in the UI.
 func TestTemplateKeysExistInI18n(t *testing.T) {
 	tpl, err := templateFS.ReadFile("templates/index.html")
 	if err != nil {
@@ -132,12 +132,12 @@ func TestTemplateKeysExistInI18n(t *testing.T) {
 		used[m[1]] = true
 		jsUsed++
 	}
-	// 脚本拆出去之后最容易发生的疏忽是这里只剩模板、忘了跟着扫 app.js
+	// The easiest slip after splitting out the script is leaving only the template here and forgetting to scan app.js too
 	if jsUsed == 0 {
-		t.Fatal("没有从 static/app.js 里提取到任何 i18n 键，扫描范围或正则可能失效了")
+		t.Fatal("No i18n keys were extracted from static/app.js; the scan scope or regex may have broken")
 	}
 	if len(used) == 0 {
-		t.Fatal("没有从模板里提取到任何 i18n 键，正则可能失效了")
+		t.Fatal("No i18n keys were extracted from the template; the regex may have broken")
 	}
 	var missing []string
 	for k := range used {
@@ -147,6 +147,6 @@ func TestTemplateKeysExistInI18n(t *testing.T) {
 	}
 	sort.Strings(missing)
 	if len(missing) > 0 {
-		t.Fatalf("模板或脚本引用了 en.json 里没有的键: %v", missing)
+		t.Fatalf("Template or script references keys that do not exist in en.json: %v", missing)
 	}
 }

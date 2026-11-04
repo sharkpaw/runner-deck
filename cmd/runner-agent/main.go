@@ -1,5 +1,5 @@
-// Runner Agent：运行在 Runner 容器内，职责仅为 Runner 进程控制（启动/停止）与健康/状态上报（/status、/health），供 Manager 通过 HTTP 调用。
-// 环境变量：RUNNER_INSTALL_DIR（默认 /runner）、AGENT_PORT（默认 8081）
+// Runner Agent: runs inside the runner container and only controls the Runner process (start/stop) and reports health/status (/status, /health). The Manager calls it over HTTP.
+// Environment variables: RUNNER_INSTALL_DIR (default /runner), AGENT_PORT (default 8081)
 package main
 
 import (
@@ -53,12 +53,12 @@ func getStatus(installDir string) (status string, running bool) {
 	if _, err := os.Stat(runnerFile); err != nil {
 		return "new", false
 	}
-	// 不看 pid 文件：actions/runner 不写这种文件（见 internal/runnerproc 的包注释），
-	// 照着找必然找不到，于是每个 runner 都报「未运行」，Manager 每 5 分钟就再拉起一次。
+	// Don't look for a pid file: actions/runner doesn't write one (see the package comment in internal/runnerproc),
+	// so the lookup always fails, every runner reports "not running", and the Manager relaunches it every 5 minutes.
 	return "installed", runnerproc.Running(installDir)
 }
 
-// startMu 串行化 /start 的「查-起」两步，见 handleStart
+// startMu serializes the check-then-start steps of /start, see handleStart
 var startMu sync.Mutex
 
 func startRunner(installDir string) error {
@@ -68,7 +68,7 @@ func startRunner(installDir string) error {
 	}
 	cmd := exec.Command(script)
 	cmd.Dir = installDir
-	// run.sh 跑的是用户的 Job：不能把注入给 Agent 的 AGENT_TOKEN 传下去，见 internal/childenv
+	// run.sh runs the user's Job: the AGENT_TOKEN injected into the Agent must not be passed down, see internal/childenv
 	cmd.Env = childenv.Environ()
 	if runtime.GOOS != "windows" {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -80,9 +80,9 @@ func startRunner(installDir string) error {
 	return nil
 }
 
-// stopRunner 向该安装目录下的所有 Runner 进程发 SIGTERM。
-// runnerproc.Find 把 run.sh 排在 Runner.Listener 之前，先停监护脚本，
-// 它的 while 循环才不会在监听器退出后又拉起一个新的。
+// stopRunner sends SIGTERM to all Runner processes under this install directory.
+// runnerproc.Find places run.sh before Runner.Listener, so the supervisor script is stopped first,
+// otherwise its while loop would start a new listener after the old one exits.
 func stopRunner(installDir string) error {
 	pids := runnerproc.Find(installDir)
 	if len(pids) == 0 {
@@ -97,7 +97,7 @@ func stopRunner(installDir string) error {
 			}
 			continue
 		}
-		// 扫描与发信号之间进程可能自己退了，这不算失败
+		// A process may exit between the scan and the signal; that is not a failure
 		if err := process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			if firstErr == nil {
 				firstErr = err
@@ -128,8 +128,8 @@ func handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dir := installDir()
-	// 「检查是否在跑」与「拉起」必须是一个原子段：Manager 的定时巡检、注册完成后的
-	// 启动和界面点击都可能同时打到这里，各自都看到「没在跑」就会各拉起一个 run.sh。
+	// The "is it running?" check and the launch must be one atomic section: the Manager's periodic checks, the
+	// start after registration completes, and UI clicks can all hit this at once, and if each sees "not running" each would launch a run.sh.
 	startMu.Lock()
 	defer startMu.Unlock()
 	if _, run := getStatus(dir); run {
@@ -159,21 +159,21 @@ func handleStop(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"message":"stop signal sent"}`))
 }
 
-// agentTokenFile 与 Manager 侧 runner.AgentTokenFile 保持一致：
-// 令牌由 Manager 写入挂载目录，Agent 从自己的 RUNNER_INSTALL_DIR 读取。
+// agentTokenFile must match runner.AgentTokenFile on the Manager side:
+// the Manager writes the token to the mounted directory, and the Agent reads it from its own RUNNER_INSTALL_DIR.
 const agentTokenFile = ".agent_token"
 
-// expectedToken 返回本 Agent 要求的令牌：优先环境变量，其次安装目录下的令牌文件。
-// 返回空字符串表示凭据不可用；控制接口必须拒绝请求。
+// expectedToken returns the token this Agent requires: the environment variable first, then the token file in the install directory.
+// An empty string means the credential is unavailable; control endpoints must reject requests.
 func expectedToken() string {
-	// 优先环境变量：Manager 创建容器时注入，不依赖挂载文件的 UID 可读性
+	// Environment variable first: the Manager injects it when creating the container, so it doesn't depend on the mounted file being readable by this UID.
 	if t := strings.TrimSpace(os.Getenv("AGENT_TOKEN")); t != "" {
 		return t
 	}
 	path := filepath.Join(installDir(), agentTokenFile)
 	b, err := os.ReadFile(path)
 	if err != nil {
-		// 文件不存在或不可读时，不得将读取失败解释为无需认证。
+		// If the file is missing or unreadable, the read failure must not be interpreted as "no authentication needed".
 		if !os.IsNotExist(err) {
 			logTokenUnreadable(path, err)
 		}
@@ -182,7 +182,7 @@ func expectedToken() string {
 	return strings.TrimSpace(string(b))
 }
 
-// tokenWarnOnce 保证权限告警只打一次，避免被状态轮询刷屏
+// tokenWarnOnce ensures the permission warning is logged only once, so status polling doesn't flood the log
 var tokenWarnOnce sync.Once
 
 func logTokenUnreadable(path string, err error) {
@@ -193,15 +193,15 @@ func logTokenUnreadable(path string, err error) {
 	})
 }
 
-// bearerPrefix Authorization 头里的认证 scheme；按 RFC 7235，scheme 名大小写不敏感
+// bearerPrefix is the auth scheme in the Authorization header; per RFC 7235 the scheme name is case-insensitive
 const bearerPrefix = "Bearer "
 
-// bearerToken 取出 `Authorization: Bearer <token>` 里的令牌，不是这个 scheme 时返回空串。
+// bearerToken extracts the token from `Authorization: Bearer <token>`, and returns an empty string if the scheme is not Bearer.
 //
-// 以前这里用 strings.TrimPrefix，而它在前缀不存在时原样返回整个字符串——于是一个
-// 不带 scheme 的裸令牌也能通过。那不构成漏洞（调用方照样得先有那串密钥），
-// 但文档六种语言都写着 `Authorization: Bearer`，Manager 发的也一直是 Bearer
-// （见 runner.setAgentAuth）：代码比自己的文档更松，没有道理。
+// This used to use strings.TrimPrefix, which returns the whole string unchanged when the prefix is missing, so a
+// bare token with no scheme would also pass. That isn't a vulnerability (the caller still needs the secret string),
+// but all six language docs say `Authorization: Bearer`, and the Manager has always sent Bearer
+// (see runner.setAgentAuth): the code was looser than its own documentation, with no good reason.
 func bearerToken(header string) string {
 	h := strings.TrimSpace(header)
 	if len(h) < len(bearerPrefix) || !strings.EqualFold(h[:len(bearerPrefix)], bearerPrefix) {
@@ -210,8 +210,8 @@ func bearerToken(header string) string {
 	return strings.TrimSpace(h[len(bearerPrefix):])
 }
 
-// requireToken 包装控制类接口；令牌不可用时失败关闭，否则要求 Bearer 匹配。
-// 每次请求重新读取令牌，便于 Manager 在容器启动后才写入令牌的场景。
+// requireToken wraps the control endpoints; it fails closed when the token is unavailable, otherwise it requires a matching Bearer token.
+// The token is re-read on every request, for the case where the Manager writes it after the container has started.
 func requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		want := expectedToken()
@@ -230,14 +230,14 @@ func requireToken(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// newAgentMux 挂载 Agent 的全部路由。
+// newAgentMux registers all of the Agent's routes.
 //
-// 用独立的 mux 而不是 http.DefaultServeMux：DefaultServeMux 是包级全局变量，
-// 同一进程里注册两次同一路径会 panic，测试因此只能起一个 server；换成独立 mux
-// 之后 newAgentServer 可以被反复构造，超时字段也才测得出来。
+// Use a dedicated mux instead of http.DefaultServeMux: DefaultServeMux is a package-level global,
+// and registering the same path twice in one process panics, so tests could only start one server. With a separate mux
+// newAgentServer can be constructed repeatedly, which also makes the timeout fields testable.
 func newAgentMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	// 控制类接口需要令牌；/health 保持开放，供容器 HEALTHCHECK 使用
+	// Control endpoints require the token; /health stays open for the container HEALTHCHECK
 	mux.HandleFunc("/status", requireToken(handleStatus))
 	mux.HandleFunc("/start", requireToken(handleStart))
 	mux.HandleFunc("/stop", requireToken(handleStop))
@@ -248,16 +248,16 @@ func newAgentMux() *http.ServeMux {
 	return mux
 }
 
-// newAgentServer 构造带超时的 HTTP 服务。
+// newAgentServer builds the HTTP server with timeouts.
 //
-// 不设超时的 http.Server 会无限期地等一个不再说话的对端：一个半开的 TCP 连接
-// 就能占住一个 goroutine 和一个 fd 直到进程结束，而 Runner 容器是长期存活的。
-// Agent 的处理函数全部即时返回（查进程表、发信号），所以这里可以给得很紧。
+// An http.Server without timeouts waits indefinitely on a peer that has stopped talking: a half-open TCP connection
+// can hold a goroutine and a file descriptor until the process exits, and the Runner container is long-lived.
+// Every Agent handler returns immediately (looks up the process table, sends signals), so the timeouts can be tight.
 func newAgentServer(port string, mux *http.ServeMux) *http.Server {
 	return &http.Server{
 		Addr:    ":" + port,
 		Handler: mux,
-		// 只有 Manager 会连过来，请求体最大也就是个空 POST
+		// Only the Manager connects, and its requests are at most an empty POST
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -266,20 +266,20 @@ func newAgentServer(port string, mux *http.ServeMux) *http.Server {
 	}
 }
 
-// shutdown 让正在跑的 Job 有机会收尾，然后关掉 HTTP 服务。
+// shutdown gives a running Job a chance to finish, then closes the HTTP server.
 //
-// 这是 docker stop -t <宽限期> 真正落到 Runner 身上的那一环。Agent 是容器里的
-// PID 1（经 tini 转发），SIGTERM 先到它这里；它要是像以前那样直接退出，内核就会
-// 对 PID namespace 里剩下的进程一律 SIGKILL——run.sh 与 Runner.Listener 连
-// SIGTERM 都收不到，Job 不会被优雅取消，GitHub 那边只能等「失去通信」超时。
+// This is the link where docker stop -t <grace period> actually reaches the Runner. The Agent is PID 1 in the container
+// (forwarding through tini), so SIGTERM arrives here first; if it exits immediately as it used to, the kernel would
+// Kill everything left in the PID namespace with SIGKILL. run.sh and Runner.Listener
+// do not receive SIGTERM, so the Job is not canceled gracefully and GitHub can only wait for the "lost communication" timeout.
 //
-// 返回 true 表示 Runner 在 grace 内退干净了。
+// Returns true if the Runner exited cleanly within the grace period.
 func shutdown(ctx context.Context, dir string, grace time.Duration) bool {
 	if !runnerproc.Running(dir) {
 		return true
 	}
-	// stopRunner 按「监护脚本先于监听器」的顺序发 SIGTERM，这个顺序必须保留：
-	// 反过来先停监听器，run.sh 的 while 循环会立刻再拉起一个新的。
+	// stopRunner sends SIGTERM in the order "supervisor script before listener". This order must be kept:
+	// if the listener is stopped first, the while loop in run.sh immediately starts a new one.
 	if err := stopRunner(dir); err != nil {
 		log.Printf("sending SIGTERM to the runner failed: %v", err)
 	}
@@ -297,9 +297,9 @@ func shutdown(ctx context.Context, dir string, grace time.Duration) bool {
 	return !runnerproc.Running(dir)
 }
 
-// runnerPollInterval 是等 Runner 退出时的轮询间隔。
-// 每次轮询都要扫一遍 procfs，200ms 已经足够快（相对几十秒的宽限期），
-// 又不至于在一个正忙着收尾的容器里跟 Job 抢 CPU。
+// runnerPollInterval is the polling interval used while waiting for the Runner to exit.
+// Each poll scans procfs, so 200ms is fast enough (relative to a grace period of tens of seconds)
+// without competing with the Job for CPU in a container that is busy shutting down.
 const runnerPollInterval = 200 * time.Millisecond
 
 func main() {
@@ -314,8 +314,8 @@ func main() {
 	}
 	log.Printf("Runner Agent listening on :%s, RUNNER_INSTALL_DIR=%s, endpoint auth %s", port, installDir(), authState)
 
-	// 先订阅再监听：容器刚起就被 docker stop 时，信号也不会落到「未订阅 = 直接退出」
-	// 的默认行为上。Go 运行时对未 Notify 的 SIGTERM 就是立刻终止进程。
+	// Subscribe before listening: if docker stop arrives right after the container starts, the signal
+	// must not fall through to the default behavior for unsubscribed signals. The Go runtime terminates the process immediately on an unhandled SIGTERM.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
 

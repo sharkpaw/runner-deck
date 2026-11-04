@@ -7,21 +7,21 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/config"
 )
 
-// githubWebBase 做成变量仅为测试；GitHub Enterprise 另说，本工具目前只对 github.com
+// githubWebBase is a variable only for testing; GitHub Enterprise is separate, and this tool currently supports only github.com
 var githubWebBase = "https://github.com"
 
-// GitHubSettingsURL 拼出该目标在 GitHub 上的 Actions Runners 设置页地址。
+// GitHubSettingsURL builds the address of this target's Actions Runners settings page on GitHub.
 //
-// 指向列表页而不是 /runners/<id> 那样的单个 Runner 页：Runner 的数字 id 只在
-// 查询 GitHub 时才拿得到，没配 PAT 的部署根本没有它，做成「有时能跳、有时跳不了」
-// 不如始终跳到那一页——要找的 Runner 就在上面。
+// It points to the list page, not a single runner page such as /runners/<id>: a runner's numeric id
+// is only available when querying GitHub, and deployments without a PAT don't have it at all, so the link would sometimes work and sometimes not.
+// Always going to the list page is more reliable, since the runner being looked for is listed there.
 //
-// 目标非法时返回空串，由调用方决定不渲染链接。这里不能返回一个半成品 URL：
-// 界面上一个点了 404 的链接比没有链接更难判断问题出在哪。
+// Returns an empty string for an invalid target, and the caller decides not to render the link. It must not return a half-built URL:
+// a link that 404s on click is harder to diagnose than no link at all.
 //
-// 逐段转义，理由与 githubcheck.runnersEndpoint 相同：ValidateTarget 只管 / 与空值，
-// 不限制字符集。前缀是写死的 https://github.com，所以协议不可能被 target 改写——
-// 这也是模板敢把它放进 href 的前提。
+// Each segment is escaped, for the same reason as githubcheck.runnersEndpoint: ValidateTarget only checks / and empty values,
+// and does not restrict the character set. The prefix is hardcoded to https://github.com, so the protocol cannot be rewritten by target;
+// this is also why the template is allowed to put it in href.
 func GitHubSettingsURL(targetType, target string) string {
 	tt := strings.ToLower(strings.TrimSpace(targetType))
 	raw := strings.TrimSpace(target)

@@ -13,8 +13,8 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/config"
 )
 
-// newFakeRunnerDir 造一个像已注册 runner 的目录：有 .runner，有一个会常驻的 run.sh。
-// run.sh 刻意不 exec，好让 bash 留在进程表里，argv 与 actions/runner 的形态一致。
+// newFakeRunnerDir creates a directory that looks like a registered runner: it has a .runner file and a run.sh that stays resident.
+// run.sh deliberately does not exec, so bash stays in the process table, with an argv that matches the shape used by actions/runner.
 func newFakeRunnerDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -31,7 +31,7 @@ func startFakeRunner(t *testing.T, dir string) *exec.Cmd {
 	cmd.Dir = dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("启动假 run.sh 失败: %v", err)
+		t.Fatalf("Failed to start fake run.sh: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -54,39 +54,39 @@ func waitUntil(cond func() bool) bool {
 func requireLinux(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
-		t.Skip("进程探测依赖 /proc，仅在 Linux 上验证")
+		t.Skip("Process detection relies on /proc, verified on Linux only")
 	}
 	if _, err := os.Stat("/proc/self/cmdline"); err != nil {
-		t.Skip("当前环境没有可用的 /proc")
+		t.Skip("No usable /proc in this environment")
 	}
 }
 
-// 这是「每 5 分钟重复拉起」那个 bug 的直接回归用例：
-// runner 在跑的时候 getStatus 必须报 running=true，否则后台巡检
-// （info.Status == StatusInstalled && !info.Running）会一轮一轮地再拉起它
+// This is the direct regression case for the "relaunched every 5 minutes" bug:
+// While the runner is running, getStatus must report running=true; otherwise the background
+// check (info.Status == StatusInstalled && !info.Running) keeps relaunching it, round after round.
 func TestGetStatus_RunningRunnerReportsRunning(t *testing.T) {
 	requireLinux(t)
 	dir := newFakeRunnerDir(t)
 
 	status, running := getStatus(dir)
 	if status != StatusInstalled {
-		t.Fatalf("有 .runner 时状态应为 %q，得到 %q", StatusInstalled, status)
+		t.Fatalf("With a .runner present, status should be %q, got %q", StatusInstalled, status)
 	}
 	if running {
-		t.Fatal("还没启动进程，running 应为 false")
+		t.Fatal("No process started yet, running should be false")
 	}
 
 	startFakeRunner(t, dir)
 	if !waitUntil(func() bool { _, r := getStatus(dir); return r }) {
-		t.Fatal("run.sh 已在运行，getStatus 仍报 running=false —— 后台巡检会反复重复拉起它")
+		t.Fatal("run.sh is already running, but getStatus still reports running=false -- the background check keeps relaunching it")
 	}
 	if status, _ := getStatus(dir); status != StatusInstalled {
-		t.Fatalf("运行中状态应仍为 %q，得到 %q", StatusInstalled, status)
+		t.Fatalf("Running status should still be %q, got %q", StatusInstalled, status)
 	}
 }
 
-// actions/runner 不写 pid 文件，.path 装的是 PATH 字符串。
-// 目录里放什么都不能让一个没在跑的 runner 被判成在跑。
+// actions/runner does not write a pid file; .path holds the PATH string.
+// Nothing placed in the directory may cause a runner that is not running to be judged as running.
 func TestGetStatus_PidLookalikeFilesDoNotFakeRunning(t *testing.T) {
 	requireLinux(t)
 	dir := newFakeRunnerDir(t)
@@ -99,51 +99,51 @@ func TestGetStatus_PidLookalikeFilesDoNotFakeRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, running := getStatus(dir); running {
-		t.Fatal("目录里的 pid 文件不应让没在跑的 runner 被判成在跑")
+		t.Fatal("A pid file in the directory must not make a runner that isn't running look running")
 	}
 }
 
-// 同一宿主机上的两个 runner 不能互相串
+// Two runners on the same host must not get mixed up with each other.
 func TestGetStatus_RunnersDoNotSeeEachOther(t *testing.T) {
 	requireLinux(t)
 	a, b := newFakeRunnerDir(t), newFakeRunnerDir(t)
 	startFakeRunner(t, a)
 	if !waitUntil(func() bool { _, r := getStatus(a); return r }) {
-		t.Fatal("a 应判定为运行中")
+		t.Fatal("a should be judged running")
 	}
 	if _, running := getStatus(b); running {
-		t.Fatal("b 没有进程，不应被 a 的进程带成运行中")
+		t.Fatal("b has no process and must not be marked running by a's process")
 	}
 }
 
-// 修复前 Stop 走的是 readRunnerPid，pid 文件永远不存在，
-// 所以默认模式下界面上的「停止」必然报「未找到 runner pid 文件或 pid 无效」
+// Before the fix, Stop went through readRunnerPid, and the pid file never exists,
+// So in default mode, "Stop" in the UI always reports "runner pid file not found or pid invalid"
 func TestStop_TerminatesRunningRunner(t *testing.T) {
 	requireLinux(t)
 	dir := newFakeRunnerDir(t)
 	startFakeRunner(t, dir)
 	if !waitUntil(func() bool { _, r := getStatus(dir); return r }) {
-		t.Fatal("准备阶段：runner 应处于运行中")
+		t.Fatal("Setup phase: runner should be running")
 	}
 	if err := Stop(dir); err != nil {
-		t.Fatalf("Stop 失败: %v", err)
+		t.Fatalf("Stop failed: %v", err)
 	}
 	if !waitUntil(func() bool { _, r := getStatus(dir); return !r }) {
-		t.Fatal("Stop 之后 runner 仍在运行")
+		t.Fatal("Runner still running after Stop")
 	}
 }
 
-// 没在跑的时候 Stop 要说清楚，不能默默成功
+// When nothing is running, Stop must say so clearly rather than succeed silently.
 func TestStop_NotRunningReportsError(t *testing.T) {
 	requireLinux(t)
 	dir := newFakeRunnerDir(t)
 	if err := Stop(dir); err == nil {
-		t.Fatal("没有进程在跑时 Stop 应返回错误")
+		t.Fatal("Stop should return an error when no process is running")
 	}
 }
 
-// List 对一整批 runner 只扫一遍 /proc，分派必须正确：
-// 跑着的那个报 running，没跑的那个不能被它带成 running
+// List scans /proc only once for the whole batch of runners, so dispatch must be correct:
+// the one that is running reports running, and the one that is not must not be marked running by it.
 func TestList_PerRunnerRunningStateInDefaultMode(t *testing.T) {
 	requireLinux(t)
 	base := t.TempDir()
@@ -152,7 +152,7 @@ func TestList_PerRunnerRunningStateInDefaultMode(t *testing.T) {
 		Items: []config.RunnerItem{
 			{Name: "alpha", Path: "alpha"},
 			{Name: "beta", Path: "beta"},
-			{Name: "gamma", Path: "gamma"}, // 目录都不建，应为 missing
+			{Name: "gamma", Path: "gamma"}, // Create no directories at all; should be missing.
 		},
 	}}
 	for _, name := range []string{"alpha", "beta"} {
@@ -175,7 +175,7 @@ func TestList_PerRunnerRunningStateInDefaultMode(t *testing.T) {
 		}
 		return false
 	}) {
-		t.Fatal("alpha 已启动，List 仍报未运行")
+		t.Fatal("alpha started, but List still reports not running")
 	}
 
 	byName := map[string]RunnerInfo{}
@@ -183,17 +183,17 @@ func TestList_PerRunnerRunningStateInDefaultMode(t *testing.T) {
 		byName[info.Name] = info
 	}
 	if got := byName["alpha"]; got.Status != StatusInstalled || !got.Running {
-		t.Fatalf("alpha 应为 installed/true，得到 %q/%v", got.Status, got.Running)
+		t.Fatalf("alpha should be installed/true, got %q/%v", got.Status, got.Running)
 	}
 	if got := byName["beta"]; got.Status != StatusInstalled || got.Running {
-		t.Fatalf("beta 应为 installed/false，得到 %q/%v —— 不能被 alpha 的进程带成运行中", got.Status, got.Running)
+		t.Fatalf("beta should be installed/false, got %q/%v -- must not be marked running by alpha's process", got.Status, got.Running)
 	}
 	if got := byName["gamma"]; got.Status != StatusMissing || got.Running {
-		t.Fatalf("gamma 目录不存在，应为 missing/false，得到 %q/%v", got.Status, got.Running)
+		t.Fatalf("gamma directory does not exist, should be missing/false, got %q/%v", got.Status, got.Running)
 	}
 }
 
-// 未注册的目录（没有 .runner）不该因为目录里恰好有进程就被判成 installed
+// An unregistered directory (no .runner) must not be judged installed just because it happens to contain a process.
 func TestList_UnregisteredDirStaysNew(t *testing.T) {
 	requireLinux(t)
 	base := t.TempDir()
@@ -209,24 +209,24 @@ func TestList_UnregisteredDirStaysNew(t *testing.T) {
 	}}
 	list := List(cfg)
 	if len(list) != 1 || list[0].Status != StatusNew || list[0].Running {
-		t.Fatalf("没有 .runner 时应为 new/false，得到 %+v", list)
+		t.Fatalf("With no .runner, should be new/false, got %+v", list)
 	}
 }
 
-// writeBlockingRunScript 写一个会一直挂住、且**不产生任何子进程**的 run.sh。
+// writeBlockingRunScript writes a run.sh that blocks indefinitely and **spawns no child processes at all**.
 //
-// 不能用 `sleep 120`：bash 会 fork 一个子进程去 exec sleep，而在 fork 与 execve 之间，
-// 子进程的 /proc/<pid>/cmdline 仍是 bash 的 argv（`/bin/bash <dir>/run.sh`），
-// 于是被认成第二个监护脚本。窗口只有几微秒，本机几乎碰不到，CI 上机器一忙就中招——
-// 「10 次 /start 之后应只有 1 个 runner 进程，实际 2 个: [2727 2728]」正是这么来的。
+// Do not use `sleep 120`: bash forks a child process to exec sleep, and between fork and execve,
+// the child's /proc/<pid>/cmdline still shows bash's argv (`/bin/bash <dir>/run.sh`),
+// so it gets counted as a second supervisor script. The window is only a few microseconds, so it almost never hits locally, but on a busy CI machine it does —
+// "after 10 /start calls there should be only 1 runner process, but there are 2: [2727 2728]" is exactly how this happened.
 //
-// read 是 builtin，重定向由当前 shell 自己完成，打开一个没有写端的 FIFO 会就地阻塞，
-// 全程不 fork，进程数因此是确定的。
+// read is a builtin, and the redirect is handled by the current shell itself; opening a FIFO with no writer blocks in place,
+// Never forks, so the process count is deterministic.
 func writeBlockingRunScript(t *testing.T, dir string) {
 	t.Helper()
 	fifo := filepath.Join(dir, ".test-block")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatalf("创建 FIFO 失败: %v", err)
+		t.Fatalf("Failed to create FIFO: %v", err)
 	}
 	script := "#!/bin/bash\nread -r -t 120 < \"" + fifo + "\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte(script), 0o755); err != nil {

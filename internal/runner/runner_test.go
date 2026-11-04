@@ -38,11 +38,11 @@ func TestList_WithItems(t *testing.T) {
 	if list[1].Name != "r2" || list[1].InstallDir != filepath.Join(base, "custom") {
 		t.Errorf("list[1]: %+v", list[1])
 	}
-	// 目录不存在时应为 StatusMissing
+	// Should be StatusMissing when the directory does not exist
 	if list[0].Status != StatusMissing {
 		t.Errorf("expected StatusMissing for missing dir, got %s", list[0].Status)
 	}
-	// 非容器模式下不应暴露 job_docker_backend
+	// job_docker_backend must not be exposed in non-container mode
 	if list[0].JobDockerBackend != "" || list[1].JobDockerBackend != "" {
 		t.Errorf("expected empty JobDockerBackend in non-container mode, got %q and %q", list[0].JobDockerBackend, list[1].JobDockerBackend)
 	}
@@ -123,7 +123,7 @@ func TestEnsureRunnerDir(t *testing.T) {
 	if dir != filepath.Join(base, "r1") {
 		t.Errorf("dir = %q", dir)
 	}
-	// 子路径
+	// Subpath
 	dir2, err := EnsureRunnerDir(cfg, "r2", "sub/r2")
 	if err != nil {
 		t.Fatal(err)
@@ -131,11 +131,11 @@ func TestEnsureRunnerDir(t *testing.T) {
 	absBase, _ := filepath.Abs(base)
 	rel, _ := filepath.Rel(absBase, dir2)
 	if rel != "sub" && rel != filepath.Join("sub", "r2") {
-		// Clean 可能合并为 sub
+		// Clean may collapse it to sub
 		t.Logf("dir2=%q rel=%q", dir2, rel)
 	}
 
-	// 路径穿越被 sanitize：含 .. 时使用 name 作为目录，结果仍在 base 下
+	// Path traversal is sanitized: when it contains .., name is used as the directory, and the result stays under base
 	dir3, err := EnsureRunnerDir(cfg, "evil", "../../etc")
 	if err != nil {
 		t.Fatal(err)
@@ -146,13 +146,13 @@ func TestEnsureRunnerDir(t *testing.T) {
 	}
 }
 
-// 配置为空时不能 panic。ListWithLiveStatus 里原本就有 cfg == nil 的判断，
-// 但它排在 List(cfg) 之后，而 List 会先读 cfg.Runners —— 那句判断成了永远走不到的死代码。
+// Must not panic when config is empty. ListWithLiveStatus already had a cfg == nil check,
+// but it runs after List(cfg), and List reads cfg.Runners first, so that check became unreachable dead code.
 func TestList_NilConfig(t *testing.T) {
 	if got := List(nil); got != nil {
-		t.Fatalf("配置为空应返回 nil，得到 %v", got)
+		t.Fatalf("Should return nil when config is empty, got %v", got)
 	}
 	if got := ListWithLiveStatus(context.Background(), nil); got != nil {
-		t.Fatalf("配置为空应返回 nil，得到 %v", got)
+		t.Fatalf("Should return nil when config is empty, got %v", got)
 	}
 }

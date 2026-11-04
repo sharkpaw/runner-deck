@@ -18,15 +18,15 @@ import (
 func requireLinux(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
-		t.Skip("进程探测依赖 /proc，仅在 Linux 上验证")
+		t.Skip("Process probing relies on /proc and is verified only on Linux")
 	}
 	if _, err := os.Stat("/proc/self/cmdline"); err != nil {
-		t.Skip("当前环境没有可用的 /proc")
+		t.Skip("No usable /proc in the current environment")
 	}
 }
 
-// mkRunnerDir 造一个 runner 目录。registered 决定它有没有 .runner（即是否「已注册」）。
-// run.sh 刻意不 exec，好让 bash 留在进程表里，argv 与 actions/runner 的形态一致。
+// mkRunnerDir creates a runner directory. registered controls whether it gets a .runner file (that is, whether it is registered).
+// run.sh deliberately does not exec, so bash stays in the process table and its argv matches the shape used by actions/runner.
 func mkRunnerDir(t *testing.T, base, name string, registered bool) string {
 	t.Helper()
 	dir := filepath.Join(base, name)
@@ -67,8 +67,8 @@ func cfgWith(base string, names ...string) *config.Config {
 	return cfg
 }
 
-// 只拉「已注册且没在跑」的那些：拉起没注册的会凭空建目录/容器，
-// 再拉一遍已经在跑的则会在同一个 Runner 上多起一个 listener
+// Only start runners that are registered and not running. Starting unregistered ones would create directories and containers out of nothing,
+// and starting one that is already running would add a second listener to the same Runner
 func TestStartIdleRunners_StartsOnlyRegisteredAndIdle(t *testing.T) {
 	requireLinux(t)
 	base := t.TempDir()
@@ -76,7 +76,7 @@ func TestStartIdleRunners_StartsOnlyRegisteredAndIdle(t *testing.T) {
 	busy := mkRunnerDir(t, base, "busy", true)
 	unreg := mkRunnerDir(t, base, "unreg", false)
 
-	// busy 先跑起来
+	// Start busy first
 	cmd := exec.Command(filepath.Join(busy, "run.sh"))
 	cmd.Dir = busy
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -85,42 +85,42 @@ func TestStartIdleRunners_StartsOnlyRegisteredAndIdle(t *testing.T) {
 	}
 	go func() { _ = cmd.Wait() }()
 	if !waitUntil(func() bool { return runnerproc.Running(busy) }) {
-		t.Fatal("准备阶段：busy 应处于运行中")
+		t.Fatal("Setup phase: busy should be running")
 	}
 	busyPids := runnerproc.Find(busy)
 
 	startIdleRunners(context.Background(), cfgWith(base, "idle", "busy", "unreg"), "测试拉起")
 
 	if !waitUntil(func() bool { return runnerproc.Running(idle) }) {
-		t.Fatal("已注册且没在跑的 idle 应被拉起")
+		t.Fatal("a registered, idle runner that is not running should be started")
 	}
 	if got := runnerproc.Find(busy); len(got) != len(busyPids) {
-		t.Fatalf("已在运行的 busy 不该被再拉一次：进程从 %v 变成 %v", busyPids, got)
+		t.Fatalf("a busy runner that is already running should not be started again: process changed from %v to %v", busyPids, got)
 	}
 	if runnerproc.Running(unreg) {
-		t.Fatal("没有 .runner 的 unreg 不该被拉起")
+		t.Fatal("an unreg runner without .runner should not be started")
 	}
 }
 
-// 配置为空或没有 runner 时应安静返回，不 panic
+// With an empty config or no runners, it should return quietly without panicking
 func TestStartIdleRunners_HandlesEmptyConfig(t *testing.T) {
 	startIdleRunners(context.Background(), nil, "测试拉起")
 	startIdleRunners(context.Background(), cfgWith(t.TempDir()), "测试拉起")
 }
 
-// 目录不存在（status=missing）的 runner 不该被拉起——
-// 那会凭空建出目录来，容器模式下还会让 Docker 以 root 属主创建挂载源
+// A runner whose directory does not exist (status=missing) should not be started,
+// since that would create the directory out of nothing and, in container mode, make Docker create the mount source owned by root
 func TestStartIdleRunners_SkipsMissingInstallDir(t *testing.T) {
 	requireLinux(t)
 	base := t.TempDir()
 	cfg := cfgWith(base, "never-created")
 	startIdleRunners(context.Background(), cfg, "测试拉起")
 	if _, err := os.Stat(filepath.Join(base, "never-created")); !os.IsNotExist(err) {
-		t.Fatal("不该为不存在的 runner 建出目录")
+		t.Fatal("should not create a directory for a nonexistent runner")
 	}
 }
 
-// 与 runner.List 的判据保持一致：状态与运行态都取自同一处
+// Stay consistent with the criteria in runner.List: status and running state both come from the same place
 func TestStartIdleRunners_MatchesListStatus(t *testing.T) {
 	requireLinux(t)
 	base := t.TempDir()
@@ -129,31 +129,31 @@ func TestStartIdleRunners_MatchesListStatus(t *testing.T) {
 
 	list := runner.List(cfg)
 	if len(list) != 1 || list[0].Status != runner.StatusInstalled || list[0].Running {
-		t.Fatalf("前提不成立：应为 installed 且未运行，得到 %+v", list)
+		t.Fatalf("precondition not met: should be installed and not running, got %+v", list)
 	}
 	startIdleRunners(context.Background(), cfg, "测试拉起")
 	if !waitUntil(func() bool {
 		l := runner.List(cfg)
 		return len(l) == 1 && l[0].Running
 	}) {
-		t.Fatalf("拉起后 List 应报告运行中，Find=%v", runnerproc.Find(dir))
+		t.Fatalf("after starting, List should report running, Find=%v", runnerproc.Find(dir))
 	}
 }
 
-// writeBlockingRunScript 写一个会一直挂住、且**不产生任何子进程**的 run.sh。
+// writeBlockingRunScript writes a run.sh that blocks indefinitely and **spawns no child processes**.
 //
-// 不能用 `sleep 120`：bash 会 fork 一个子进程去 exec sleep，而在 fork 与 execve 之间，
-// 子进程的 /proc/<pid>/cmdline 仍是 bash 的 argv（`/bin/bash <dir>/run.sh`），
-// 于是被认成第二个监护脚本。窗口只有几微秒，本机几乎碰不到，CI 上机器一忙就中招——
-// 「10 次 /start 之后应只有 1 个 runner 进程，实际 2 个: [2727 2728]」正是这么来的。
+// Do not use `sleep 120`: bash forks a child process to exec sleep, and between fork and execve,
+// the child's /proc/<pid>/cmdline still shows bash's argv (`/bin/bash <dir>/run.sh`),
+// so it is mistaken for a second supervisor script. The window is only a few microseconds and rarely hit locally, but on a busy CI machine it bites,
+// 'after 10 /start calls there should be only 1 runner process, actually 2: [2727 2728]' is exactly how this came about.
 //
-// read 是 builtin，重定向由当前 shell 自己完成，打开一个没有写端的 FIFO 会就地阻塞，
-// 全程不 fork，进程数因此是确定的。
+// read is a builtin, and the redirection is handled by the current shell itself. Opening a FIFO with no writer blocks in place,
+// so nothing forks and the process count is deterministic.
 func writeBlockingRunScript(t *testing.T, dir string) {
 	t.Helper()
 	fifo := filepath.Join(dir, ".test-block")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatalf("创建 FIFO 失败: %v", err)
+		t.Fatalf("failed to create FIFO: %v", err)
 	}
 	script := "#!/bin/bash\nread -r -t 120 < \"" + fifo + "\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte(script), 0o755); err != nil {

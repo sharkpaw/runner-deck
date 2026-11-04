@@ -10,7 +10,7 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runner"
 )
 
-// fakeConfigScript 在 installDir 下放一个假的 config 脚本，把收到的参数逐行写进 args.txt
+// fakeConfigScript writes a fake config script under installDir that logs each received argument on its own line to args.txt
 func fakeConfigScript(t *testing.T) (installDir, argsFile string) {
 	t.Helper()
 	installDir = t.TempDir()
@@ -26,7 +26,7 @@ func recordedArgs(t *testing.T, argsFile string) []string {
 	t.Helper()
 	b, err := os.ReadFile(argsFile)
 	if err != nil {
-		t.Fatalf("假 config 脚本没有记录到参数: %v", err)
+		t.Fatalf("fake config script did not record the arguments: %v", err)
 	}
 	return strings.Split(strings.TrimSpace(string(b)), "\n")
 }
@@ -50,9 +50,9 @@ func hasFlag(args []string, flag string) bool {
 }
 
 // TestRunConfigScript_PassesRunnerName
-// 不传 --name 时 config.sh 取本机 hostname 作为 Runner 名，而它是在 Manager 容器内执行的：
-// 一个部署里的每个 Runner 都会用同一个名字（Manager 容器的 hostname）去注册，
-// GitHub 上最终只看得到一个 Runner，名字还是个容器 ID，和界面上的名称对不上。
+// Without --name, config.sh uses the host's hostname as the runner name, and it runs inside the manager container:
+// every runner in a deployment registers with the same name (the manager container's hostname),
+// GitHub ends up showing only one runner, named with a container ID that does not match the name shown in the UI.
 func TestRunConfigScript_PassesRunnerName(t *testing.T) {
 	installDir, argsFile := fakeConfigScript(t)
 
@@ -62,14 +62,14 @@ func TestRunConfigScript_PassesRunnerName(t *testing.T) {
 
 	args := recordedArgs(t, argsFile)
 	if !hasFlagValue(args, "--name", "droiddesk-2") {
-		t.Fatalf("注册参数里没有 --name droiddesk-2，实际: %v", args)
+		t.Fatalf("registration args have no --name droiddesk-2, got: %v", args)
 	}
 }
 
 // TestRunConfigScript_PassesUnattended
-// 撞上重名时，带 --unattended 会直接抛错退出；不带则进入交互式重试循环
-// （"Failed to replace the runner. Try again or ctrl-c to quit"）。这里没有 TTY，
-// 那个循环会一直耗到 2 分钟超时，而注册是单 worker 顺序执行的，后面排队的 Runner 全被堵住。
+// On a name clash, --unattended makes it fail and exit immediately; without it, it enters an interactive retry loop
+// ("Failed to replace the runner. Try again or ctrl-c to quit"). There is no TTY here,
+// that loop keeps running until the 2-minute timeout, and since registration runs sequentially on a single worker, every runner queued behind it is blocked.
 func TestRunConfigScript_PassesUnattended(t *testing.T) {
 	installDir, argsFile := fakeConfigScript(t)
 
@@ -78,11 +78,11 @@ func TestRunConfigScript_PassesUnattended(t *testing.T) {
 	}
 
 	if args := recordedArgs(t, argsFile); !hasFlag(args, "--unattended") {
-		t.Fatalf("注册参数里没有 --unattended，重名时会卡在交互提示上，实际: %v", args)
+		t.Fatalf("registration args have no --unattended, so a name clash would hang on an interactive prompt, got: %v", args)
 	}
 }
 
-// TestRunConfigScript_KeepsUrlTokenAndLabels 原有参数不能因为新增而丢
+// TestRunConfigScript_KeepsUrlTokenAndLabels ensures existing args are not dropped when new ones are added
 func TestRunConfigScript_KeepsUrlTokenAndLabels(t *testing.T) {
 	installDir, argsFile := fakeConfigScript(t)
 
@@ -93,12 +93,12 @@ func TestRunConfigScript_KeepsUrlTokenAndLabels(t *testing.T) {
 	args := recordedArgs(t, argsFile)
 	for _, c := range [][2]string{{"--url", "https://github.com/o/r"}, {"--token", "tok"}, {"--labels", "x,y"}} {
 		if !hasFlagValue(args, c[0], c[1]) {
-			t.Fatalf("注册参数里缺少 %s %s，实际: %v", c[0], c[1], args)
+			t.Fatalf("registration args are missing %s %s, got: %v", c[0], c[1], args)
 		}
 	}
 }
 
-// TestRunConfigScript_OmitsEmptyName 名称为空时不能传出一个空的 --name（config.sh 会当成缺参数报错）
+// TestRunConfigScript_OmitsEmptyName ensures an empty name does not pass an empty --name (config.sh would treat it as a missing argument and fail)
 func TestRunConfigScript_OmitsEmptyName(t *testing.T) {
 	installDir, argsFile := fakeConfigScript(t)
 
@@ -107,6 +107,6 @@ func TestRunConfigScript_OmitsEmptyName(t *testing.T) {
 	}
 
 	if args := recordedArgs(t, argsFile); hasFlag(args, "--name") {
-		t.Fatalf("名称为空时不该传 --name，实际: %v", args)
+		t.Fatalf("--name should not be passed when the name is empty, got: %v", args)
 	}
 }

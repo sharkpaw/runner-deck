@@ -9,7 +9,7 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/config"
 )
 
-// legacyPath / storePath 两个位置各自的路径，测试里反复用到
+// legacyPath / storePath: the paths of the two locations, used repeatedly in the tests
 func legacyPath(installDir string) string { return filepath.Join(installDir, LegacyRunnerTokenFile) }
 
 func writeLegacy(t *testing.T, installDir, token string) {
@@ -43,31 +43,31 @@ func TestNewStore_DirIsBesideTheConfigFile(t *testing.T) {
 		{"config.yaml", "tokens"},
 	} {
 		if got := NewStore(tc.configPath).Dir; got != tc.want {
-			t.Errorf("NewStore(%q).Dir = %q，期望 %q", tc.configPath, got, tc.want)
+			t.Errorf("NewStore(%q).Dir = %q, expected %q", tc.configPath, got, tc.want)
 		}
 	}
 }
 
-// 新位置必须落在配置目录下，而配置目录不会被挂进 Runner 容器——
-// 这是本包存在的全部理由，钉住它免得日后有人把 Dir 改回 base_path 下。
+// The new location must sit under the config directory, which is not mounted into the Runner container.
+// This is the whole reason this package exists. Pin it so nobody later changes Dir back to base_path.
 func TestNewStore_DirIsNotUnderTheRunnerBasePath(t *testing.T) {
 	store := NewStore("/app/config/config.yaml")
 	const basePath = "/app/runners"
 	rel, err := filepath.Rel(basePath, store.Dir)
 	if err == nil && !strings.HasPrefix(rel, "..") {
-		t.Fatalf("凭据目录 %s 落在了 Runner 目录 %s 之下，容器模式会把它挂进容器", store.Dir, basePath)
+		t.Fatalf("credential directory %s is under runner directory %s; container mode would mount it into the container", store.Dir, basePath)
 	}
 }
 
-// TestMigrate 覆盖 4 种组合。每条都断言「旧文件是否还在」——
-// 只复制不删除的话旧文件仍在挂载目录里，漏洞没有关闭，所以那是本表的重点。
+// TestMigrate covers 4 combinations. Each case asserts whether the old file still exists.
+// If files are only copied and not deleted, the old files stay in the mounted directory and the hole is not closed, which is the point of this table.
 func TestMigrate(t *testing.T) {
 	cases := []struct {
 		name         string
-		legacy       string // 空表示旧位置没有文件
-		existing     string // 空表示新位置没有文件
+		legacy       string // Empty means the old location has no files
+		existing     string // Empty means the new location has no files
 		wantMigrated bool
-		wantToken    string // 迁移后新位置应有的内容
+		wantToken    string // The contents the new location should have after migration
 	}{
 		{name: "旧无新无：什么也不做"},
 		{name: "旧无新有：什么也不做", existing: "new-pat", wantToken: "new-pat"},
@@ -92,25 +92,25 @@ func TestMigrate(t *testing.T) {
 
 			migrated, err := store.Migrate("alpha", installDir)
 			if err != nil {
-				t.Fatalf("Migrate 出错：%v", err)
+				t.Fatalf("Migrate error: %v", err)
 			}
 			if migrated != tc.wantMigrated {
-				t.Errorf("migrated = %v，期望 %v", migrated, tc.wantMigrated)
+				t.Errorf("migrated = %v, expected %v", migrated, tc.wantMigrated)
 			}
 			if got := store.GitHubToken("alpha"); got != tc.wantToken {
-				t.Errorf("GitHubToken = %q，期望 %q", got, tc.wantToken)
+				t.Errorf("GitHubToken = %q, expected %q", got, tc.wantToken)
 			}
-			// 旧位置有过文件的，迁移后一律不能再有：它就在挂载进容器的那个目录里
+			// If the old location had files, none may remain after migration: it sits in the directory mounted into the container
 			if tc.legacy != "" {
 				if _, err := os.Stat(legacyPath(installDir)); !os.IsNotExist(err) {
-					t.Errorf("旧位置 %s 仍然存在（err=%v），Job 还能读到它", legacyPath(installDir), err)
+					t.Errorf("old location %s still exists (err=%v); the job can still read it", legacyPath(installDir), err)
 				}
 			}
 		})
 	}
 }
 
-// 每个检查周期都会调用，所以必须幂等：第二次调用不该报错，也不该改变结果
+// Called every check cycle, so it must be idempotent: a second call should neither error nor change the result
 func TestMigrate_IsIdempotent(t *testing.T) {
 	root := t.TempDir()
 	installDir := filepath.Join(root, "runners", "alpha")
@@ -118,21 +118,21 @@ func TestMigrate_IsIdempotent(t *testing.T) {
 	writeLegacy(t, installDir, "old-pat")
 
 	if migrated, err := store.Migrate("alpha", installDir); err != nil || !migrated {
-		t.Fatalf("首次迁移应成功：migrated=%v err=%v", migrated, err)
+		t.Fatalf("first migration should succeed: migrated=%v err=%v", migrated, err)
 	}
 	migrated, err := store.Migrate("alpha", installDir)
 	if err != nil {
-		t.Fatalf("再次迁移不该出错：%v", err)
+		t.Fatalf("second migration should not error: %v", err)
 	}
 	if migrated {
-		t.Error("没有可搬的东西时 migrated 应为 false")
+		t.Error("migrated should be false when there is nothing to move")
 	}
 	if got := store.GitHubToken("alpha"); got != "old-pat" {
-		t.Errorf("令牌应保持 old-pat，得到 %q", got)
+		t.Errorf("token should remain old-pat, got %q", got)
 	}
 }
 
-// 空文件里没有凭据：没有要搬的东西，也不去删用户的文件
+// Empty file has no credentials: nothing to move, and the user's file is not deleted
 func TestMigrate_EmptyLegacyFileIsLeftAlone(t *testing.T) {
 	root := t.TempDir()
 	installDir := filepath.Join(root, "runners", "alpha")
@@ -141,28 +141,28 @@ func TestMigrate_EmptyLegacyFileIsLeftAlone(t *testing.T) {
 
 	migrated, err := store.Migrate("alpha", installDir)
 	if err != nil {
-		t.Fatalf("Migrate 出错：%v", err)
+		t.Fatalf("Migrate error: %v", err)
 	}
 	if migrated {
-		t.Error("空文件不该算作一次迁移")
+		t.Error("An empty file should not count as a migration")
 	}
 	if _, err := os.Stat(legacyPath(installDir)); err != nil {
-		t.Errorf("空文件不含凭据，应原样留着：%v", err)
+		t.Errorf("Empty file has no credentials and should be left as is: %v", err)
 	}
 	if got := store.GitHubToken("alpha"); got != "" {
-		t.Errorf("新位置不该被写入，得到 %q", got)
+		t.Errorf("New location should not be written, got %q", got)
 	}
 }
 
-// 写入失败时旧文件必须留着：先删后写会把用户唯一的一份 PAT 弄丢。
+// The legacy file must survive a failed write: delete-then-write would lose the user's only PAT.
 //
-// 制造失败的办法要挑一下。只读目录不行——测试常以 root 跑，root 照样写得进去，
-// 那条断言会凭运气通过。让 Dir 的父路径是个普通文件也不行：那样连
-// os.ReadFile(新位置) 都拿 ENOTDIR，Migrate 在「读不出新位置」那一路就返回了，
-// 压根走不到写入（那一路另有 TestMigrate_UnreadableNewLocationKeepsTheLegacyFile）。
+// Pick the failure trigger carefully. A read-only directory won't work: tests often run as root, and root can still write there,
+// so the assertion would pass by luck. Making Dir's parent path a regular file won't work either: then
+// os.ReadFile(new location) also fails with ENOTDIR, and Migrate returns on the "cannot read new location" path,
+// so it never reaches the write (that path has its own test, TestMigrate_UnreadableNewLocationKeepsTheLegacyFile).
 //
-// 用一个指向不存在目标的符号链接：读新位置得到 ENOENT（于是继续往写入走），
-// 而 MkdirAll 在这个名字上失败。两个条件同时成立，且与 UID 无关。
+// Use a symlink pointing to a nonexistent target: reading the new location gets ENOENT (so it proceeds to the write),
+// while MkdirAll fails on this name. Both conditions hold at once, independent of UID.
 func TestMigrate_WriteFailureKeepsTheLegacyFile(t *testing.T) {
 	root := t.TempDir()
 	installDir := filepath.Join(root, "runners", "alpha")
@@ -173,33 +173,33 @@ func TestMigrate_WriteFailureKeepsTheLegacyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &Store{Dir: dir}
-	// 钉住前提：必须确实是「新位置不存在」，否则这条用例测的就不是写入失败那一路
+	// Pin the precondition: the new location must truly not exist, otherwise this case tests a different path than the write failure
 	newPath, err := store.Path("alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.ReadFile(newPath); !os.IsNotExist(err) {
-		t.Fatalf("前提不成立：读新位置应得到「不存在」，得到 %v", err)
+		t.Fatalf("Precondition not met: reading the new location should give \"not exist\", got %v", err)
 	}
 
 	migrated, err := store.Migrate("alpha", installDir)
 	if err == nil {
-		t.Fatal("写入不可能成功，Migrate 应返回错误")
+		t.Fatal("Write cannot succeed, Migrate should return an error")
 	}
 	if migrated {
-		t.Error("写入失败时 migrated 必须为 false")
+		t.Error("Migrated must be false when the write fails")
 	}
 	b, readErr := os.ReadFile(legacyPath(installDir))
 	if readErr != nil {
-		t.Fatalf("写入失败时旧文件必须留着，否则 PAT 就丢了：%v", readErr)
+		t.Fatalf("The old file must stay when the write fails, or the PAT is lost: %v", readErr)
 	}
 	if strings.TrimSpace(string(b)) != "old-pat" {
-		t.Errorf("旧文件内容应保持不变，得到 %q", b)
+		t.Errorf("The old file content should be unchanged, got %q", b)
 	}
 }
 
-// 新位置读不出来（不是「不存在」，而是读失败）时同样不能删旧文件：
-// 不知道新位置有什么，就不能拿掉手上唯一确定存在的那一份。
+// If the new location can't be read (not "missing" but a read failure), the old file must not be deleted either:
+// Without knowing what's at the new location, we must not drop the only copy we know exists.
 func TestMigrate_UnreadableNewLocationKeepsTheLegacyFile(t *testing.T) {
 	root := t.TempDir()
 	installDir := filepath.Join(root, "runners", "alpha")
@@ -213,20 +213,20 @@ func TestMigrate_UnreadableNewLocationKeepsTheLegacyFile(t *testing.T) {
 
 	migrated, err := store.Migrate("alpha", installDir)
 	if err == nil {
-		t.Fatal("读不出新位置时 Migrate 应返回错误")
+		t.Fatal("Migrate should return an error when the new location can't be read")
 	}
 	if migrated {
-		t.Error("没搬成时 migrated 必须为 false")
+		t.Error("migrated must be false when the move didn't happen")
 	}
 	if _, err := os.Stat(legacyPath(installDir)); err != nil {
-		t.Fatalf("旧文件必须留着：%v", err)
+		t.Fatalf("The old file must stay: %v", err)
 	}
 }
 
-// 只读目录那一路也验一下，但 root 下这个前提不成立，跳过
+// Also test the read-only directory path, but the precondition doesn't hold under root, so skip it
 func TestMigrate_WriteFailureOnReadOnlyDirKeepsTheLegacyFile(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("以 root 运行时只读目录照样可写，这条前提不成立")
+		t.Skip("Read-only directories are still writable when running as root, so this precondition doesn't hold")
 	}
 	root := t.TempDir()
 	installDir := filepath.Join(root, "runners", "alpha")
@@ -239,14 +239,14 @@ func TestMigrate_WriteFailureOnReadOnlyDirKeepsTheLegacyFile(t *testing.T) {
 	store := &Store{Dir: filepath.Join(parent, "tokens")}
 
 	if _, err := store.Migrate("alpha", installDir); err == nil {
-		t.Fatal("写入不可能成功，Migrate 应返回错误")
+		t.Fatal("The write can't succeed, so Migrate should return an error")
 	}
 	if _, err := os.Stat(legacyPath(installDir)); err != nil {
-		t.Fatalf("写入失败时旧文件必须留着：%v", err)
+		t.Fatalf("The old file must stay when the write fails: %v", err)
 	}
 }
 
-// 权限是这件事的一半：目录 0700、文件 0600
+// Permissions are half of this: directory 0700, file 0600
 func TestMigrate_Permissions(t *testing.T) {
 	root := t.TempDir()
 	installDir := filepath.Join(root, "runners", "alpha")
@@ -254,14 +254,14 @@ func TestMigrate_Permissions(t *testing.T) {
 	writeLegacy(t, installDir, "old-pat")
 
 	if _, err := store.Migrate("alpha", installDir); err != nil {
-		t.Fatalf("Migrate 出错：%v", err)
+		t.Fatalf("Migrate error: %v", err)
 	}
 	di, err := os.Stat(store.Dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := di.Mode().Perm(); got != dirMode {
-		t.Errorf("凭据目录权限为 %04o，期望 %04o", got, dirMode)
+		t.Errorf("Credentials directory permissions are %04o, expected %04o", got, dirMode)
 	}
 	p, err := store.Path("alpha")
 	if err != nil {
@@ -272,11 +272,11 @@ func TestMigrate_Permissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := fi.Mode().Perm(); got != fileMode {
-		t.Errorf("凭据文件权限为 %04o，期望 %04o", got, fileMode)
+		t.Errorf("Credentials file permissions are %04o, expected %04o", got, fileMode)
 	}
 }
 
-// 迁移后不留临时文件：tokens/ 下只应有按 Runner 名命名的那一个
+// After migration, no temp files should remain: only the one named after the runner should be under tokens/
 func TestMigrate_LeavesNoTemporaryFiles(t *testing.T) {
 	root := t.TempDir()
 	installDir := filepath.Join(root, "runners", "alpha")
@@ -284,7 +284,7 @@ func TestMigrate_LeavesNoTemporaryFiles(t *testing.T) {
 	writeLegacy(t, installDir, "old-pat")
 
 	if _, err := store.Migrate("alpha", installDir); err != nil {
-		t.Fatalf("Migrate 出错：%v", err)
+		t.Fatalf("Migrate error: %v", err)
 	}
 	entries, err := os.ReadDir(store.Dir)
 	if err != nil {
@@ -295,14 +295,14 @@ func TestMigrate_LeavesNoTemporaryFiles(t *testing.T) {
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Errorf("tokens/ 下应只有 alpha，得到 %v", names)
+		t.Errorf("Only alpha should be under tokens/, got %v", names)
 	}
 }
 
 func TestMigrate_NoInstallDirIsNotAnError(t *testing.T) {
 	store := &Store{Dir: filepath.Join(t.TempDir(), "tokens")}
 	if migrated, err := store.Migrate("alpha", ""); err != nil || migrated {
-		t.Fatalf("installDir 为空应静默返回：migrated=%v err=%v", migrated, err)
+		t.Fatalf("An empty installDir should return silently: migrated=%v err=%v", migrated, err)
 	}
 }
 
@@ -310,58 +310,58 @@ func TestGitHubToken(t *testing.T) {
 	root := t.TempDir()
 	store := &Store{Dir: filepath.Join(root, "config", "tokens")}
 	if got := store.GitHubToken("alpha"); got != "" {
-		t.Errorf("没有凭据时应返回空串，得到 %q", got)
+		t.Errorf("With no credential, an empty string should be returned, got %q", got)
 	}
 	writeStore(t, store, "alpha", "  pat-with-space  ")
 	if got := store.GitHubToken("alpha"); got != "pat-with-space" {
-		t.Errorf("应去掉首尾空白，得到 %q", got)
+		t.Errorf("Leading and trailing whitespace should be trimmed, got %q", got)
 	}
 	if got := store.GitHubToken("beta"); got != "" {
-		t.Errorf("另一个 Runner 不该读到，得到 %q", got)
+		t.Errorf("Another runner shouldn't be able to read it, got %q", got)
 	}
 }
 
 func TestRemove(t *testing.T) {
 	root := t.TempDir()
 	store := &Store{Dir: filepath.Join(root, "config", "tokens")}
-	// 不存在时不算错误——删除 Runner 时绝大多数都没有 PAT
+	// Missing isn't an error. When a runner is removed, most of the time there's no PAT.
 	if err := store.Remove("alpha"); err != nil {
-		t.Fatalf("删除不存在的凭据不该出错：%v", err)
+		t.Fatalf("Removing a nonexistent credential should not error: %v", err)
 	}
 	writeStore(t, store, "alpha", "pat")
 	writeStore(t, store, "beta", "other")
 	if err := store.Remove("alpha"); err != nil {
-		t.Fatalf("Remove 出错：%v", err)
+		t.Fatalf("Remove error: %v", err)
 	}
 	if got := store.GitHubToken("alpha"); got != "" {
-		t.Errorf("alpha 的凭据应已删除，得到 %q", got)
+		t.Errorf("alpha's credential should be deleted, got %q", got)
 	}
 	if got := store.GitHubToken("beta"); got != "other" {
-		t.Errorf("不该动到 beta，得到 %q", got)
+		t.Errorf("beta should not be touched, got %q", got)
 	}
 }
 
-// 名字要拼进路径，不合法的名字必须挡在外面而不是拼出一个越界路径
+// The name is spliced into the path, so invalid names must be rejected up front rather than building an out-of-bounds path
 func TestPath_RejectsUnsafeNames(t *testing.T) {
 	store := &Store{Dir: filepath.Join(t.TempDir(), "tokens")}
 	for _, name := range []string{"", "..", "../etc/passwd", "a/b", `a\b`, "  "} {
 		if _, err := store.Path(name); err == nil {
-			t.Errorf("名字 %q 应被拒绝", name)
+			t.Errorf("name %q should be rejected", name)
 		}
 		if got := store.GitHubToken(name); got != "" {
-			t.Errorf("名字 %q 不该读出任何东西，得到 %q", name, got)
+			t.Errorf("name %q should not read anything, got %q", name, got)
 		}
 		if err := store.Remove(name); err == nil {
-			t.Errorf("名字 %q 的 Remove 应返回错误", name)
+			t.Errorf("Remove for name %q should return an error", name)
 		}
 	}
-	// 合法的名字要能过，包括以 . 开头的——正是它让 base_path/.something/ 那个方案不可行
+	// Valid names must pass, including ones starting with a dot. That's exactly what makes the base_path/.something/ approach unworkable.
 	for _, name := range []string{"alpha", ".hidden", "a.b-c_d"} {
 		if !config.IsSafeRunnerNameOrPath(name) {
-			t.Fatalf("前提有变：%q 现在被 config 判为不合法", name)
+			t.Fatalf("The precondition has changed: %q is now judged invalid by config", name)
 		}
 		if _, err := store.Path(name); err != nil {
-			t.Errorf("名字 %q 应被接受：%v", name, err)
+			t.Errorf("name %q should be accepted: %v", name, err)
 		}
 	}
 }
@@ -378,32 +378,32 @@ func TestMigrateAll(t *testing.T) {
 		{Name: "beta", TargetType: "repo", Target: "o/r"},
 		{Name: "gamma", TargetType: "repo", Target: "o/r", Path: "gamma-dir"},
 	}
-	// alpha 与 gamma 各有一个旧位置的 PAT，beta 没有
+	// alpha and gamma each have a PAT at the old location; beta has none
 	writeLegacy(t, filepath.Join(basePath, "alpha"), "alpha-pat")
 	writeLegacy(t, filepath.Join(basePath, "gamma-dir"), "gamma-pat")
 
 	if moved := MigrateAll(cfg, store); moved != 2 {
-		t.Errorf("应搬动 2 个，得到 %d", moved)
+		t.Errorf("Should have moved 2, got %d", moved)
 	}
 	if got := store.GitHubToken("alpha"); got != "alpha-pat" {
-		t.Errorf("alpha 的令牌为 %q", got)
+		t.Errorf("alpha's token is %q", got)
 	}
-	// path 与 name 不同的 Runner 也要处理：旧文件在 path 下，新文件按 name 寻址
+	// Runners whose path and name differ also need handling: the old file is under path, the new one is addressed by name
 	if got := store.GitHubToken("gamma"); got != "gamma-pat" {
-		t.Errorf("gamma 的令牌为 %q", got)
+		t.Errorf("gamma's token is %q", got)
 	}
 	if got := store.GitHubToken("beta"); got != "" {
-		t.Errorf("beta 本来就没有 PAT，得到 %q", got)
+		t.Errorf("beta never had a PAT, got %q", got)
 	}
 	for _, dir := range []string{"alpha", "gamma-dir"} {
 		if _, err := os.Stat(legacyPath(filepath.Join(basePath, dir))); !os.IsNotExist(err) {
-			t.Errorf("%s 的旧文件仍然存在（err=%v）", dir, err)
+			t.Errorf("%s's legacy file still exists (err=%v)", dir, err)
 		}
 	}
 	if moved := MigrateAll(nil, store); moved != 0 {
-		t.Errorf("cfg 为 nil 时应返回 0，得到 %d", moved)
+		t.Errorf("Should return 0 when cfg is nil, got %d", moved)
 	}
 	if moved := MigrateAll(cfg, nil); moved != 0 {
-		t.Errorf("store 为 nil 时应返回 0，得到 %d", moved)
+		t.Errorf("Should return 0 when store is nil, got %d", moved)
 	}
 }

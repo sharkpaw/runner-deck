@@ -11,7 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// 搭一个带指标中间件的 Echo，路由表与真实服务同形（含 :name 这种参数路由）。
+// Set up an Echo with the metrics middleware, and a route table shaped like the real service (including param routes such as :name).
 func metricsApp() *echo.Echo {
 	e := echo.New()
 	e.Use(metricsMiddleware())
@@ -32,22 +32,22 @@ func get(e *echo.Echo, target string) int {
 	return rec.Code
 }
 
-// 抓一次 /metrics，返回文本。
+// Scrape /metrics once and return the text.
 func scrape(t *testing.T, e *echo.Echo) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, metricsPath, nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("/metrics 返回 %d，期望 200", rec.Code)
+		t.Fatalf("/metrics returned %d, expected 200", rec.Code)
 	}
 	return rec.Body.String()
 }
 
-// counterValue 把所有匹配 labels 的样本**加起来**。
+// counterValue **sums** the samples that match all the labels.
 //
-// 必须求和而不是取第一条：httpMetrics 是包级变量，同一个进程里所有用例共用一份
-// registry，别的用例（csrf_test、wiring_test 里那些）也会打到 /api/runners/:name，
-// 只是状态码不同。只取第一条匹配行的话，拿到的是别人留下的计数。
+// It must sum rather than take the first match: httpMetrics is a package-level variable, and all tests in the same process share one copy of it
+// registry. Other tests (the ones in csrf_test and wiring_test) also hit /api/runners/:name,
+// just with different status codes. If we only took the first matching line, we would read counts left behind by someone else.
 func counterValue(t *testing.T, body, metric string, labels map[string]string) float64 {
 	t.Helper()
 	sum := 0.0
@@ -68,43 +68,43 @@ func counterValue(t *testing.T, body, metric string, labels map[string]string) f
 		fields := strings.Fields(line)
 		v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
 		if err != nil {
-			t.Fatalf("解析不了这行: %s", line)
+			t.Fatalf("cannot parse this line: %s", line)
 		}
 		sum += v
 	}
 	return sum
 }
 
-// 最基本的一条：请求打完，/metrics 上真的能抓到对应的样本。
+// The most basic case: after the request completes, the matching sample really shows up on /metrics.
 //
-// 这条特意抓 /metrics 而不是直接读 registry —— 它同时证明了
-// metricsHandler 用的是 HandlerFor(httpMetrics.Registry) 而不是 Handler()。
-// NewHTTPMetrics 在 Registry 为 nil 时自建一个 registry，而 Handler() 服务的是
-// **默认** registry：写成 Handler() 的话这里抓到的会是一堆 Go 运行时指标，
-// 唯独没有我们记的这些。
+// This test scrapes /metrics instead of reading the registry directly. That also proves
+// metricsHandler uses HandlerFor(httpMetrics.Registry), not Handler().
+// NewHTTPMetrics builds its own registry when Registry is nil, while Handler() serves the
+// **default** registry. If this were written with Handler(), the scrape would return a pile of Go runtime metrics,
+// but none of the ones we record.
 func TestMetrics_RecordedSamplesAreScrapable(t *testing.T) {
 	e := metricsApp()
 	before := counterValue(t, scrape(t, e), "runner_deck_http_requests_total",
 		map[string]string{"method": "GET", "path": "/api/runners", "status": "200"})
 
 	if code := get(e, "/api/runners"); code != http.StatusOK {
-		t.Fatalf("状态码 %d", code)
+		t.Fatalf("status code %d", code)
 	}
 
 	after := counterValue(t, scrape(t, e), "runner_deck_http_requests_total",
 		map[string]string{"method": "GET", "path": "/api/runners", "status": "200"})
 	if after == 0 {
-		t.Fatalf("抓不到 runner_deck_http_requests_total，/metrics 内容:\n%s", scrape(t, e))
+		t.Fatalf("could not find runner_deck_http_requests_total, /metrics content:\n%s", scrape(t, e))
 	}
 	if after != before+1 {
-		t.Errorf("计数 %v -> %v，期望 +1", before, after)
+		t.Errorf("count %v -> %v, expected +1", before, after)
 	}
 }
 
-// 基数控制，这个 PR 里最要紧的一条。
+// Cardinality control, the most important check in this PR.
 //
-// path 标签取的是 Echo 的**路由模板**，不是请求 URL。三个不同 runner 名
-// 必须落在同一条时间序列上；否则每建一个 runner 就多一条序列，Prometheus 会被撑爆。
+// The path label uses Echo's **route template**, not the request URL. Three different runner names
+// must land on the same time series. Otherwise every runner created adds another series, and Prometheus would be overwhelmed.
 func TestMetrics_PathLabelIsRouteTemplateNotRequestURL(t *testing.T) {
 	e := metricsApp()
 	tmpl := map[string]string{"path": "/api/runners/:name"}
@@ -112,22 +112,22 @@ func TestMetrics_PathLabelIsRouteTemplateNotRequestURL(t *testing.T) {
 
 	for _, name := range []string{"alpha", "bravo", "charlie"} {
 		if code := get(e, "/api/runners/"+name); code != http.StatusOK {
-			t.Fatalf("%s 状态码 %d", name, code)
+			t.Fatalf("%s status code %d", name, code)
 		}
 	}
 	body := scrape(t, e)
 
 	if got := counterValue(t, body, "runner_deck_http_requests_total", tmpl) - before; got != 3 {
-		t.Errorf("三个不同 runner 名应合并到 :name 模板上、净增 3，实得 %v", got)
+		t.Errorf("three different runner names should collapse onto the :name template, a net increase of 3, got %v", got)
 	}
 	for _, name := range []string{"alpha", "bravo", "charlie"} {
 		if strings.Contains(body, `path="/api/runners/`+name+`"`) {
-			t.Errorf("具体的 runner 名 %q 变成了标签值，基数会爆:\n%s", name, body)
+			t.Errorf("the specific runner name %q became a label value, which will blow up cardinality:\n%s", name, body)
 		}
 	}
 }
 
-// 404 同理，而且更危险：任何人扫一遍随机 URL 就能造序列。
+// 404 is the same, and more dangerous: anyone who scans random URLs can create series.
 func TestMetrics_UnmatchedRoutesCollapseToOneLabel(t *testing.T) {
 	e := metricsApp()
 	nf := map[string]string{"path": notFoundPathLabel}
@@ -139,38 +139,38 @@ func TestMetrics_UnmatchedRoutesCollapseToOneLabel(t *testing.T) {
 	body := scrape(t, e)
 
 	if got := counterValue(t, body, "runner_deck_http_requests_total", nf) - before; got != 3 {
-		t.Errorf("未匹配路由应合并到 %q、净增 3，实得 %v", notFoundPathLabel, got)
+		t.Errorf("unmatched routes should collapse into %q, a net increase of 3, got %v", notFoundPathLabel, got)
 	}
 	for _, p := range []string{"nope-1", "nope-2", "passwd"} {
 		if strings.Contains(body, p) {
-			t.Errorf("未匹配的 URL 片段 %q 进了标签:\n%s", p, body)
+			t.Errorf("unmatched URL fragment %q leaked into a label:\n%s", p, body)
 		}
 	}
 }
 
-// 错误状态码必须记成真实状态码。
+// Error status codes must be recorded as their real status codes.
 //
-// Echo 的 HTTPErrorHandler 是在处理链返回**之后**才写响应的，
-// 那时 c.Response().Status 还停在 200——直接读它就会把所有失败请求记成成功，
-// 基于 status=~"5.." 的告警永远不会触发。中间件因此从返回的 error 上取码。
+// Echo's HTTPErrorHandler writes the response **after** the handler chain returns,
+// at which point c.Response().Status is still 200. Reading it directly would record every failed request as a success,
+// so alerts based on status=~"5.." would never fire. The middleware therefore takes the code from the returned error.
 func TestMetrics_ErrorStatusIsRecordedNotDefaultedTo200(t *testing.T) {
 	e := metricsApp()
 	if code := get(e, "/boom"); code != http.StatusBadGateway {
-		t.Fatalf("客户端看到的状态码是 %d，期望 502", code)
+		t.Fatalf("the client saw status code %d, expected 502", code)
 	}
 	body := scrape(t, e)
 
 	if v := counterValue(t, body, "runner_deck_http_requests_total",
 		map[string]string{"path": "/boom", "status": "502"}); v < 1 {
-		t.Errorf("502 没被记下来:\n%s", body)
+		t.Errorf("502 was not recorded:\n%s", body)
 	}
 	if v := counterValue(t, body, "runner_deck_http_requests_total",
 		map[string]string{"path": "/boom", "status": "200"}); v > 0 {
-		t.Errorf("失败请求被记成了 200，这会让 5xx 告警永远不触发")
+		t.Errorf("failed requests were recorded as 200, which would keep 5xx alerts from ever firing")
 	}
 }
 
-// 探针与 /metrics 自身不记：探针每几秒一次，/metrics 记自己更是没有意义。
+// Probes and /metrics itself are not recorded: probes run every few seconds, and recording /metrics would be pointless.
 func TestMetrics_SkipsProbesAndItself(t *testing.T) {
 	e := metricsApp()
 	for i := 0; i < 3; i++ {
@@ -182,24 +182,24 @@ func TestMetrics_SkipsProbesAndItself(t *testing.T) {
 	for _, p := range []string{"/health", "/ready", metricsPath} {
 		if v := counterValue(t, body, "runner_deck_http_requests_total",
 			map[string]string{"path": p}); v != 0 {
-			t.Errorf("%s 不该被记录，却有 %v 次", p, v)
+			t.Errorf("%s should not be recorded, but it has %v hits", p, v)
 		}
 	}
 }
 
-// 延迟直方图也要真的有观测值，不然只有计数、没有分布。
+// The latency histogram must also have actual observations, otherwise there is a count but no distribution.
 func TestMetrics_DurationHistogramIsObserved(t *testing.T) {
 	e := metricsApp()
 	get(e, "/api/runners")
 	body := scrape(t, e)
 
 	if !regexp.MustCompile(`runner_deck_http_request_duration_seconds_count\{[^}]*path="/api/runners"[^}]*\}`).MatchString(body) {
-		t.Errorf("没有延迟直方图的样本:\n%s", body)
+		t.Errorf("samples without a latency histogram:\n%s", body)
 	}
 }
 
-// /metrics 不在 Skipper 里，所以配了 Basic Auth 之后它也要凭据。
-// 指标会吐出全部接口的调用量与延迟，没理由比 /api 更公开。
+// /metrics is not in Skipper, so it also requires credentials once Basic Auth is configured.
+// Metrics expose call volume and latency for every endpoint, so there is no reason for them to be more public than /api.
 func TestMetrics_EndpointIsBehindBasicAuthWhenConfigured(t *testing.T) {
 	t.Setenv("BASIC_AUTH_PASSWORD", "s3cret")
 	t.Setenv("BASIC_AUTH_USER", "")
@@ -208,14 +208,14 @@ func TestMetrics_EndpointIsBehindBasicAuthWhenConfigured(t *testing.T) {
 	if mw, _ := basicAuthMiddleware(); mw != nil {
 		e.Use(mw)
 	} else {
-		t.Fatal("设了密码却没装上中间件")
+		t.Fatal("Password was set but the middleware was not installed")
 	}
 	e.GET(metricsPath, metricsHandler())
 
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, metricsPath, nil))
 	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("/metrics 无凭据时应 401，实得 %d", rec.Code)
+		t.Errorf("/metrics without credentials should return 401, got %d", rec.Code)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, metricsPath, nil)
@@ -223,6 +223,6 @@ func TestMetrics_EndpointIsBehindBasicAuthWhenConfigured(t *testing.T) {
 	rec2 := httptest.NewRecorder()
 	e.ServeHTTP(rec2, req)
 	if rec2.Code != http.StatusOK {
-		t.Errorf("/metrics 带正确凭据应 200，实得 %d", rec2.Code)
+		t.Errorf("/metrics with correct credentials should return 200, got %d", rec2.Code)
 	}
 }

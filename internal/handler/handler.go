@@ -1,5 +1,5 @@
-// Package handler 实现 Manager 的 HTTP API 与 WebUI 逻辑。
-// Manager 职责：配置读写、Runner 注册编排（安装/注册脚本）、容器启停调度、状态聚合；不直接承载 Runner 进程。
+// Package handler implements the Manager's HTTP API and WebUI logic.
+// Manager responsibilities: config read/write, runner registration orchestration (install/register scripts), container start/stop scheduling, and status aggregation; it does not host runner processes directly.
 package handler
 
 import (
@@ -32,21 +32,21 @@ var supportedLangs = []string{"en", "tr", "zh", "fr", "ja", "ko", "de"}
 // I18nLoader loads translations for a language code (e.g. "en", "zh"). Set by main from embed.
 var I18nLoader func(lang string) (map[string]string, error)
 
-// installRunnerScriptPath 容器内自动安装 runner 的脚本路径（Docker 镜像中有）。
-// 是 var 而非 const，只为让测试把它指向一个假脚本——注册流程里「要不要先安装」
-// 这个分支，不改这一处就只能靠真去下载一份 actions/runner 才走得到。
+// installRunnerScriptPath is the script path used to auto-install the runner inside the container (present in the Docker image).
+// It is a var rather than a const only so tests can point it at a fake script; the "should we install first"
+// branch in the registration flow can only be reached by actually downloading actions/runner without changing this.
 var installRunnerScriptPath = "/app/scripts/install-runner.sh"
 
-// ConfigPath 配置文件路径，由 main 注入
+// ConfigPath is the config file path, injected by main
 var ConfigPath string
 
-// Secrets Manager 侧凭据（可选 PAT）的存放位置，由 main 注入，与 ConfigPath 同理。
+// The location of the Secrets Manager-side credential (optional PAT), injected by main, same as ConfigPath.
 var Secrets *secrets.Store
 
-// secretStore 返回凭据存放位置；main 没注入时按 ConfigPath 推导。
+// secretStore returns the credential storage location; when main does not inject one, it is derived from ConfigPath.
 //
-// 推导这一步是给测试留的：它们只设 ConfigPath，不必再记着多设一个包级变量，
-// 而凭据目录本来就是由配置文件路径决定的，两者不会各自指一处。
+// This derivation exists for tests: they only set ConfigPath and need not remember to set another package-level variable,
+// since the credential directory is already determined by the config file path, so the two can never point at different places.
 func secretStore() *secrets.Store {
 	if Secrets != nil {
 		return Secrets
@@ -54,20 +54,20 @@ func secretStore() *secrets.Store {
 	return secrets.NewStore(ConfigPath)
 }
 
-// lifecycleContext 为「启停 Runner」这类写操作派生上下文：只保留超时，丢掉请求的取消信号。
+// lifecycleContext derives the context for write operations like "start/stop runner": it keeps only the timeout and drops the request's cancellation signal.
 //
-// 不能直接挂在 c.Request().Context() 上。浏览器刷新或跳转会取消在途请求，而容器操作
-// 最终落到 exec.CommandContext 起的 docker 子进程上，上下文一取消就是 SIGKILL：
-// docker create 被砍在半路，日志里只剩「docker create 失败。输出: (无输出): signal: killed」，
-// 而 daemon 侧可能已经把容器建了出来，下次启动再撞上名字冲突。
-// 启停一旦发起就该跑完，与发起它的那个 HTTP 连接是否还在无关——
-// RemoveRunnerByName 与后台注册 worker 本来就是这么做的，这里与之统一。
-// 请求上下文里的值（如 trace）仍然保留，只是不再传播取消。
+// It must not be attached directly to c.Request().Context(). A browser refresh or navigation cancels in-flight requests, and container operations
+// ultimately run in the docker child process started by exec.CommandContext, and cancelling the context means SIGKILL:
+// docker create gets killed midway, and the log only shows "docker create failed. Output: (no output): signal: killed",
+// while the daemon may already have created the container, so the next start hits a name conflict.
+// Once started, a start/stop should run to completion, regardless of whether the HTTP connection that initiated it is still alive --
+// RemoveRunnerByName and the background registration worker already work this way, so this aligns with them.
+// Values in the request context (such as trace) are still kept; only cancellation is no longer propagated.
 func lifecycleContext(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(parent), d)
 }
 
-// registrationJob 后台安装并注册 runner 的任务
+// registrationJob is the task that installs and registers a runner in the background
 type registrationJob struct {
 	BasePath   string
 	InstallDir string
@@ -77,10 +77,10 @@ type registrationJob struct {
 	Labels     []string
 }
 
-// registrationQueue 后台任务队列，单 worker 顺序执行，避免多任务同时占满资源且 API 不阻塞
+// registrationQueue is the background task queue, run sequentially by a single worker to avoid multiple tasks exhausting resources at once while keeping the API non-blocking
 var registrationQueue = make(chan registrationJob, 128)
 
-// StartRegistrationWorker 启动后台 worker，应在 main 中调用一次
+// StartRegistrationWorker starts the background worker; it should be called once in main
 func StartRegistrationWorker() {
 	startRegistrationWorker(registrationQueue)
 }
@@ -98,7 +98,7 @@ func startRegistrationWorker(queue <-chan registrationJob) <-chan struct{} {
 	return done
 }
 
-// runRegistrationJob 执行单次安装+注册+启动（在后台 goroutine 中调用）
+// runRegistrationJob performs a single install, register, and start (called in a background goroutine)
 func runRegistrationJob(j registrationJob) {
 	installDir := j.InstallDir
 	configScript := filepath.Join(installDir, runner.ConfigScriptName())
@@ -132,8 +132,8 @@ func runRegistrationJob(j registrationJob) {
 				strings.Contains(outLower, "already") || strings.Contains(outLower, "used")) {
 			msg += ". Generate a fresh registration token on GitHub for each runner."
 		}
-		// --unattended 下重名会直接失败退出，错误里只说「存在同名 Runner」，
-		// 但没说该去哪儿删——GitHub 侧的 Runner 列表不在本工具的管辖范围内
+		// Under --unattended, a duplicate name exits with an immediate failure, and the error only says "a runner with the same name exists",
+		// but it does not say where to delete it: the GitHub-side runner list is outside this tool's scope
 		if strings.Contains(outLower, "runner exists with the same name") ||
 			strings.Contains(outLower, "a runner exists with the same name") {
 			msg += ". GitHub already lists a runner with this name: delete it under Settings → Actions → Runners on the target repository or organization, then try again."
@@ -180,17 +180,17 @@ func clearProbe(info *runner.RunnerInfo) {
 	info.Probe = nil
 }
 
-// applyContainerStatus 容器模式下用 Agent 状态覆盖 list 中每项的 Running/Status，就地修改
+// applyContainerStatus overwrites each item's Running/Status in list with the Agent status in container mode, modifying in place
 func applyContainerStatus(ctx context.Context, cfg *config.Config, list []runner.RunnerInfo) {
 	for i := range list {
 		applyContainerStatusOne(ctx, cfg, &list[i])
 	}
 }
 
-// applyContainerStatusOne 容器模式下用 Agent 状态覆盖单条 info 的 Running/Status/Probe
+// applyContainerStatusOne overwrites the Running/Status/Probe of a single info with the Agent status in container mode
 func applyContainerStatusOne(ctx context.Context, cfg *config.Config, info *runner.RunnerInfo) {
 	running, status, drift, statusErr := runner.ContainerRunnerStatus(ctx, cfg, info.Name, info.InstallDir)
-	// 漂移信息与探测结果无关：探测失败时也照样带上，界面才能提示「这个容器是按旧配置建的」
+	// Drift information is independent of the probe result: it is still included when the probe fails, so the UI can warn that "this container was built from an old config"
 	info.ContainerDrift = drift
 	if statusErr != nil {
 		log.Printf("[container-status] name=%s: %v", info.Name, statusErr)
@@ -202,19 +202,19 @@ func applyContainerStatusOne(ctx context.Context, cfg *config.Config, info *runn
 	info.Status = status
 }
 
-// shortRandomSuffixLen 建议名后缀长度；字符集固定为小写字母+数字，
-// 因为它会被拼进容器名与目录名。
+// shortRandomSuffixLen is the length of the suggested name suffix; the charset is fixed to lowercase letters plus digits,
+// because it gets concatenated into container and directory names.
 const shortRandomSuffixLen = 6
 
-// shortRandomSuffix 生成 6 位小写字母+数字的随机后缀，用于 runner 名称去重。
+// shortRandomSuffix generates a 6-character random suffix of lowercase letters and digits, used to deduplicate runner names.
 //
-// 早先的实现是 letters[int(b[i])%len(letters)]：字符集 36 个字符除不尽 256，
-// a/b/c/d 出现的概率比其余字符高约 14%。后缀只用来去重，不是安全边界，
-// 但没有理由留着一个有偏的实现——secure.RandomString 走 crypto/rand.Int
-// 按字符集长度取模，天然无偏。
+// The earlier implementation was letters[int(b[i])%len(letters)]: the 36-character set does not divide 256 evenly,
+// so a/b/c/d are about 14% more likely than the other characters. The suffix is only for deduplication, not a security boundary,
+// but there is no reason to keep a biased implementation -- secure.RandomString uses crypto/rand.Int
+// with modulo by the charset length, which is naturally unbiased.
 //
-// 取不到随机数时返回空串，由调用方跳过这一轮：绝不能回退到一个可预测的值，
-// 那会让两次并发添加拿到同一个建议名，恰好制造出建议名本该避开的冲突。
+// It returns an empty string when no random number is available, and the caller skips this round: it must never fall back to a predictable value,
+// since that would let two concurrent adds get the same suggested name, creating exactly the conflict the suggestion is meant to avoid.
 func shortRandomSuffix() string {
 	s, err := secure.RandomString(shortRandomSuffixLen, secure.CharsetAlphanumericLower)
 	if err != nil {
@@ -224,7 +224,7 @@ func shortRandomSuffix() string {
 	return s
 }
 
-// runInstallRunnerScript 执行容器内 install-runner.sh，下载并解压 runner 到 basePath/runnerName；超时返回 error
+// runInstallRunnerScript runs install-runner.sh inside the container, downloading and extracting the runner to basePath/runnerName; returns an error on timeout
 func runInstallRunnerScript(basePath, runnerName string, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -237,17 +237,17 @@ func runInstallRunnerScript(basePath, runnerName string, timeout time.Duration) 
 	return out, err
 }
 
-// runConfigScript 在 installDir 下执行 config 脚本向 GitHub 注册，超时 2 分钟；返回输出与 error
-// 将 installDir 转为绝对路径，避免相对路径在 exec 时随进程 CWD 解析导致找不到 config 脚本
+// runConfigScript runs the config script under installDir to register with GitHub, with a 2-minute timeout; returns the output and error
+// Converts installDir to an absolute path, to avoid relative paths being resolved against the process CWD at exec time, which would fail to find the config script
 //
-// 必须传 --name：不传时 config.sh 取本机 hostname 作为 Runner 名，而它是在 Manager 容器内
-// 执行的，于是一个部署里的每个 Runner 都用同一个名字（Manager 容器的 hostname）去注册。
-// 结果是 GitHub 上只看得到一个 Runner，名字还是个容器 ID，与界面上的名称对不上。
+// --name must be passed: without it, config.sh uses the local hostname as the runner name, and that hostname is inside the Manager container
+// the one that ran, so every Runner in a deployment registered under the same name (the Manager container's hostname).
+// As a result, GitHub only showed one Runner, and its name was a container ID that did not match the name shown in the UI.
 //
-// 必须传 --unattended：撞上重名时，带 --unattended 会直接抛错退出，不带则进入交互式重试循环
-// （"Failed to replace the runner. Try again or ctrl-c to quit"）。这里没有 TTY，
-// 那个循环会一直耗到超时才结束，而注册是单 worker 顺序执行的，后面排队的 Runner 全被堵住——
-// 表现为「加了三个，只有第一个注册成功，另外两个连一行日志都没有」。
+// --unattended must be passed: on a name collision, --unattended makes it fail and exit immediately. Without it, it enters an interactive retry loop
+// ("Failed to replace the runner. Try again or ctrl-c to quit"). There is no TTY here,
+// so that loop runs until the timeout. Registration runs sequentially on a single worker, so every queued Runner behind it is blocked,
+// which shows up as "three were added, only the first registered, and the other two have not logged a single line".
 func runConfigScript(installDir, url, token, name string, labels []string, timeout time.Duration) ([]byte, error) {
 	absDir, err := filepath.Abs(installDir)
 	if err != nil {
@@ -274,7 +274,7 @@ func runConfigScript(installDir, url, token, name string, labels []string, timeo
 	return out, err
 }
 
-// writeRegistrationResult 将本次注册结果写入 runner 目录
+// writeRegistrationResult writes the result of this registration to the runner directory.
 func writeRegistrationResult(installDir string, success bool, message string) {
 	p := filepath.Join(installDir, runner.RegistrationResultFile)
 	body := struct {
@@ -283,12 +283,12 @@ func writeRegistrationResult(installDir string, success bool, message string) {
 		At      string `json:"at"`
 	}{Success: success, Message: message, At: time.Now().Format(time.RFC3339)}
 	b, _ := json.Marshal(body)
-	// 原子替换，理由同 runner.WriteGitHubStatus。错误仍然忽略：
-	// 注册结果写不下去不该让一次成功的注册报错，界面上少一条结果而已。
+	// Replaces atomically, for the same reason as runner.WriteGitHubStatus. Errors are still ignored:
+	// failing to write the registration result should not make a successful registration report an error. At worst, the UI is missing one result line.
 	_ = atomicfile.WriteFile(p, b, 0644)
 }
 
-// ListRunners 列出所有 runner；容器模式下用容器内 Agent 状态覆盖 Running/Status
+// ListRunners lists all runners. In container mode, the in-container Agent status overrides Running/Status.
 func ListRunners(c echo.Context) error {
 	cfg, err := getConfig(c)
 	if err != nil {
@@ -301,8 +301,8 @@ func ListRunners(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"runners": list})
 }
 
-// viewData 装配模板要用的数据。首页和 runnerRows 片段渲染的是同一批字段，
-// 两处各抄一遍迟早会漏掉其中一个（比如容器模式的状态覆盖），所以收在一起。
+// viewData assembles the data the template needs. The index page and the runnerRows fragment render the same set of fields,
+// and copying it in both places would eventually miss one of them (such as the container-mode status override), so it is kept in one place.
 func viewData(c echo.Context) (map[string]any, error) {
 	cfg, err := getConfig(c)
 	if err != nil {
@@ -334,7 +334,7 @@ func viewData(c echo.Context) (map[string]any, error) {
 	}, nil
 }
 
-// Index 管理界面首页；容器模式下用容器内 Agent 状态覆盖
+// Index serves the Manager home page. In container mode, the in-container Agent status overrides it.
 func Index(c echo.Context) error {
 	data, err := viewData(c)
 	if err != nil {
@@ -343,10 +343,10 @@ func Index(c echo.Context) error {
 	return c.Render(http.StatusOK, "index.html", data)
 }
 
-// RunnerRows 只渲染列表的 <tbody> 片段，供界面定时刷新时整体替换。
-// 走服务端片段而不是让 JS 拿 /api/runners 的 JSON 自己拼行，是因为行里那几处
-// 三态判断（GitHubYes/GitHubNo、GitHubBusyYes）指针为 false 时也非 nil，
-// 在 JS 里重写一遍正是最容易把「空闲」显示成「忙碌中」的地方。
+// RunnerRows renders only the list's <tbody> fragment, so the UI can replace it wholesale on periodic refresh.
+// Using a server-rendered fragment instead of having JS build rows from the /api/runners JSON is because several of the row fields
+// use three-state checks (GitHubYes/GitHubNo, GitHubBusyYes) where a false pointer is still non-nil.
+// Rewriting that logic in JS is exactly where it is easiest to show "idle" as "busy".
 func RunnerRows(c echo.Context) error {
 	data, err := viewData(c)
 	if err != nil {
@@ -355,12 +355,12 @@ func RunnerRows(c echo.Context) error {
 	return c.Render(http.StatusOK, "runnerRows", data)
 }
 
-// AddRunnerRequest 添加 runner 请求。
+// AddRunnerRequest is the request for adding a runner.
 //
-// 刻意只有 json tag，没有 form tag：跨站 form 提交是 CORS 意义上的「简单请求」，
-// 不触发预检就能带着已缓存的 Basic Auth 凭据发出去。少了 form tag，这种请求即便
-// 绕过了 csrfGuardMiddleware 也只能绑出一个空结构体，随即被必填校验挡掉。
-// 界面本来就用 JSON 提交（FormData 只用于就地读取表单字段），不受影响。
+// It deliberately has only json tags, not form tags. A cross-site form submission is a "simple request" in CORS terms,
+// and can carry cached Basic Auth credentials without a preflight. Without form tags, such a request, even if it got past csrfGuardMiddleware,
+// would only bind to an empty struct and then be rejected by required-field validation.
+// The UI already submits JSON (FormData is only used to read form fields in place), so this does not affect it.
 type AddRunnerRequest struct {
 	Name              string   `json:"name"`
 	Path              string   `json:"path"`
@@ -368,12 +368,12 @@ type AddRunnerRequest struct {
 	Target            string   `json:"target"`
 	Labels            []string `json:"labels"`
 	RegistrationToken string   `json:"registration_token"`
-	// AutoRename 为 true 时沿用旧行为：名称冲突自动改名。默认改为返回 409 并给出建议名，
-	// 免得界面上填了 foo 却静默建出 foo-ab12cd，用户以为自己在操作 foo。
+	// AutoRename true keeps the old behavior: on a name conflict, rename automatically. The default is now to return 409 with a suggested name,
+	// so that entering foo in the UI does not silently create foo-ab12cd and leave the user thinking they are operating on foo.
 	AutoRename bool `json:"auto_rename"`
 }
 
-// AddRunner 添加并可选注册新 runner
+// AddRunner adds a new runner and optionally registers it.
 func AddRunner(c echo.Context) error {
 	cfg, err := getConfig(c)
 	if err != nil {
@@ -399,8 +399,8 @@ func AddRunner(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, tr(c, "api.name_path_invalid"))
 	}
 	targetNorm := req.Target
-	// 冲突预检：同名 Runner、撞容器名、安装目录被占、磁盘上有已注册的残留目录、宿主机上有同名容器。
-	// 与 /api/runner-precheck 用的是同一套判断，保证界面提示和这里的结论一致。
+	// Conflict precheck: same-named Runner, container name collision, install directory already in use, leftover registered directory on disk, and same-named container on the host.
+	// It uses the same logic as /api/runner-precheck, so the UI hint and the result here always agree.
 	name := req.Name
 	lookupCtx, lookupCancel := lifecycleContext(c.Request().Context(), 5*time.Second)
 	defer lookupCancel()
@@ -428,7 +428,7 @@ func AddRunner(c echo.Context) error {
 			}
 			return c.JSON(http.StatusConflict, resp)
 		}
-		// auto_rename：沿用旧行为，自动找一个可用名
+		// auto_rename: keep the old behavior and automatically find an available name.
 		if req.Path != "" {
 			return echo.NewHTTPError(http.StatusConflict, trf(c, "api.rename_with_path", conflicts[0].Message))
 		}
@@ -465,7 +465,7 @@ func AddRunner(c echo.Context) error {
 	if req.RegistrationToken != "" {
 		configScript := filepath.Join(installDir, runner.ConfigScriptName())
 		if _, err := os.Stat(configScript); err != nil {
-			// 目录为空时需先安装：若存在自动安装脚本则交给后台 worker 执行，避免阻塞请求
+			// If the directory is empty, install is needed first: if an auto-install script exists, hand it to the background worker so the request is not blocked.
 			if _, scriptErr := os.Stat(installRunnerScriptPath); scriptErr == nil {
 				url := "https://github.com/" + targetNorm
 				select {
@@ -496,7 +496,7 @@ func AddRunner(c echo.Context) error {
 				"install_dir": installDir,
 			})
 		}
-		// 已有 config 脚本（目录非空）：仅需注册，也放入后台执行，避免长时间阻塞
+		// An existing config script (non-empty directory) only needs registration, which is also run in the background to avoid a long block.
 		url := "https://github.com/" + targetNorm
 		select {
 		case registrationQueue <- registrationJob{
@@ -527,7 +527,7 @@ func AddRunner(c echo.Context) error {
 	})
 }
 
-// GetRunner 查看单个 runner 配置与状态（GET /api/runners/:name）；容器模式下用 Agent 状态覆盖
+// GetRunner returns a single runner's config and status (GET /api/runners/:name). In container mode, the Agent status overrides it.
 func GetRunner(c echo.Context) error {
 	cfg, err := getConfig(c)
 	if err != nil {
@@ -550,7 +550,7 @@ func GetRunner(c echo.Context) error {
 	return c.JSON(http.StatusOK, info)
 }
 
-// StartRunner 启动指定 runner（POST /api/runners/:name/start）；容器模式下启动 Runner 容器并调 Agent /start
+// StartRunner starts the specified runner (POST /api/runners/:name/start). In container mode, it starts the Runner container and calls the Agent /start.
 func StartRunner(c echo.Context) error {
 	cfg, err := getConfig(c)
 	if err != nil {
@@ -576,7 +576,7 @@ func StartRunner(c echo.Context) error {
 			log.Printf("[start] status probe failed for container runner name=%s, starting anyway: %v", info.Name, info.Probe.Error)
 		}
 	}
-	// 容器模式下探测失败会把状态标记为 unknown；启动前资格判断应回退到磁盘原始状态。
+	// In container mode, if probing fails, the status is marked unknown; the eligibility check before start should fall back to the raw on-disk state.
 	startStatus := info.Status
 	if probeFailed {
 		startStatus = originalStatus
@@ -601,10 +601,10 @@ func StartRunner(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"message": tr(c, "api.start_issued")})
 }
 
-// RecreateRunner 按当前配置重建 Runner 容器（POST /api/runners/:name/recreate）。
+// RecreateRunner recreates the Runner container from the current config (POST /api/runners/:name/recreate).
 //
-// 启动已停止的容器时，发现创建参数与配置不一致会自动重建；但正在运行的容器不会——
-// 上面很可能正跑着 Job。这个接口就是那扇「我知道会中断，现在就换」的门。
+// When starting a stopped container, a mismatch between creation parameters and config triggers an automatic rebuild, but a running container is not rebuilt,
+// and it is likely running a Job right now. This endpoint is the door for "I know this will interrupt, replace it now".
 func RecreateRunner(c echo.Context) error {
 	cfg, err := getConfig(c)
 	if err != nil {
@@ -635,7 +635,7 @@ func RecreateRunner(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"message": tr(c, "api.recreated")})
 }
 
-// StopRunner 停止指定 runner（POST /api/runners/:name/stop）；容器模式下停止 Runner 容器
+// StopRunner stops the specified runner (POST /api/runners/:name/stop). In container mode, it stops the Runner container.
 func StopRunner(c echo.Context) error {
 	cfg, err := getConfig(c)
 	if err != nil {
@@ -664,10 +664,10 @@ func StopRunner(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]any{"message": tr(c, "api.not_running")})
 	}
 	if cfg.Runners.ContainerMode {
-		// 必须比宽限期长：StopRunnerContainer 执行的是 docker stop -t <宽限期>，
-		// 而容器里的 Agent 会用掉其中的大部分等 Runner 退出。上下文先到期，docker
-		// 子进程就在宽限期走完之前被 SIGKILL，界面上报「停止失败」，容器其实还在停。
-		// 这里按常量推出而不是写死 35：宽限期调大时这个上限跟着走，不必记得回来改。
+		// It must be longer than the grace period: StopRunnerContainer runs docker stop -t <grace period>,
+		// and the Agent inside the container uses most of that time waiting for the Runner to exit. If the context expires first, the docker
+		// child process gets SIGKILLed before the grace period finishes, the UI reports "stop failed", and the container is in fact still stopping.
+		// Computed from the constant instead of hardcoding 35: if the grace period is raised, this cap follows, so no need to come back and edit it.
 		ctx, cancel := lifecycleContext(c.Request().Context(), runnerproc.StopGracePeriod+5*time.Second)
 		defer cancel()
 		if err := runner.StopRunnerContainer(ctx, name); err != nil {
@@ -687,8 +687,8 @@ func StopRunner(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"message": tr(c, "api.stop_signalled")})
 }
 
-// UpdateRunnerRequest 更新 runner 请求（名称不可改，以 URL 路径参数为准）。
-// 与 AddRunnerRequest 同理，只接受 JSON。
+// UpdateRunnerRequest is the request to update a runner (the name cannot change; the URL path parameter is authoritative).
+// Same as AddRunnerRequest; accepts JSON only.
 type UpdateRunnerRequest struct {
 	Name       string   `json:"name"`
 	Path       string   `json:"path"`
@@ -697,7 +697,7 @@ type UpdateRunnerRequest struct {
 	Labels     []string `json:"labels"`
 }
 
-// UpdateRunner 更新 runner 配置（PUT /api/runners/:name）；名称不可改，与目录一致
+// UpdateRunner updates a runner's config (PUT /api/runners/:name); the name cannot change and must match the directory
 func UpdateRunner(c echo.Context) error {
 	name := c.Param("name")
 	if name == "" {
@@ -715,7 +715,7 @@ func UpdateRunner(c echo.Context) error {
 	req.TargetType = strings.TrimSpace(req.TargetType)
 	req.Target = strings.TrimSpace(req.Target)
 	req.Labels = normalizeLabels(req.Labels)
-	// 名称不可改，仅使用 URL 路径参数
+	// The name cannot change; only the URL path parameter is used
 	if req.Name != "" && req.Name != name {
 		return echo.NewHTTPError(http.StatusBadRequest, tr(c, "api.name_immutable"))
 	}
@@ -761,7 +761,7 @@ func UpdateRunner(c echo.Context) error {
 		return err
 	}
 	updated = runner.GetByName(cfg, name)
-	// 若已注册且未在运行，自动启动（容器/进程模式统一走 StartIfInstalled）
+	// If already registered and not running, start it automatically (container and process modes both go through StartIfInstalled)
 	msg := tr(c, "api.updated")
 	var started bool
 	if updated != nil && updated.Status == runner.StatusInstalled && !updated.Running {
@@ -782,13 +782,13 @@ func UpdateRunner(c echo.Context) error {
 	})
 }
 
-// deregisterFromGitHub 做成变量便于测试替换：真实实现要打 GitHub API，
-// 而这里真正要钉住的是「在删目录之前调用它」——照旧文档放进那个目录的 PAT
-// 要先被搬出来才能用上，搬运的源头就是那个目录。
+// deregisterFromGitHub is a variable so tests can replace it: the real implementation calls the GitHub API,
+// while what this test actually pins down is "calling it before the directory is deleted". The PAT that the old docs placed in that directory
+// has to be moved out before it can be used, and the source of that move is the directory itself.
 var deregisterFromGitHub = githubcheck.Deregister
 
-// RemoveRunnerByName 从路径参数获取 name 并移除（DELETE /api/runners/:name）
-// 会先停止 runner 进程，再删除其安装目录，最后从配置中移除。
+// RemoveRunnerByName takes the name from the path parameter and removes it (DELETE /api/runners/:name)
+// It first stops the runner process, then deletes its install directory, and finally removes it from the config.
 func RemoveRunnerByName(c echo.Context) error {
 	name := c.Param("name")
 	if name == "" {
@@ -806,7 +806,7 @@ func RemoveRunnerByName(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, tr(c, "api.runner_not_found"))
 	}
 	installDir := info.InstallDir
-	// 先停止 runner：容器模式下停止并删除容器，否则停止本地进程
+	// Stop the runner first: in container mode, stop and delete the container; otherwise stop the local process
 	if cfg.Runners.ContainerMode {
 		ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()
@@ -816,10 +816,10 @@ func RemoveRunnerByName(c echo.Context) error {
 	} else {
 		_ = runner.Stop(installDir)
 	}
-	// 必须赶在删目录之前注销：GitHub 侧的删除要用该 Runner 的 PAT，而照旧文档
-	// 放进该目录的那份要先被搬出来才能用上。
-	// 从本工具删掉不等于从 GitHub 删掉——留下的那个会让之后用同一名称重新添加时
-	// 撞上「存在同名 Runner」而注册失败。
+	// Deregistration must happen before the directory is deleted: deleting on the GitHub side needs this runner's PAT, while the copy the old docs placed
+	// in that directory has to be moved out before it can be used.
+	// Deleting from this tool does not delete from GitHub. The leftover runner would make a later re-add with the same name
+	// fail with "a runner with this name already exists".
 	store := secretStore()
 	deregCtx, deregCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	dereg := deregisterFromGitHub(deregCtx, store, installDir, info.TargetType, info.Target, name)
@@ -827,8 +827,8 @@ func RemoveRunnerByName(c echo.Context) error {
 	if !dereg.Done {
 		log.Printf("[remove] %s: %s", name, trEnf(dereg.MessageKey, dereg.MessageArgs...))
 	}
-	// 凭据在注销之后才能删：注销正要用它。留着的话，下一个同名 Runner 会莫名
-	// 继承上一个的 PAT。
+	// Credentials can only be deleted after deregistration, since deregistration still needs them. If they were kept, the next runner with the same name would
+	// silently inherit the previous one's PAT.
 	// Keep credentials until installation cleanup is confirmed, so failures can be
 	// inspected and retried using the existing identity and configuration.
 	if installDir != "" && isUnderBasePath(cfg.Runners.BasePath, installDir) {
@@ -853,7 +853,7 @@ func RemoveRunnerByName(c echo.Context) error {
 	})
 }
 
-// isUnderBasePath 判断 dir 是否在 basePath 之下（用于安全删除），且不为 basePath 自身
+// isUnderBasePath reports whether dir is under basePath (used for safe deletion), and dir is not basePath itself
 func isUnderBasePath(basePath, dir string) bool {
 	baseAbs, err := filepath.Abs(basePath)
 	if err != nil {
@@ -887,11 +887,11 @@ func normalizeLabels(labels []string) []string {
 	return out
 }
 
-// removeRunnerFromConfig 从内存中的配置移除指定 runner，不写文件（由 LoadAndSave 负责保存）。
+// removeRunnerFromConfig removes the specified runner from the in-memory config without writing a file (saving is handled by LoadAndSave).
 //
-// 收 echo.Context 只为把「未找到」这条消息按请求语言翻出来。它本来就返回
-// echo.NewHTTPError，传上下文进来不比原先更耦合；反过来让它返回哨兵错误、
-// 由调用点翻译，等于为这一处单开一条只有它用的错误通道。
+// It takes echo.Context only so the "not found" message can be translated into the request's language. It already returns
+// echo.NewHTTPError, so passing the context in adds no more coupling than before. Returning a sentinel error instead and
+// translating at the call site would mean a separate error channel used only by this one place.
 func removeRunnerFromConfig(c echo.Context, cfg *config.Config, name string) error {
 	newItems := make([]config.RunnerItem, 0, len(cfg.Runners.Items))
 	for _, item := range cfg.Runners.Items {

@@ -8,16 +8,16 @@ import (
 	"testing"
 )
 
-// repoRoot 本包在 internal/docsconsistency 下，测试的工作目录就是包目录。
+// repoRoot is in internal/docsconsistency, so the test's working directory is the package directory.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 认准一个只会出现在仓库根的文件，路径算错时立刻失败，而不是静默地什么都没查。
+	// Use a file that only exists at the repo root; if the path is wrong, fail right away instead of silently checking nothing.
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
-		t.Fatalf("没找到仓库根（%s）: %v", root, err)
+		t.Fatalf("repo root not found (%s): %v", root, err)
 	}
 	return root
 }
@@ -39,30 +39,30 @@ var (
 	codeRe    = regexp.MustCompile("`[^`]*`")
 )
 
-// section 一个标题及其正文的统计量。正文指到下一个标题为止的内容。
+// section holds the stats for one heading and its body. The body runs up to the next heading.
 type section struct {
-	line     int // 标题所在行号，仅用于报错定位
-	tableRow int // 表格行数（以 | 开头的行）
+	line     int // Line number of the heading, used only to locate errors
+	tableRow int // Number of table rows (lines starting with |)
 	blocks   []codeBlock
 	bullets  int
-	links    []string // 解析为仓库相对路径后的链接目标，纯锚点链接不计
+	links    []string // Link target resolved to a repo-relative path; pure anchor links are not counted
 }
 
 type codeBlock struct {
-	info  string // ``` 后面的语言标记
-	lines int    // 非注释、非空的行数
+	info  string // Language tag after ```
+	lines int    // Number of non-comment, non-blank lines
 }
 
-// parseSections 按标题切分文档并统计每节的内容量。
+// parseSections splits a document by heading and counts the content of each section.
 //
-// 围栏内的行不参与任何识别：guide.md 的 bash 块里有 `# 编辑 config/config.yaml…`
-// 这样的注释行，当成标题会让节数直接对不上（ci-recipes 的标题检查同样跳过围栏，
-// 两边看到的必须是同一份切分）。
+// Lines inside fences are not recognized as anything. guide.md has a bash block containing `# edit config/config.yaml…`
+// comment lines like this, which would count as headings and throw off the section count (the ci-recipes heading check also skips fences,
+// so both sides must see the same split).
 func parseSections(t *testing.T, path string) []section {
 	t.Helper()
 	lines := readLines(t, path)
 
-	// 文件开头到第一个标题之间的内容归入一个哨兵节，这样所有文件的下标都能对齐。
+	// Content from the start of the file up to the first heading goes into a sentinel section so indexes line up across all files.
 	secs := []section{{line: 0}}
 	inFence := false
 	var fenceInfo string
@@ -83,7 +83,7 @@ func parseSections(t *testing.T, path string) []section {
 		}
 		if inFence {
 			s := strings.TrimSpace(raw)
-			// 注释行按语言翻译，不参与比对；空行同理。
+			// Comment lines are translated per language and not compared; blank lines likewise.
 			if s != "" && !strings.HasPrefix(s, "#") && !strings.HasPrefix(s, "//") {
 				fenceCount++
 			}
@@ -107,17 +107,17 @@ func parseSections(t *testing.T, path string) []section {
 	return secs
 }
 
-// docLinks 取出一行里的 Markdown 链接，解析成仓库相对路径。
+// docLinks extracts the Markdown links from a line and resolves them to repo-relative paths.
 //
-// 解析而不是直接比字面量，是因为同一个目标在英文与译文里的写法必然不同：
-// docs/guide.md 写 ../examples/，docs/zh/guide.md 写 ../../examples/，
-// 指的是同一个地方。纯锚点链接（#4-security…）两边本该不同，跳过。
+// Parsing instead of comparing raw literals, because the same target is necessarily written differently in English and translations:
+// docs/guide.md writes ../examples/, docs/zh/guide.md writes ../../examples/,
+// and both point to the same place. Pure anchor links (#4-security…) are expected to differ between the two, so skip them.
 func docLinks(path, raw string) []string {
-	// 顶部的语言导航行两边天然不同（当前语言不是链接），不比。
+	// The language nav line at the top is naturally different on each side (the current language is not a link), so don't compare it.
 	if strings.HasPrefix(strings.TrimSpace(raw), "**文档") {
 		return nil
 	}
-	// 行内代码里的 [x](y) 是被展示的文本，不是链接。
+	// [x](y) inside inline code is displayed text, not a link.
 	line := codeRe.ReplaceAllString(raw, "")
 
 	var out []string

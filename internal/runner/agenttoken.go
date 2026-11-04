@@ -1,9 +1,9 @@
-// Agent 调用令牌：Runner 容器内的 Agent 暴露 /start、/stop 等控制接口，
-// 同一 docker 网络内的任何容器都能访问。令牌用于确认调用方确实是 Manager。
+// Agent call token: the Agent inside the Runner container exposes control endpoints such as /start and /stop,
+// reachable from any container on the same docker network. The token confirms the caller really is the Manager.
 //
-// 令牌存放在 Runner 安装目录下，该目录既被 Manager 访问（宿主机侧路径），
-// 也挂载进 Runner 容器（/runner），因此无需通过环境变量传递，
-// Manager 重启后也能重新读到同一个令牌。
+// The token is stored in the Runner install directory, which the Manager accesses (host-side path)
+// and which is also mounted into the Runner container (/runner). So it does not need to be passed through environment variables,
+// and the Manager can read the same token again after a restart.
 package runner
 
 import (
@@ -17,42 +17,42 @@ import (
 	secure "github.com/soulteary/secure-kit/v2"
 )
 
-// AgentTokenFile Runner 安装目录下保存 Agent 令牌的文件名
+// AgentTokenFile is the name of the file in the Runner install directory that stores the Agent token
 const AgentTokenFile = ".agent_token"
 
-// agentTokenBytes 令牌随机字节数，hex 编码后为 64 个字符
+// agentTokenBytes is the number of random bytes in the token; it is 64 characters after hex encoding
 const agentTokenBytes = 32
 
-// EnsureAgentToken 返回该 Runner 的 Agent 令牌：已存在则读出，否则生成并以 0600 写入。
-// 生成或写入失败时返回错误，调用方必须停止需要认证的操作。
+// EnsureAgentToken returns the Agent token for this Runner: it reads the token if it exists, otherwise it generates one and writes it with mode 0600.
+// On a generation or write failure it returns an error; callers must stop any operation that requires authentication.
 //
-// 启停路径（持 runnerOps 锁）与状态路径（不持锁，因为它每次列表都要跑，不能被一次几秒的
-// docker create 挡住）会同时走到这里，所以创建必须是「单一胜者」：各生成一个的话，
-// 后落盘的会覆盖先落盘的，而注入进容器的是先落盘的那个——Agent 认自己 env 里的 A、
-// Manager 之后从盘上读到 B，从此永远 401，且容器 env 非空，agent_token 漂移检查也修不回来。
+// The start/stop path (holds the runnerOps lock) and the status path (no lock, because it runs on every list and must not be blocked by a
+// docker create that takes a few seconds) both reach here, so creation must have a single winner: if each generated its own,
+// whichever was written to disk last would overwrite the first, yet the value injected into the container is the first one. The Agent checks its env A,
+// the Manager later reads B from disk and gets 401 forever, and the container env is non-empty, so the agent_token drift check cannot repair it either.
 //
-// 做法是「先写临时文件，内容齐全后再原子地挂上正式名字」：os.Link 不会覆盖已有的名字，
-// 所以既是单一胜者，又保证 .agent_token 这个名字要么不存在、要么内容完整——
-// 不存在「已创建、还没写完」的中间态。
+// The approach is to write a temp file first and, once the content is complete, atomically attach the final name. os.Link does not overwrite an existing name,
+// so it gives a single winner and also guarantees that the .agent_token name either does not exist or has complete content.
+// There is no intermediate state of 'created but not yet written'.
 //
-// 刻意不去回收空文件。回收必然要 unlink，而「等若干毫秒还是空就判定写入者已死」
-// 是不成立的：写入者可能只是被调度走了，或者文件系统写入卡了一下（宿主机负载、
-// NFS、cgroup IO 限流都会）。此时 unlink 就会把一个还活着的写入者的 inode 摘掉，
-// 它照样把 A 写进那个已经没有名字的 inode 并返回 A，而盘上留下的是回收者发布的 B——
-// 正是上面那种分裂。本实现既然不产生空文件，也就没有需要回收的东西。
+// Empty files are deliberately not reclaimed. Reclaiming requires unlink, and the idea that 'if it is still empty after a few milliseconds, the writer is dead'
+// does not hold. The writer may simply have been descheduled, or the filesystem write may have stalled (host load,
+// NFS, or cgroup IO throttling can all cause this). Unlinking then removes the inode of a writer that is still alive,
+// which still writes A into the now-nameless inode and returns A, while the disk keeps B, published by the reclaimer.
+// That is exactly the split described above. Since this implementation never produces empty files, there is nothing to reclaim.
 func EnsureAgentToken(installDir string) (string, error) {
 	if token := ReadAgentToken(installDir); token != "" {
 		return token, nil
 	}
 	path := filepath.Join(installDir, AgentTokenFile)
 
-	// RandomHex(n) 返回 2n 个十六进制字符，与原先 rand.Read(32 字节)+hex 编码等价
+	// RandomHex(n) returns 2n hex characters, equivalent to the original rand.Read(32 bytes) plus hex encoding
 	token, err := secure.RandomHex(agentTokenBytes)
 	if err != nil {
 		return "", fmt.Errorf("cannot generate the Agent token: %w", err)
 	}
 
-	// os.CreateTemp 以 0600 创建，与正式文件一致
+	// os.CreateTemp creates the file with 0600, consistent with the final file
 	f, err := os.CreateTemp(installDir, AgentTokenFile+".tmp-*")
 	if err != nil {
 		return "", fmt.Errorf("cannot create the temporary token file: %w", err)
@@ -71,13 +71,13 @@ func EnsureAgentToken(installDir string) (string, error) {
 		if !os.IsExist(err) {
 			return "", fmt.Errorf("cannot publish the Agent token %s: %w", path, err)
 		}
-		// 名字已被占：别人先发布了，用他的。经由 Link 挂上来的内容必然是完整的
+		// The name is already taken: someone else published first, so use theirs. Content attached via Link is always complete,
 		if existing := ReadAgentToken(installDir); existing != "" {
 			return existing, nil
 		}
-		// 占位的是个读不出内容的文件。本实现不会产生这种文件，所以它要么是更早版本
-		// 写入失败的残留，要么是权限问题。两种都不该由这里擅自删除——见上面关于
-		// unlink 的说明——交给人处理，并把该做什么说清楚。
+		// so the occupying file is one whose content cannot be read. This implementation does not produce such a file, so it is either a leftover
+		// from an earlier version's failed write, or a permissions problem. Neither should be deleted from here (see the note above about
+		// unlink). Hand it to a human and state clearly what should be done.
 		return "", fmt.Errorf("the token file %s exists but reads back empty (a leftover from a failed write by an earlier version, "+
 			"or the permissions are wrong). Restore the existing token and its permissions before retrying; "+
 			"the Manager will not make unauthenticated Agent calls", path)
@@ -85,12 +85,12 @@ func EnsureAgentToken(installDir string) (string, error) {
 	return token, nil
 }
 
-// tokenWarnOnce 同一个安装目录只告警一次，避免被状态轮询刷屏
+// tokenWarnOnce warns only once per install directory, to avoid flooding the log from status polling
 var tokenWarnOnce sync.Map
 
-// WarnAgentTokenUnavailable 令牌拿不到时告警。状态路径每次列表都会调用 EnsureAgentToken，
-// 不能每次都打；但也不能完全不打——拿不到令牌会阻止 Manager 调用 Agent，
-// 而且 agent_token 漂移检查会因为「手头没有令牌」而跳过自己，界面上什么都看不到。
+// WarnAgentTokenUnavailable warns when the token cannot be obtained. The status path calls EnsureAgentToken on every list,
+// so it cannot warn every time. But it must not stay silent either: without a token the Manager cannot call the Agent,
+// and the agent_token drift check skips itself because it has no token, so nothing shows up in the UI.
 func WarnAgentTokenUnavailable(installDir string, err error) {
 	if err == nil {
 		return
@@ -104,8 +104,8 @@ func WarnAgentTokenUnavailable(installDir string, err error) {
 	})
 }
 
-// ReadAgentToken 读取令牌；文件不存在或内容为空时返回空字符串。
-// 空字符串表示凭据不可用，不能视为允许匿名访问。
+// ReadAgentToken reads the token. It returns an empty string if the file does not exist or is empty.
+// An empty string means the credential is unavailable and must not be treated as allowing anonymous access.
 func ReadAgentToken(installDir string) string {
 	b, err := os.ReadFile(filepath.Join(installDir, AgentTokenFile))
 	if err != nil {

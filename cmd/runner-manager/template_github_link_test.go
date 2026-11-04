@@ -20,12 +20,12 @@ func zhText(t *testing.T, key string) string {
 		t.Fatal(err)
 	}
 	if T[key] == "" {
-		t.Fatalf("zh.json 里没有 %q", key)
+		t.Fatalf("zh.json has no %q", key)
 	}
 	return T[key]
 }
 
-// 已登记时「已注册」和「GitHub ✓」都要能点到 GitHub 的 Runners 设置页
+// When registered, both "Registered" and "GitHub ✓" must link to the GitHub Runners settings page
 func TestIndexTemplate_GitHubIndicatorsLinkToSettingsPage(t *testing.T) {
 	html := renderIndex(t, runner.RunnerInfo{
 		Name: "alpha", Status: runner.StatusInstalled,
@@ -36,17 +36,17 @@ func TestIndexTemplate_GitHubIndicatorsLinkToSettingsPage(t *testing.T) {
 	})
 	href := `href="https://github.com/o/r/settings/actions/runners"`
 	if n := strings.Count(html, href); n != 2 {
-		t.Fatalf("「已注册」与「GitHub ✓」都应链接到设置页，找到 %d 处 %s", n, href)
+		t.Fatalf("\"Registered\" and \"GitHub ✓\" should both link to the settings page, found %d of %s", n, href)
 	}
-	// 新标签页打开，并且带 noopener——否则新页面能通过 window.opener 操纵本页
+	// Open in a new tab with noopener, otherwise the new page can manipulate this one via window.opener
 	if strings.Count(html, `target="_blank"`) < 2 || strings.Count(html, `rel="noopener noreferrer"`) < 2 {
-		t.Fatal("跳转 GitHub 的链接应带 target=_blank 与 rel=noopener noreferrer")
+		t.Fatal("Links to GitHub should carry target=_blank and rel=noopener noreferrer")
 	}
 }
 
-// 「已注册」变成链接之后，原来挂在它上面的注册结果原文不能丢——
-// 那一格真正的诊断信息就是它，注册失败时尤其要看得到。
-// 载体已从 title 换成 .tip：title 键盘和触屏都拿不到，而这条恰恰是排查要看的。
+// Once "Registered" becomes a link, the raw registration result that was attached to it must not be lost,
+// since that cell is the real diagnostic info, especially visible when registration fails.
+// The carrier moved from title to .tip: title is unreachable by keyboard and touch, yet this is what troubleshooting needs.
 func TestIndexTemplate_RegisteredLinkKeepsRegistrationMessageTooltip(t *testing.T) {
 	msg := "注册失败：A runner exists with the same name，请先删除同名 Runner"
 	html := renderIndex(t, runner.RunnerInfo{
@@ -57,43 +57,43 @@ func TestIndexTemplate_RegisteredLinkKeepsRegistrationMessageTooltip(t *testing.
 		GitHubURL: runner.GitHubSettingsURL("repo", "o/r"),
 	})
 	if !strings.Contains(html, `<span class="tip">`+msg+`</span>`) {
-		t.Fatal("「已注册」链接应保留注册结果原文（.tip）")
+		t.Fatal("The \"Registered\" link should keep the raw registration result (.tip)")
 	}
-	// 提示必须挂在那个链接自己身上，否则悬停/聚焦时根本不会出来
+	// The tooltip must be attached to the link itself, otherwise it never appears on hover or focus
 	i := strings.Index(html, `class="reg-ok github-link has-tip"`)
 	if i < 0 {
-		t.Fatal("「已注册」链接缺少 has-tip")
+		t.Fatal("The \"Registered\" link is missing has-tip")
 	}
 	if !strings.Contains(html[i:i+len(msg)+400], `<span class="tip">`+msg+`</span>`) {
-		t.Fatal("注册结果原文没有挂在「已注册」链接内部")
+		t.Fatal("The raw registration result is not attached inside the \"Registered\" link")
 	}
 }
 
-// 目标拼不出可信地址时宁可不给链接：点了 404 的链接比纯文本更难排查
+// When the target can't form a trustworthy address, prefer no link: a link that 404s is harder to troubleshoot than plain text
 func TestIndexTemplate_NoLinkWithoutURL(t *testing.T) {
 	html := renderIndex(t, runner.RunnerInfo{
 		Name: "alpha", Status: runner.StatusInstalled,
 		RegistrationMessage: "ok", GitHubCheckAt: "2026-09-20T09:00:00Z",
 		RegisteredOnGitHub: boolPtr(true),
-		GitHubURL:          "", // target 非法，Go 侧已拒绝生成
+		GitHubURL:          "", // target is invalid, the Go side has already refused to generate it
 	})
 	if strings.Contains(html, "/settings/actions/runners") {
-		t.Fatal("没有可信地址时不应渲染链接")
+		t.Fatal("A link should not render when there is no trustworthy address")
 	}
-	// 文案本身还得在，只是不可点
+	// The text itself should remain, just not clickable
 	if !strings.Contains(html, zhText(t, "github.yes")) {
-		t.Fatal("即便没有链接，「GitHub ✓」文案仍应显示")
+		t.Fatal("Even without a link, the \"GitHub ✓\" text should still be displayed")
 	}
 }
 
-// hrefRe 取出渲染结果里所有 href 的值
+// hrefRe extracts the values of all hrefs in the rendered output
 var hrefRe = regexp.MustCompile(`href="([^"]*)"`)
 
-// href 是拼给浏览器的。target 由用户填，必须证明它落进 href 后仍然出不去。
+// href is handed to the browser. target is user-supplied, so we must prove it cannot escape the href even after landing in it.
 //
-// 只断言 href 的值，不在整页里搜关键字：target 同时也会作为文本出现在目标那一列，
-// 在那里它已经被转义成 &#34; 之类的惰性文本，整页搜 onmouseover= 会搜到它而误报。
-// 真正要证明的是「引号进不了 href」——能逃出属性的只有裸引号。
+// Assert only the href values, do not search keywords across the whole page: target also appears as text in the target column,
+// where it has already been escaped into inert text such as &#34;, so searching the page for onmouseover= would match it and cause a false positive.
+// What really needs proving is "a quote cannot get into the href": only a bare quote can break out of the attribute.
 func TestIndexTemplate_HostileTargetCannotInjectHref(t *testing.T) {
 	for _, target := range []string{
 		`o/r" onmouseover="alert(1)`,
@@ -114,27 +114,27 @@ func TestIndexTemplate_HostileTargetCannotInjectHref(t *testing.T) {
 			}
 			checked++
 			if !strings.HasPrefix(href, "https://github.com/") {
-				t.Fatalf("target %q 生成了非 github.com 的 href: %q", target, href)
+				t.Fatalf("target %q produced a non-github.com href: %q", target, href)
 			}
-			// html/template 会把 URL 上下文里危险的协议改写成 #ZgotmplZ
+			// html/template rewrites dangerous protocols in URL context to #ZgotmplZ
 			if strings.Contains(href, "ZgotmplZ") || strings.Contains(href, "javascript:") {
-				t.Fatalf("target %q 生成了被模板判危的 href: %q", target, href)
+				t.Fatalf("target %q produced an href flagged by the template: %q", target, href)
 			}
 			for _, bad := range []string{`"`, `'`, `<`, `>`, ` `} {
 				if strings.Contains(href, bad) {
-					t.Fatalf("target %q 的 href 里有未转义的 %q: %q", target, bad, href)
+					t.Fatalf("target %q has an unescaped %q in its href: %q", target, bad, href)
 				}
 			}
 		}
 		if checked == 0 {
-			t.Fatalf("target %q 没渲染出任何设置页链接，断言落空了", target)
+			t.Fatalf("target %q rendered no settings page link, the assertion failed", target)
 		}
 	}
 }
 
-// 忙碌徽标只在 GitHub 说它忙的时候出现。
-// GitHubBusy 是 *bool：模板里写 {{if .GitHubBusy}} 会让「空闲」也显示成「忙碌中」，
-// 和当初 RegisteredOnGitHub 那个 bug 是同一个坑，所以三态都要钉住。
+// The busy badge only appears when GitHub reports the runner as busy.
+// GitHubBusy is a *bool: writing {{if .GitHubBusy}} in the template would make "idle" show as "busy",
+// the same trap as the earlier RegisteredOnGitHub bug, so all three states must be pinned down.
 func TestIndexTemplate_BusyBadgeOnlyWhenBusy(t *testing.T) {
 	busy := zhText(t, "badge.busy")
 	cases := []struct {
@@ -154,15 +154,15 @@ func TestIndexTemplate_BusyBadgeOnlyWhenBusy(t *testing.T) {
 				RegistrationMessage: "ok", GitHubBusy: tc.v,
 			})
 			if got := strings.Contains(html, ">"+busy+"<"); got != tc.want {
-				t.Fatalf("忙碌徽标出现 = %v，期望 %v", got, tc.want)
+				t.Fatalf("busy badge present = %v, expected %v", got, tc.want)
 			}
 		})
 	}
 }
 
-// 查看态要真的是三栏。样式表里少了这条，弹窗就退回一长条竖排，
-// 而模板渲染得出来的 HTML 是一样的——只能直接断言样式。
-// 样式与脚本已从 index.html 拆到 static/，断言跟着挪，意图不变。
+// The detail view must really be three columns. Without this rule in the stylesheet the modal falls back to one long vertical stack,
+// while the rendered HTML looks identical, so the styles themselves must be asserted directly.
+// Styles and scripts were moved out of index.html into static/; the assertion follows them, intent unchanged.
 func TestIndexTemplate_ViewIsThreeColumnGrid(t *testing.T) {
 	cssBytes, err := staticFS.ReadFile("static/app.css")
 	if err != nil {
@@ -174,7 +174,7 @@ func TestIndexTemplate_ViewIsThreeColumnGrid(t *testing.T) {
 		"#modalView .row.span-all { grid-column: 1 / -1; }",
 	} {
 		if !strings.Contains(css, want) {
-			t.Fatalf("样式表里应有 %q", want)
+			t.Fatalf("stylesheet should contain %q", want)
 		}
 	}
 	jsBytes, err := staticFS.ReadFile("static/app.js")
@@ -182,11 +182,11 @@ func TestIndexTemplate_ViewIsThreeColumnGrid(t *testing.T) {
 		t.Fatal(err)
 	}
 	js := string(jsBytes)
-	// 行内 display:block 会盖掉 display:grid，三栏当场失效
+	// An inline display:block overrides display:grid and breaks the three columns immediately
 	if strings.Contains(js, "modalView.style.display = 'block'") {
-		t.Fatal("modalView 不能用行内 display:block 显示，会盖掉样式表里的 grid")
+		t.Fatal("modalView cannot be shown with inline display:block, as it would override the grid in the stylesheet")
 	}
 	if strings.Contains(js, "modalEditForm.style.display = 'block'") {
-		t.Fatal("modalEditForm 不能用行内 display:block 显示，会盖掉样式表里的 grid")
+		t.Fatal("modalEditForm cannot be shown with inline display:block, as it would override the grid in the stylesheet")
 	}
 }

@@ -9,15 +9,15 @@ import (
 	"testing"
 )
 
-// 只查这几个前缀开头的引用。仓库里出现的其它斜杠串不是本仓库的路径：
-// runners/<name>/.agent_token 是运行期产物，config/config.yaml 被 gitignore，
-// src/Misc/layoutbin/runsvc.sh 是 actions/runner 的路径。
+// Only check references starting with these prefixes. Other slash-separated strings in the repo are not paths to this repo:
+// runners/<name>/.agent_token is a runtime artifact, config/config.yaml is gitignored,
+// src/Misc/layoutbin/runsvc.sh is a path in actions/runner.
 var refPrefixes = []string{"docs/", "examples/", "scripts/", "cmd/", "internal/", ".github/"}
 
-// 扫描这些文件。Markdown 之间的相对链接已经被渲染器和人眼盯着，
-// 真正没人看的是配置模板与 compose 文件注释里的引用——本仓库历史上的两处失效引用
-// 都在这里（docker-compose.yml 与 config.yaml.example 顶部各有一句「详见 …」），
-// 而且指向的文件在仓库历史中从未存在过。
+// Scan these files. Relative links between Markdown files are already watched by the renderer and human eyes,
+// What nobody actually checks are references in config templates and compose file comments; the two broken references in this repo's history
+// are both here (docker-compose.yml and config.yaml.example each have a line at the top saying "see ..."),
+// and the files they point to never existed in the repo history.
 func scannedForRefs(name string) bool {
 	switch filepath.Ext(name) {
 	case ".yml", ".yaml", ".example", ".sh", ".conf", ".go":
@@ -28,15 +28,15 @@ func scannedForRefs(name string) bool {
 
 var urlRe = regexp.MustCompile(`https?://\S+`)
 
-// 结尾可能粘上的 ASCII 标点。中文标点由 cutAtNonPath 一并截掉。
+// Trailing ASCII punctuation may stick to the end. Chinese punctuation is cut off by cutAtNonPath as well.
 const trailingPunct = ".,;:!?)]}'\"`"
 
-// cutAtNonPath 把 token 截到第一个不可能出现在路径里的字符。
+// cutAtNonPath cuts the token at the first character that can never appear in a path.
 //
-// 中文注释里路径后面常常直接跟标点或汉字、中间没有空格——
-// 「见 scripts/ci-recipes.conf（基准路径……」按空白切出来是一整个 token。
-// 不截断就会拿着 "scripts/ci-recipes.conf（基准路径" 去 Stat，对一条完全正确的
-// 注释报红。这里按「什么能出现在路径里」来切，比逐个枚举中文标点可靠。
+// In Chinese comments, a path is often followed directly by punctuation or Han characters with no space;
+// a comment like "see scripts/ci-recipes.conf (baseline path..." split on whitespace becomes one whole token.
+// Without cutting, it would Stat "scripts/ci-recipes.conf (baseline path" and flag a fully correct
+// comment as broken. Splitting on "what can appear in a path" is more reliable than enumerating Chinese punctuation one by one.
 func cutAtNonPath(tok string) string {
 	for i, r := range tok {
 		switch {
@@ -49,14 +49,14 @@ func cutAtNonPath(tok string) string {
 	return tok
 }
 
-// TestPathRefs_NonMarkdownFilesPointAtRealFiles 非 Markdown 文件里引用的仓库路径必须存在。
+// TestPathRefs_NonMarkdownFilesPointAtRealFiles: repo paths referenced in non-Markdown files must exist.
 //
-// Markdown 之间的相对链接目前零断链，断掉的两处全在 .yml 与 .example 的注释里，
-// 没有任何检查覆盖那一侧——而 config.yaml.example 恰恰是每个用户第一步就会复制走、
-// 并照着改的文件，它顶上那句「详细字段说明见 …」曾把人指向一份从未存在过的文件。
+// Relative links between Markdown files currently have zero broken links; the two broken ones are both in .yml and .example comments,
+// and no check covers that side. Yet config.yaml.example is exactly the file every user copies first
+// and edits, and its top line "detailed field docs in ..." once pointed people to a file that never existed.
 //
-// 附带的约束：注释里也不能再写失效路径。这是有意的——一条指不到东西的路径，
-// 写在注释里和写在文档里一样会浪费读者的时间。
+// Side constraint: comments must not contain broken paths either. This is intentional; a path that points to nothing
+// wastes the reader's time in a comment just as much as in a doc.
 func TestPathRefs_NonMarkdownFilesPointAtRealFiles(t *testing.T) {
 	repo := repoRoot(t)
 
@@ -90,7 +90,7 @@ func TestPathRefs_NonMarkdownFilesPointAtRealFiles(t *testing.T) {
 					continue
 				}
 				if _, err := os.Stat(filepath.Join(repo, ref)); err != nil {
-					t.Errorf("%s:%d 引用了不存在的 %s", filepath.ToSlash(rel), i+1, ref)
+					t.Errorf("%s:%d references nonexistent %s", filepath.ToSlash(rel), i+1, ref)
 				}
 			}
 		}
@@ -101,11 +101,11 @@ func TestPathRefs_NonMarkdownFilesPointAtRealFiles(t *testing.T) {
 	}
 }
 
-// pathRefs 取出一行里指向本仓库的路径引用。
+// pathRefs extracts path references in a line that point to this repo.
 //
-// 按 token 切而不是在整行上跑正则，是为了让 github.com/soulteary/ci-recipes/cmd/ci-recipes
-// 这类外部模块路径整体落选：正则在整行上匹配，会从这一串的中间截出一段本仓库没有的
-// cmd 目录，于是检查会因为一条完全正确的 go install 命令而报红。
+// Splitting by token instead of running a regex over the whole line makes github.com/soulteary/ci-recipes/cmd/ci-recipes
+// such external module paths get excluded as a whole: a regex matched over the whole line would cut a segment out of the middle of this string that this repo does not have
+// cmd directory, so the check would flag a fully correct go install command as broken.
 func pathRefs(line string) []string {
 	line = urlRe.ReplaceAllString(line, " ")
 	line = strings.Map(func(r rune) rune {
@@ -121,7 +121,7 @@ func pathRefs(line string) []string {
 		tok = strings.TrimPrefix(tok, "./")
 		tok = cutAtNonPath(tok)
 		tok = strings.TrimRight(tok, trailingPunct)
-		// 通配与模板占位不是具体路径：scripts/*.sh、docs/<lang>/guide.md、$(DIR)/x
+		// Wildcards and template placeholders are not concrete paths: scripts/*.sh, docs/<lang>/guide.md, $(DIR)/x
 		if strings.ContainsAny(tok, "*?$<>") {
 			continue
 		}

@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-// PROBE_ROW_IDS 里写错一个 id 不会有任何报错，只是那一行在健康的 Runner 上
-// 继续显示「—」——正是这次要去掉的东西。这里把 JS 里的名单和模板里的
-// id 对起来。
+// A wrong id in PROBE_ROW_IDS raises no error; on a healthy Runner that row
+// just keeps showing "—", the very thing this change removes. This checks the list in JS against the template's
+// ids match up.
 func TestTemplate_ProbeRowIDsMatchMarkup(t *testing.T) {
-	// 名单住在 static/app.js，行的 id 住在模板，两边都要读
+	// The list lives in static/app.js and the row ids in the template, so both are read.
 	tpl, err := templateFS.ReadFile("templates/index.html")
 	if err != nil {
 		t.Fatal(err)
@@ -24,20 +24,20 @@ func TestTemplate_ProbeRowIDsMatchMarkup(t *testing.T) {
 	listRe := regexp.MustCompile(`const PROBE_ROW_IDS = \[([^\]]+)\]`)
 	m := listRe.FindStringSubmatch(string(js))
 	if m == nil {
-		t.Fatal("找不到 PROBE_ROW_IDS")
+		t.Fatal("PROBE_ROW_IDS not found")
 	}
 	ids := regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(m[1], -1)
 	if len(ids) != 5 {
-		t.Fatalf("PROBE_ROW_IDS 应有 5 项，实际 %d 项", len(ids))
+		t.Fatalf("PROBE_ROW_IDS should have 5 items, got %d", len(ids))
 	}
 	for _, id := range ids {
 		if !strings.Contains(src, `id="`+id[1]+`"`) {
-			t.Errorf("PROBE_ROW_IDS 里的 %s 在模板里没有对应的行", id[1])
+			t.Errorf("%s in PROBE_ROW_IDS has no matching row in the template", id[1])
 		}
 	}
 
-	// 反过来：模板里带 vProbe 前缀的 ...Row 都该在名单里，
-	// 以后新增一行探测字段时不会被悄悄漏掉
+	// The reverse also holds: every ...Row in the template with the vProbe prefix must be in the list,
+	// so that a probe field row added later cannot be silently missed
 	rowRe := regexp.MustCompile(`id="(vProbe\w*Row)"`)
 	inList := map[string]bool{}
 	for _, id := range ids {
@@ -45,14 +45,14 @@ func TestTemplate_ProbeRowIDsMatchMarkup(t *testing.T) {
 	}
 	for _, r := range rowRe.FindAllStringSubmatch(src, -1) {
 		if !inList[r[1]] {
-			t.Errorf("模板里的 %s 不在 PROBE_ROW_IDS 中，无探测错误时它会继续显示「—」", r[1])
+			t.Errorf("%s in the template is not in PROBE_ROW_IDS, so without a probe error it keeps showing '—'", r[1])
 		}
 	}
 }
 
-// 两处时间戳都必须走 renderTimestamp，漏掉哪个那一栏就退回裸 RFC3339
+// Both timestamps must go through renderTimestamp; if either is missed, that column falls back to raw RFC3339
 func TestTemplate_TimestampsUseRelativeRenderer(t *testing.T) {
-	// 脚本已从 index.html 拆到 static/app.js，断言跟着载体走，意图不变
+	// The script has moved from index.html to static/app.js, so the assertion follows the file; intent unchanged
 	b, err := staticFS.ReadFile("static/app.js")
 	if err != nil {
 		t.Fatal(err)
@@ -60,14 +60,14 @@ func TestTemplate_TimestampsUseRelativeRenderer(t *testing.T) {
 	src := string(b)
 	for _, id := range []string{"vRegistrationCheckedAt", "vGitHubCheckAt"} {
 		if !strings.Contains(src, "renderTimestamp(document.getElementById('"+id+"')") {
-			t.Errorf("%s 没有走 renderTimestamp", id)
+			t.Errorf("%s does not go through renderTimestamp", id)
 		}
 	}
-	// 相对时间交给 Intl，不另铺一套六语言文案；拿不到时要能回落
+	// Relative time is left to Intl rather than a separate six-language copy set; it must fall back when unavailable
 	if !strings.Contains(src, "Intl.RelativeTimeFormat") {
-		t.Error("相对时间应使用 Intl.RelativeTimeFormat")
+		t.Error("Relative time should use Intl.RelativeTimeFormat")
 	}
 	if !strings.Contains(src, "if (!rel) { el.textContent = iso; return; }") {
-		t.Error("Intl 不可用或时间解析失败时应原样显示，不能把信息弄丢")
+		t.Error("When Intl is unavailable or time parsing fails, the raw value should be shown so no information is lost")
 	}
 }

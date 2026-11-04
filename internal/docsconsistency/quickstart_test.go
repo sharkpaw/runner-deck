@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-// TestQuickStart_ReadmeMatchesTheGuide README 与使用指南里的快速开始命令必须一致。
+// TestQuickStart_ReadmeMatchesTheGuide makes sure the quick start commands in the README and the usage guide match.
 //
-// 这是 README 瘦身之后**刻意留下**的唯一一处技术性重复：30 秒起步得在首页上，
-// 完整说明得在指南里，两边都得有。留着重复就得有人盯着，而「有人盯着」在这个仓库
-// 已经失败过一次——那段命令在两处是两个形态，其中一处 chown 排在 mkdir 之前、
-// 照抄必定报错，而六份译文和 README 一起错着，没有任何东西会因此变红。
+// This is the one deliberate technical duplication left after slimming the README: the 30-second start has to stay on the front page,
+// while the full instructions live in the guide, so both need it. Keeping the duplicate means someone has to watch it, and in this repo
+// that watching has already failed once: the same commands existed in two forms, and in one of them chown came before mkdir,
+// so copying it always errored, while six translations and the README were wrong together and nothing turned red.
 //
-// 只比命令行，不比注释：注释在指南里是被翻译的，在 README 里是英文。
-// CI 的 `Quick start runs` job 负责证明命令真能跑通，这里负责证明两处是同一段。
+// Compare only the command lines, not comments: comments in the guide get translated, while in the README they stay in English.
+// The CI job `Quick start runs` proves the commands actually work; this test proves the two copies are the same.
 func TestQuickStart_ReadmeMatchesTheGuide(t *testing.T) {
 	repo := repoRoot(t)
 
@@ -26,16 +26,16 @@ func TestQuickStart_ReadmeMatchesTheGuide(t *testing.T) {
 		filepath.Join(repo, "docs", "guide.md"), regexp.MustCompile(`(?m)^### .*docker-compose`))
 
 	if strings.Join(readme, "\n") != strings.Join(guide, "\n") {
-		t.Errorf("README.md 与 docs/guide.md 的快速开始命令不一致。\nREADME:\n  %s\nguide:\n  %s",
+		t.Errorf("README.md and docs/guide.md have different quick start commands.\nREADME:\n  %s\nguide:\n  %s",
 			strings.Join(readme, "\n  "), strings.Join(guide, "\n  "))
 	}
-	// 两边都抽不出东西时上面那个比较会「相等」，于是这条用例永远绿。
+	// If neither side yields anything, the comparison above counts as equal, so this case would always pass.
 	if len(guide) < 3 {
-		t.Fatalf("从 docs/guide.md 只抽到 %d 条命令，定位用的正则可能已经对不上了", len(guide))
+		t.Fatalf("Only %d commands were extracted from docs/guide.md; the regex used to locate them may no longer match", len(guide))
 	}
 }
 
-// commandsInFirstBashBlock 取出 heading 之后第一个 ```bash 块里的命令行（去掉注释与空行）。
+// commandsInFirstBashBlock returns the command lines (comments and blank lines removed) from the first ```bash block after the heading.
 func commandsInFirstBashBlock(t *testing.T, path string, heading *regexp.Regexp) []string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -51,7 +51,7 @@ func commandsInFirstBashBlock(t *testing.T, path string, heading *regexp.Regexp)
 		}
 	}
 	if i == len(lines) {
-		t.Fatalf("%s 里没找到匹配 %s 的标题", filepath.Base(path), heading)
+		t.Fatalf("no heading matching %s found in %s", filepath.Base(path), heading)
 	}
 
 	var out []string

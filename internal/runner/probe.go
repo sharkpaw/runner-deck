@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// ProbeErrorType 用于标识容器状态探测失败类型，便于 API/UI 分类展示。
+// ProbeErrorType identifies the type of container status probe failure, for API/UI classification.
 type ProbeErrorType string
 
 const (
@@ -15,7 +15,7 @@ const (
 	ProbeErrorTypeAgentConnect ProbeErrorType = "agent-connect"
 )
 
-// ProbeError 包装底层错误并携带可机器识别的失败类型。
+// ProbeError wraps the underlying error and carries a machine-readable failure type.
 type ProbeError struct {
 	Type ProbeErrorType
 	Err  error
@@ -42,7 +42,7 @@ func newProbeError(t ProbeErrorType, err error) error {
 	return &ProbeError{Type: t, Err: err}
 }
 
-// DetectProbeErrorType 提取探测错误类型，供 handler/API/UI 统一使用。
+// DetectProbeErrorType extracts the probe error type for unified use by handler/API/UI.
 func DetectProbeErrorType(err error) ProbeErrorType {
 	if err == nil {
 		return ProbeErrorTypeUnknown
@@ -51,7 +51,7 @@ func DetectProbeErrorType(err error) ProbeErrorType {
 	if errors.As(err, &pe) && pe != nil && pe.Type != "" {
 		return pe.Type
 	}
-	// 兼容历史错误字符串（避免旧路径没有包装导致丢分类）
+	// Compatible with legacy error strings (avoids losing classification when old paths are not wrapped)
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "docker"), strings.Contains(msg, "daemon"), strings.Contains(msg, "socket"):
@@ -65,7 +65,7 @@ func DetectProbeErrorType(err error) ProbeErrorType {
 	}
 }
 
-// ProbeSuggestion 返回给调用方的简短排障建议。
+// ProbeSuggestion returns a short troubleshooting suggestion to the caller.
 func ProbeSuggestion(t ProbeErrorType) string {
 	switch t {
 	case ProbeErrorTypeDockerAccess:
@@ -79,7 +79,7 @@ func ProbeSuggestion(t ProbeErrorType) string {
 	}
 }
 
-// ProbeCheckCommand 返回只读检查命令（无副作用）。
+// ProbeCheckCommand returns a read-only check command (no side effects).
 func ProbeCheckCommand(t ProbeErrorType) string {
 	switch t {
 	case ProbeErrorTypeDockerAccess:
@@ -93,7 +93,7 @@ func ProbeCheckCommand(t ProbeErrorType) string {
 	}
 }
 
-// ProbeFixCommand 返回可能有副作用的修复命令。
+// ProbeFixCommand returns a fix command that may have side effects.
 func ProbeFixCommand(t ProbeErrorType) string {
 	switch t {
 	case ProbeErrorTypeDockerAccess:

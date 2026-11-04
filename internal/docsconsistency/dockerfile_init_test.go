@@ -8,21 +8,21 @@ import (
 	"testing"
 )
 
-// initBinary 是两个镜像里 PID 1 该是的那个程序。
-// 路径来自 noble/universe 的 tini 包（tini_0.19.0-1，装 /usr/bin/tini 与 /usr/bin/tini-static）。
+// initBinary is the program PID 1 should be in both images.
+// Path comes from the tini package in noble/universe (tini_0.19.0-1, installs /usr/bin/tini and /usr/bin/tini-static).
 const initBinary = "/usr/bin/tini"
 
-// TestDockerfiles_EntrypointRunsUnderInit 两个镜像的 ENTRYPOINT 都必须以 init 开头。
+// TestDockerfiles_EntrypointRunsUnderInit requires both images' ENTRYPOINT to start with init.
 //
-// 为什么值得一条测试守着：这是个「删掉也照样能构建、照样能跑」的改动。
-// 镜像少了 tini，Agent 与 Manager 就又变回容器里的 PID 1，于是
-//   - Job 留下的孤儿进程没人回收，僵尸跨 Job 累积，还占着
-//     runners.resources.pids_limit 的名额，到顶之后 fork 失败，
-//     表现为 Job 随机报 Resource temporarily unavailable；
-//   - SIGTERM 不再被转发……这一半现在由 Agent / Manager 自己订阅信号兜住，
-//     所以少了 tini 也不会有哪条现有用例变红——回收孤儿这一半则没有别的兜底。
+// Why this deserves a test: this is a change that still builds and still runs if you delete it.
+// Without tini in the image, Agent and Manager go back to being PID 1 in the container, so
+//   - orphaned processes left by Jobs are never reaped, zombies pile up across Jobs and take up
+//     slots in runners.resources.pids_limit, and once that limit is hit fork fails,
+//     so Jobs randomly fail with Resource temporarily unavailable;
+//   - SIGTERM is no longer forwarded. That half is now covered by Agent / Manager subscribing to signals themselves,
+//     so removing tini won't turn any existing test red. Reaping orphans has no other safety net.
 //
-// 任何一次「顺手改回 ENTRYPOINT」都得先让这条变红。
+// Any change that puts ENTRYPOINT back by hand must first turn this test red.
 func TestDockerfiles_EntrypointRunsUnderInit(t *testing.T) {
 	repo := repoRoot(t)
 
@@ -31,25 +31,25 @@ func TestDockerfiles_EntrypointRunsUnderInit(t *testing.T) {
 			path := filepath.Join(repo, name)
 			argv := entrypointArgv(t, path)
 			if len(argv) == 0 {
-				t.Fatalf("%s 里没找到 exec 形式（JSON 数组）的 ENTRYPOINT", name)
+				t.Fatalf("no exec-form (JSON array) ENTRYPOINT found in %s", name)
 			}
 			if argv[0] != initBinary {
-				t.Fatalf("%s 的 ENTRYPOINT 第一项应为 %s，实际 %q（完整 argv: %v）",
+				t.Fatalf("first item of ENTRYPOINT in %s should be %s, got %q (full argv: %v)",
 					name, initBinary, argv[0], argv)
 			}
-			// tini 与被它带起来的程序之间要有 --，否则后者的参数会被 tini 自己吃掉
+			// tini and the program it launches need -- between them, or tini will consume the program's arguments itself
 			if len(argv) < 3 || argv[1] != "--" {
-				t.Fatalf("%s 的 ENTRYPOINT 应为 [%q, \"--\", <程序>]，实际 %v", name, initBinary, argv)
+				t.Fatalf("ENTRYPOINT in %s should be [%q, \"--\", <program>], got %v", name, initBinary, argv)
 			}
 		})
 	}
 }
 
-// entrypointArgv 取出 Dockerfile 里最后一条 exec 形式 ENTRYPOINT 的 argv。
+// entrypointArgv returns the argv of the last exec-form ENTRYPOINT in the Dockerfile.
 //
-// 只认 JSON 数组形式：shell 形式（ENTRYPOINT foo bar）会被 /bin/sh -c 包一层，
-// sh 才是 PID 1，而它既不转发信号也不回收孤儿——那正是本测试要防的情形，
-// 所以解析不出数组时让调用方失败，而不是在这里放过。
+// Only the JSON array form is accepted: shell form (ENTRYPOINT foo bar) gets wrapped in /bin/sh -c,
+// and sh becomes PID 1, which neither forwards signals nor reaps orphans. That is exactly the case this test guards against,
+// so when no array can be parsed, make the caller fail rather than let it pass here.
 func entrypointArgv(t *testing.T, path string) []string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -57,7 +57,7 @@ func entrypointArgv(t *testing.T, path string) []string {
 		t.Fatal(err)
 	}
 	var argv []string
-	// 续行（\ 结尾）先拼起来，免得 ENTRYPOINT 被拆在两行时看不见
+	// Join continuation lines (ending in \) first, so an ENTRYPOINT split across lines is still seen
 	lines := strings.Split(strings.ReplaceAll(string(b), "\\\n", " "), "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -67,7 +67,7 @@ func entrypointArgv(t *testing.T, path string) []string {
 		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "ENTRYPOINT"))
 		var parsed []string
 		if err := json.Unmarshal([]byte(rest), &parsed); err != nil {
-			t.Fatalf("%s 的 ENTRYPOINT 不是 exec 形式（JSON 数组）: %s", filepath.Base(path), rest)
+			t.Fatalf("ENTRYPOINT in %s is not exec form (JSON array): %s", filepath.Base(path), rest)
 		}
 		argv = parsed
 	}

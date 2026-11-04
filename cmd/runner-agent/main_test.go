@@ -18,15 +18,15 @@ import (
 func requireLinux(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
-		t.Skip("进程探测依赖 /proc，仅在 Linux 上验证")
+		t.Skip("Process detection depends on /proc, verified only on Linux")
 	}
 	if _, err := os.Stat("/proc/self/cmdline"); err != nil {
-		t.Skip("当前环境没有可用的 /proc")
+		t.Skip("No usable /proc in the current environment")
 	}
 }
 
-// newRunnerDir 造一个像已注册 runner 的安装目录，并把它设为本 Agent 的 RUNNER_INSTALL_DIR。
-// run.sh 刻意不 exec，好让 bash 留在进程表里，argv 与 actions/runner 的形态一致。
+// newRunnerDir builds an install directory that looks like a registered runner and sets it as this Agent's RUNNER_INSTALL_DIR.
+// run.sh deliberately does not exec, so bash stays in the process table and argv matches the actions/runner shape.
 func newRunnerDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -67,42 +67,42 @@ func TestGetStatus_ReflectsRunningProcess(t *testing.T) {
 	dir := newRunnerDir(t)
 
 	if status, running := getStatus(dir); status != "installed" || running {
-		t.Fatalf("启动前应为 installed/false，得到 %q/%v", status, running)
+		t.Fatalf("Before start it should be installed/false, got %q/%v", status, running)
 	}
 	if rec := postStart(t); rec.Code != http.StatusOK {
-		t.Fatalf("/start 返回 %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("/start returned %d: %s", rec.Code, rec.Body.String())
 	}
 	if !waitUntil(func() bool { _, r := getStatus(dir); return r }) {
-		t.Fatal("run.sh 已启动，getStatus 仍报未运行")
+		t.Fatal("run.sh started, but getStatus still reports not running")
 	}
 }
 
-// Manager 每 5 分钟巡检一次「已注册未运行」的 runner 并拉起。
-// 修复前 getStatus 恒为 false，这道幂等护栏形同虚设，每一轮都多起一个 run.sh。
+// Manager checks every 5 minutes for registered-but-not-running runners and starts them.
+// Before the fix getStatus always returned false, so this idempotency guard did nothing and every cycle started another run.sh.
 func TestHandleStart_IsIdempotent(t *testing.T) {
 	requireLinux(t)
 	dir := newRunnerDir(t)
 
 	if rec := postStart(t); rec.Code != http.StatusOK {
-		t.Fatalf("首次 /start 返回 %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("First /start returned %d: %s", rec.Code, rec.Body.String())
 	}
 	if !waitUntil(func() bool { _, r := getStatus(dir); return r }) {
-		t.Fatal("首次 /start 后应处于运行中")
+		t.Fatal("Should be running after the first /start")
 	}
 
-	// 模拟后续 9 轮定时拉起
+	// Simulate the next 9 scheduled starts
 	for i := 0; i < 9; i++ {
 		rec := postStart(t)
 		if rec.Code != http.StatusOK {
-			t.Fatalf("第 %d 次 /start 返回 %d: %s", i+2, rec.Code, rec.Body.String())
+			t.Fatalf("/start #%d returned %d: %s", i+2, rec.Code, rec.Body.String())
 		}
 		if !strings.Contains(rec.Body.String(), "already running") {
-			t.Fatalf("第 %d 次 /start 应答复 already running，实际 %s", i+2, rec.Body.String())
+			t.Fatalf("/start #%d should reply already running, got %s", i+2, rec.Body.String())
 		}
 	}
 
 	if got := runnerproc.Find(dir); len(got) != 1 {
-		t.Fatalf("10 次 /start 之后应只有 1 个 runner 进程，实际 %d 个: %v", len(got), got)
+		t.Fatalf("After 10 /start calls there should be exactly 1 runner process, found %d: %v", len(got), got)
 	}
 }
 
@@ -110,35 +110,35 @@ func TestHandleStop_TerminatesRunner(t *testing.T) {
 	requireLinux(t)
 	dir := newRunnerDir(t)
 	if rec := postStart(t); rec.Code != http.StatusOK {
-		t.Fatalf("/start 返回 %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("/start returned %d: %s", rec.Code, rec.Body.String())
 	}
 	if !waitUntil(func() bool { _, r := getStatus(dir); return r }) {
-		t.Fatal("准备阶段：应处于运行中")
+		t.Fatal("Setup phase: should be running")
 	}
 
 	rec := httptest.NewRecorder()
 	handleStop(rec, httptest.NewRequest(http.MethodPost, "/stop", nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("/stop 返回 %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("/stop returned %d: %s", rec.Code, rec.Body.String())
 	}
 	if !waitUntil(func() bool { _, r := getStatus(dir); return !r }) {
-		t.Fatal("/stop 之后仍在运行")
+		t.Fatal("Still running after /stop")
 	}
 }
 
-// 没在跑的时候 /stop 要报错，不能默默成功
+// /stop must fail when nothing is running, not succeed silently
 func TestHandleStop_NotRunningReportsError(t *testing.T) {
 	requireLinux(t)
 	newRunnerDir(t)
 	rec := httptest.NewRecorder()
 	handleStop(rec, httptest.NewRequest(http.MethodPost, "/stop", nil))
 	if rec.Code == http.StatusOK {
-		t.Fatalf("没有进程在跑时 /stop 不应返回 200: %s", rec.Body.String())
+		t.Fatalf("/stop should not return 200 when no process is running: %s", rec.Body.String())
 	}
 }
 
-// 目录里放着长得像 pid 文件的东西也不能把状态带偏：
-// actions/runner 不写 Runner.Listener.pid，.path 装的是 PATH 字符串
+// A directory containing something that looks like a pid file must not skew the status either:
+// actions/runner does not write Runner.Listener.pid, and .path holds a PATH string
 func TestGetStatus_PidLookalikeFilesAreIgnored(t *testing.T) {
 	requireLinux(t)
 	dir := newRunnerDir(t)
@@ -151,32 +151,32 @@ func TestGetStatus_PidLookalikeFilesAreIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, running := getStatus(dir); running {
-		t.Fatal("没有进程在跑，pid 文件不应让状态变成运行中")
+		t.Fatal("No process is running, so a pid file should not make the status running")
 	}
 }
 
-// 未注册的目录（没有 .runner）应为 new
+// An unregistered directory (no .runner) should report new
 func TestGetStatus_UnregisteredDirIsNew(t *testing.T) {
 	dir := t.TempDir()
 	if status, running := getStatus(dir); status != "new" || running {
-		t.Fatalf("没有 .runner 时应为 new/false，得到 %q/%v", status, running)
+		t.Fatalf("Without .runner it should be new/false, got %q/%v", status, running)
 	}
 }
 
-// writeBlockingRunScript 写一个会一直挂住、且**不产生任何子进程**的 run.sh。
+// writeBlockingRunScript writes a run.sh that blocks forever and **spawns no child processes**.
 //
-// 不能用 `sleep 120`：bash 会 fork 一个子进程去 exec sleep，而在 fork 与 execve 之间，
-// 子进程的 /proc/<pid>/cmdline 仍是 bash 的 argv（`/bin/bash <dir>/run.sh`），
-// 于是被认成第二个监护脚本。窗口只有几微秒，本机几乎碰不到，CI 上机器一忙就中招——
-// 「10 次 /start 之后应只有 1 个 runner 进程，实际 2 个: [2727 2728]」正是这么来的。
+// Do not use `sleep 120`: bash forks a child to exec sleep, and between fork and execve
+// the child's /proc/<pid>/cmdline still shows bash's argv (`/bin/bash <dir>/run.sh`),
+// so it is counted as a second watchdog script. That window is only a few microseconds, rarely hit locally, but on a busy CI machine it does hit—
+// "After 10 /start calls there should be exactly 1 runner process, found 2: [2727 2728]" came from exactly this.
 //
-// read 是 builtin，重定向由当前 shell 自己完成，打开一个没有写端的 FIFO 会就地阻塞，
-// 全程不 fork，进程数因此是确定的。
+// read is a builtin, so the redirect is handled by the current shell; opening a FIFO with no writer blocks in place,
+// with no fork at any point, so the process count stays deterministic.
 func writeBlockingRunScript(t *testing.T, dir string) {
 	t.Helper()
 	fifo := filepath.Join(dir, ".test-block")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatalf("创建 FIFO 失败: %v", err)
+		t.Fatalf("Failed to create FIFO: %v", err)
 	}
 	script := "#!/bin/bash\nread -r -t 120 < \"" + fifo + "\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte(script), 0o755); err != nil {

@@ -29,54 +29,54 @@ func langCtx(t *testing.T, query, cookie, acceptLang, xLang string) echo.Context
 	return echo.New().NewContext(req, httptest.NewRecorder())
 }
 
-// i18n-kit 认识 10 种语言，我们只有 6 份译文。init() 把 kit 的 SupportedLanguages
-// 收窄到 supportedLangs，这条用例守的就是那次收窄——没有它，?lang=es 会被当成合法取值，
-// 界面语言变成一个根本没有译文的 es。
+// i18n-kit knows 10 languages, but we only have 6 translations. init() narrows kit's SupportedLanguages
+// to supportedLangs. This case guards exactly that narrowing: without it, ?lang=es would be accepted as a valid value,
+// and the UI language would become es, which has no translation at all.
 func TestSupportedLanguagesIsNarrowedToOurTranslations(t *testing.T) {
 	if len(i18n.SupportedLanguages) != len(supportedLangs) {
-		t.Fatalf("i18n.SupportedLanguages = %v，期望与 supportedLangs %v 等长",
+		t.Fatalf("i18n.SupportedLanguages = %v, expected same length as supportedLangs %v",
 			i18n.SupportedLanguages, supportedLangs)
 	}
 	for _, want := range supportedLangs {
 		if !i18n.Language(want).IsValid() {
-			t.Errorf("%q 有译文却不被 IsValid 认可", want)
+			t.Errorf("%q has a translation but IsValid rejects it", want)
 		}
 	}
-	// 反向：kit 自带但我们没有译文的语言必须被挡掉
+	// Reverse: languages kit ships with but we have no translation for must be rejected
 	for _, unsupported := range []string{"it", "es", "pt", "ru"} {
 		if i18n.Language(unsupported).IsValid() {
-			t.Errorf("%q 没有译文，不该通过 IsValid", unsupported)
+			t.Errorf("%q has no translation and should not pass IsValid", unsupported)
 		}
 	}
 }
 
-// 这条是换用 i18n-kit 的理由：原先那段手写解析按出现顺序取第一个能认的语言，完全无视 q 值。
-// 实测 origin/main 的实现对下面第一行返回 "en"——而客户端明说了更想要 de（q=0.9 > q=0.1）。
+// This is the reason for switching to i18n-kit: the old hand-written parser took the first language it recognized in order of appearance, ignoring q values entirely.
+// Tested: origin/main's implementation returns "en" for the first line below, but the client clearly prefers de (q=0.9 > q=0.1).
 func TestResolveLang_AcceptLanguageHonorsQuality(t *testing.T) {
 	cases := []struct {
 		header string
 		want   string
 	}{
-		{"en;q=0.1,de;q=0.9", "de"}, // 旧实现给 "en"，是 bug
+		{"en;q=0.1,de;q=0.9", "de"}, // The old implementation returns "en", which is a bug
 		{"de;q=0.9,en;q=0.1", "de"},
 		{"ja;q=0.2,ko;q=0.8", "ko"},
-		{"de-DE,de;q=0.9,en;q=0.8", "de"}, // 无 q 者视为 1.0，仍是 de
+		{"de-DE,de;q=0.9,en;q=0.8", "de"}, // No q is treated as 1.0, so it is still de
 	}
 	for _, tc := range cases {
 		t.Run(tc.header, func(t *testing.T) {
 			if got := resolveLang(langCtx(t, "", "", tc.header, "")); got != tc.want {
-				t.Fatalf("resolveLang = %q，期望 %q", got, tc.want)
+				t.Fatalf("resolveLang = %q, expected %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// supportedAcceptLanguage 的存在理由，也是最容易在重构里丢掉的一条。
+// The reason supportedAcceptLanguage exists, and the easiest one to lose during a refactor.
 //
-// 不过滤的话：kit 的 Accept-Language 解析按 q 排序后返回第一个 ParseLanguage 认识的语言，
-// 而 ParseLanguage 查的是 kit 内部 10 种语言的别名表、不是收窄后的 SupportedLanguages。
-// 于是 "es,ja" 解析成 es，回到 Detect 里被 IsValid 挡掉，整条链直接回落 en。
-// 实测 origin/main 对 "es,ja" 返回 "ja"——所以那会是一次实打实的退化。
+// Without filtering: kit's Accept-Language parsing sorts by q and returns the first language that ParseLanguage recognizes,
+// but ParseLanguage looks up kit's internal alias table of 10 languages, not the narrowed SupportedLanguages.
+// So "es,ja" parses to es, which IsValid rejects in Detect, and the whole chain falls back to en.
+// Tested: origin/main returns "ja" for "es,ja", so this would be a real regression.
 func TestResolveLang_UnsupportedAcceptLanguageFallsThroughToNext(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -91,14 +91,14 @@ func TestResolveLang_UnsupportedAcceptLanguageFallsThroughToNext(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := resolveLang(langCtx(t, "", "", tc.header, "")); got != tc.want {
-				t.Fatalf("resolveLang(%q) = %q，期望 %q", tc.header, got, tc.want)
+				t.Fatalf("resolveLang(%q) = %q, expected %q", tc.header, got, tc.want)
 			}
 		})
 	}
 }
 
-// 换 kit 之后新拿到的能力：query / cookie 上的地区变体也能归一化。
-// 旧实现只对 Accept-Language 里的值切 "-"，?lang=zh-CN 是直接不认的（实测返回空、继续往下找）。
+// Newly gained with kit: region variants in query / cookie are also normalized.
+// The old implementation only split on "-" for values in Accept-Language, so ?lang=zh-CN was simply not recognized (tested: returns empty and keeps searching).
 func TestResolveLang_NormalizesRegionalVariants(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -116,39 +116,39 @@ func TestResolveLang_NormalizesRegionalVariants(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := resolveLang(langCtx(t, tc.query, tc.cookie, "", "")); got != tc.want {
-				t.Fatalf("resolveLang = %q，期望 %q", got, tc.want)
+				t.Fatalf("resolveLang = %q, expected %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// 没有译文的取值必须像非法取值一样被跳过，而不是被当成合法语言用上。
+// Values without translations must be skipped like invalid values, not used as valid languages.
 func TestResolveLang_UnsupportedValuesSkippedInEveryStep(t *testing.T) {
 	if got := resolveLang(langCtx(t, "es", "ja", "", "")); got != "ja" {
-		t.Fatalf("?lang=es 应跳过并继续看 cookie，得到 %q", got)
+		t.Fatalf("?lang=es should be skipped and cookie checked next, got %q", got)
 	}
 	if got := resolveLang(langCtx(t, "", "es", "ko", "")); got != "ko" {
-		t.Fatalf("cookie=es 应跳过并继续看 Accept-Language，得到 %q", got)
+		t.Fatalf("cookie=es should be skipped and Accept-Language checked next, got %q", got)
 	}
 	if got := resolveLang(langCtx(t, "es", "it", "pt", "")); got != "en" {
-		t.Fatalf("三处都没有译文时应回落 en，得到 %q", got)
+		t.Fatalf("when none of the three have translations it should fall back to en, got %q", got)
 	}
 }
 
-// X-Language 排在 cookie 之后、Accept-Language 之前，是换 kit 之后顺带多出来的一档，
-// 这里把次序钉住，免得日后改 Priority 时无声地挪位。
+// X-Language ranks after cookie and before Accept-Language. It is an extra tier that came along with the kit switch,
+// so pin the order here to keep it from silently shifting when Priority changes later.
 func TestResolveLang_XLanguageSitsBetweenCookieAndAcceptLanguage(t *testing.T) {
 	if got := resolveLang(langCtx(t, "", "ja", "", "ko")); got != "ja" {
-		t.Fatalf("cookie 应优先于 X-Language，得到 %q", got)
+		t.Fatalf("cookie should take precedence over X-Language, got %q", got)
 	}
 	if got := resolveLang(langCtx(t, "", "", "de", "ko")); got != "ko" {
-		t.Fatalf("X-Language 应优先于 Accept-Language，得到 %q", got)
+		t.Fatalf("X-Language should take precedence over Accept-Language, got %q", got)
 	}
 }
 
-// resolveLang 只读不写：一次性的 ?lang= 不该改掉浏览器上的长期偏好。
-// i18n-kit 的 httpadapter.Middleware（v4 之前是根包的 StdMiddleware）是会按配置写
-// cookie 的，这条用例守住「我们没用它」。
+// resolveLang is read-only: a one-off ?lang= should not overwrite the browser's long-term preference.
+// i18n-kit's httpadapter.Middleware (StdMiddleware in the root package before v4) is the one that writes based on config
+// cookie-related. This case guards that we never use it.
 func TestResolveLang_DoesNotWriteCookie(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/?lang=ja", nil)
@@ -156,10 +156,10 @@ func TestResolveLang_DoesNotWriteCookie(t *testing.T) {
 	c := echo.New().NewContext(req, rec)
 
 	if got := resolveLang(c); got != "ja" {
-		t.Fatalf("resolveLang = %q，期望 ja", got)
+		t.Fatalf("resolveLang = %q, expected ja", got)
 	}
 	if sc := rec.Result().Header.Values("Set-Cookie"); len(sc) != 0 {
-		t.Fatalf("resolveLang 不该写 cookie，却发出了 %v", sc)
+		t.Fatalf("resolveLang should not write a cookie, but emitted %v", sc)
 	}
 }
 
@@ -173,15 +173,15 @@ func TestSupportedAcceptLanguage(t *testing.T) {
 		{"es", ""},
 		{"es,ja", "ja"},
 		{"ja,es", "ja"},
-		{"es;q=0.9,ja;q=0.1", "ja;q=0.1"}, // q 值原样保留，交给 kit 排序
+		{"es;q=0.9,ja;q=0.1", "ja;q=0.1"}, // Keep the q values as-is and leave sorting to kit
 		{"de-DE,de;q=0.9,en;q=0.8", "de-DE,de;q=0.9,en;q=0.8"},
 		{"es,it,pt,ru", ""},
-		{"  ja  ,  es  ", "ja"}, // 条目两侧空白去掉
+		{"  ja  ,  es  ", "ja"}, // Trim whitespace on both ends of the entry
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
 			if got := supportedAcceptLanguage(tc.in); got != tc.want {
-				t.Fatalf("supportedAcceptLanguage(%q) = %q，期望 %q", tc.in, got, tc.want)
+				t.Fatalf("supportedAcceptLanguage(%q) = %q, expected %q", tc.in, got, tc.want)
 			}
 		})
 	}

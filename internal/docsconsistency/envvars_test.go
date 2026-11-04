@@ -10,41 +10,41 @@ import (
 	"testing"
 )
 
-// 直接取环境变量的调用点：os.Getenv("X")、env.GetTrimmed("X", …) 等。
+// Direct call sites that read env vars: os.Getenv("X"), env.GetTrimmed("X", …), etc.
 var envCallRe = regexp.MustCompile(`(?:os\.Getenv|env\.Get\w*)\(\s*"([A-Z][A-Z0-9_]*)"`)
 
-// loopReadEnvVars 是少数几个不在调用点上出现名字的变量。
+// loopReadEnvVars holds the few variables whose names don't appear at a call site.
 //
-// config.go 里端口是遍历一个切片读的（`for _, key := range []string{…}`），
-// 目的是让「两个名字、后一个生效」这件事只写一遍。代价是上面那条正则看不见它们，
-// 所以在这里点名。下面的用例会反过来确认它们确实还在那个文件里——
-// 哪天循环没了，这里会提醒你把这两行删掉，而不是继续守着两个不存在的变量。
+// In config.go the ports are read by looping over a slice (`for _, key := range []string{…}`),
+// so the rule that "the later name wins" is written only once. The cost is that the regex above can't see them,
+// so they are named here. The test below checks in reverse that they are still in that file.
+// If the loop is ever removed, this reminds you to delete these two lines instead of guarding two variables that no longer exist.
 var loopReadEnvVars = map[string]string{
 	"MANAGER_PORT": "internal/config/config.go",
 	"SERVER_PORT":  "internal/config/config.go",
 }
 
-// scriptEnvVars 是 scripts/install-runner.sh 读的变量。
-// 它不是 Go 代码，上面的正则扫不到，但对运维来说和其它变量没有区别。
+// scriptEnvVars holds the variables read by scripts/install-runner.sh.
+// It is not Go code, so the regex above doesn't match it, but to operators it is no different from the others.
 var scriptEnvVars = map[string]string{
 	"RUNNER_VERSION":         "scripts/install-runner.sh",
 	"RUNNER_SHA256":          "scripts/install-runner.sh",
 	"RUNNER_FORCE_REINSTALL": "scripts/install-runner.sh",
 }
 
-// TestEnvVars_EveryVariableTheCodeReadsIsDocumented 代码读的每个环境变量都要在使用指南里查得到。
+// TestEnvVars_EveryVariableTheCodeReadsIsDocumented: every env var the code reads must be findable in the usage guide.
 //
-// 审计时这一项是「文档缺口」里最大的一处：guide.md 只写了一句「部分字段可通过环境变量覆盖……
-// 详见 .env.example」，而那份文件只有中文，本身还漏了三个变量，另有两个（RUNNER_IMAGE 的别名
-// CONTAINER_IMAGE、VOLUME_HOST_PATH 的别名 RUNNERS_VOLUME_HOST_PATH）只有读源码才知道存在。
+// This was the largest gap in the audit: guide.md has a single sentence saying "some fields can be overridden via env vars... see .env.example",
+// and that file is Chinese-only and was itself missing three variables. Two more (the alias RUNNER_IMAGE for CONTAINER_IMAGE, and the alias
+// RUNNERS_VOLUME_HOST_PATH for VOLUME_HOST_PATH) were only discoverable by reading the source.
 //
-// 补一张表只解决当时那一次。这条用例解决的是下一次：新加一个 env 读取点而不写文档，
-// 测试当场红，报出的是变量名和它该去的地方。
+// Adding a table fixes only that one occurrence. This test covers the next one: a new env read added without docs
+// fails the test on the spot and reports the variable name and where it should be documented.
 func TestEnvVars_EveryVariableTheCodeReadsIsDocumented(t *testing.T) {
 	repo := repoRoot(t)
 	conf := loadDocsConf(t, repo)
 
-	vars := map[string]string{} // 变量名 -> 读它的文件，仅用于报错
+	vars := map[string]string{} // Variable name -> the file that reads it, used only for error messages.
 	err := filepath.WalkDir(repo, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -74,16 +74,16 @@ func TestEnvVars_EveryVariableTheCodeReadsIsDocumented(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(vars) < 10 {
-		// 正则被改坏时它会安静地什么都扫不到，那样这条用例永远绿。
-		t.Fatalf("只扫到 %d 个环境变量，envCallRe 可能已经匹配不上了: %v", len(vars), keysOf(vars))
+		// If the regex is broken it silently matches nothing, and this test would stay green forever.
+		t.Fatalf("only found %d env vars, envCallRe may no longer match: %v", len(vars), keysOf(vars))
 	}
 	for name, where := range loopReadEnvVars {
 		src, errRead := os.ReadFile(filepath.Join(repo, where))
 		if errRead != nil {
-			t.Fatalf("%s 读不到: %v", where, errRead)
+			t.Fatalf("%s could not be read: %v", where, errRead)
 		}
 		if !strings.Contains(string(src), `"`+name+`"`) {
-			t.Errorf("%s 已经不在 %s 里了，把它从 loopReadEnvVars 删掉", name, where)
+			t.Errorf("%s is no longer in %s, remove it from loopReadEnvVars", name, where)
 			continue
 		}
 		vars[name] = where
@@ -92,8 +92,8 @@ func TestEnvVars_EveryVariableTheCodeReadsIsDocumented(t *testing.T) {
 		vars[name] = where
 	}
 
-	// 英文原文与五份译文都要提到——变量名是标识符，不该被翻译，
-	// 所以「某一份译文里没有」就是那一份漏了一行。
+	// The English original and all five translations must mention each variable. Variable names are identifiers and must not be translated,
+	// so "missing from one translation" means that translation lacks a line.
 	files := []string{filepath.Join(conf.root, "guide.md")}
 	for _, lang := range conf.langs {
 		files = append(files, filepath.Join(conf.root, lang, "guide.md"))
@@ -106,18 +106,18 @@ func TestEnvVars_EveryVariableTheCodeReadsIsDocumented(t *testing.T) {
 		text := string(b)
 		for _, name := range keysOf(vars) {
 			if !mentionsEnvVar(text, name) {
-				t.Errorf("%s 没有提到 %s（%s 读它）；环境变量一节缺这一行",
+				t.Errorf("%s is not mentioned in %s (read by %s); the environment variables section is missing this line",
 					filepath.ToSlash(f), name, vars[name])
 			}
 		}
 	}
 }
 
-// mentionsEnvVar 判断文档里是否提到了这个变量，按标识符边界匹配。
+// mentionsEnvVar reports whether the document mentions the variable, matching on identifier boundaries.
 //
-// 不能用 strings.Contains：`FLEET_IMAGE_TAG` 是 `FLEET_IMAGE_TAGG` 的子串，
-// 于是一个写错成更长名字的变量照样「提到过」。这正是写这条用例时自己踩到的——
-// 第一版用 Contains，把译文里的名字改长一个字母，测试纹丝不动。
+// strings.Contains cannot be used: `FLEET_IMAGE_TAG` is a substring of `FLEET_IMAGE_TAGG`,
+// so a typo'd variable with a longer name would still count as mentioned. I hit this myself while writing this test:
+// the first version used Contains, and changing one letter of the name in a translation left the test passing.
 func mentionsEnvVar(text, name string) bool {
 	isNameChar := func(b byte) bool {
 		return b == '_' || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
@@ -147,14 +147,14 @@ func keysOf(m map[string]string) []string {
 	return out
 }
 
-// TestEnvVars_ConfigOverridesAreInTheEnvTemplate config.go 读的每个变量都要出现在 .env.example 里。
+// TestEnvVars_ConfigOverridesAreInTheEnvTemplate: every variable config.go reads must appear in .env.example.
 //
-// 那个文件是「全容器部署只改 .env」这条路径的全部界面，而它此前漏了三个变量，其中两个
-// （CONTAINER_IMAGE、RUNNERS_VOLUME_HOST_PATH）是别名，只有读源码才知道存在。
+// That file is the entire interface for the "full container deployment, edit only .env" path, and it previously lacked three variables, two of which
+// (CONTAINER_IMAGE and RUNNERS_VOLUME_HOST_PATH) are aliases that are only discoverable by reading the source.
 //
-// 范围刻意只取 internal/config/config.go：它读的正好是「能覆盖配置文件的那一组」，
-// 也就是一份 .env 需要覆盖的全集。Agent 在容器内读的 AGENT_PORT 之类不在其中——
-// 那些由 Manager 创建容器时注入，写进模板只会是噪音。
+// The scope is deliberately limited to internal/config/config.go: it reads exactly the set that can override the config file,
+// which is the full set a .env needs to override. AGENT_PORT and similar variables that the Agent reads inside the container are not included:
+// the Manager injects those when it creates the container, so putting them in the template would only be noise.
 func TestEnvVars_ConfigOverridesAreInTheEnvTemplate(t *testing.T) {
 	repo := repoRoot(t)
 
@@ -172,7 +172,7 @@ func TestEnvVars_ConfigOverridesAreInTheEnvTemplate(t *testing.T) {
 		}
 	}
 	if len(vars) < 8 {
-		t.Fatalf("只在 config.go 里扫到 %d 个变量，envCallRe 可能已经匹配不上了", len(vars))
+		t.Fatalf("only found %d variables in config.go, envCallRe may no longer match", len(vars))
 	}
 
 	tmpl, err := os.ReadFile(filepath.Join(repo, ".env.example"))
@@ -181,7 +181,7 @@ func TestEnvVars_ConfigOverridesAreInTheEnvTemplate(t *testing.T) {
 	}
 	for _, name := range keysOf(boolKeysAsMap(vars)) {
 		if !mentionsEnvVar(string(tmpl), name) {
-			t.Errorf(".env.example 里没有 %s；全容器部署只改 .env 的人会找不到它", name)
+			t.Errorf("%s is missing from .env.example; someone deploying the full container and editing only .env would not find it", name)
 		}
 	}
 }

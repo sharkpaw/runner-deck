@@ -40,24 +40,24 @@ var i18nFS embed.FS
 //go:embed static/app.css static/app.js
 var staticFS embed.FS
 
-// 三者均由构建时 -ldflags "-X main.Xxx=..." 注入。
-// Commit/BuildDate 未注入时为空，version-kit 会把它们从输出里省掉。
+// All three are injected at build time via -ldflags "-X main.Xxx=...".
+// Commit/BuildDate are left empty when not injected, and version-kit omits them from the output.
 var (
 	Version   = "dev"
 	Commit    string
 	BuildDate string
 )
 
-// assetVersion 是内嵌静态资源的内容指纹，拼进 /static/app.css?v= 里。
-// 用内容哈希而不是 Version：dev 构建的版本号恒为 "dev"，改完样式刷新页面
-// 拿到的还会是缓存里的旧文件。内容一变指纹就变，浏览器自然会去取新的。
+// assetVersion is a content fingerprint of the embedded static assets, appended as /static/app.css?v=.
+// A content hash is used instead of Version: the version of a dev build is always "dev", so after editing styles, refreshing the page
+// would still fetch the old cached file. When the content changes, the fingerprint changes, and the browser fetches the new one naturally.
 func assetVersion() string {
 	h := fnv.New64a()
 	entries, err := staticFS.ReadDir("static")
 	if err != nil {
 		return "dev"
 	}
-	// ReadDir 按文件名排序，因此同样的内容每次得到同样的指纹
+	// ReadDir sorts by filename, so identical content always yields the same fingerprint
 	for _, e := range entries {
 		b, err := staticFS.ReadFile("static/" + e.Name())
 		if err != nil {
@@ -69,9 +69,9 @@ func assetVersion() string {
 	return strconv.FormatUint(h.Sum64(), 36)
 }
 
-// staticHandler 提供内嵌的 /static 资源。
-// 带 ?v=（页面自己拼的那种）就长缓存——地址里已经有内容指纹，内容变了地址也会变；
-// 直接敲地址不带 v 的则只许协商缓存，免得手工请求拿到一份再也刷不掉的副本。
+// staticHandler serves the embedded /static assets.
+// Requests with ?v= (the kind the page builds itself) get long caching: the URL already carries the content fingerprint, so when the content changes the URL changes too;
+// a bare address without v may only use conditional caching, so a manual request can't end up holding a copy that never refreshes.
 func staticHandler() echo.HandlerFunc {
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -94,13 +94,13 @@ type templateRenderer struct {
 }
 
 func (t *templateRenderer) Render(w io.Writer, name string, data interface{}, c echo.Context) error {
-	// ParseFS 在不同 Go 版本中模板名可能为 basename 或完整路径，两种都尝试
+	// ParseFS may name templates by basename or by full path depending on the Go version, so try both
 	for _, templateName := range []string{name, "templates/" + name} {
 		if t.templates.Lookup(templateName) != nil {
 			return t.templates.ExecuteTemplate(w, templateName, data)
 		}
 	}
-	return t.templates.ExecuteTemplate(w, name, data) // 最后尝试一次，以返回明确错误
+	return t.templates.ExecuteTemplate(w, name, data) // One last attempt, so an explicit error is returned
 }
 
 func newTemplateRenderer() *templateRenderer {
@@ -118,8 +118,8 @@ func main() {
 	handler.Commit = Commit
 	handler.BuildDate = BuildDate
 
-	// -version 打印完整构建信息（含提交与构建时间），本机执行、不对外；
-	// HTTP 的 /version 仍只给版本号，见 handler.VersionInfo 的说明。
+	// -version prints the full build info (including commit and build time). It runs locally and is not exposed externally;
+	// the HTTP /version endpoint still only returns the version number, see the note on handler.VersionInfo.
 	if *showVersion {
 		fmt.Println(handler.BuildInfo().Full())
 		os.Exit(0)
@@ -138,8 +138,8 @@ func main() {
 	if cfg.Runners.ContainerMode && runner.ManagerDockerHostIsDind() {
 		log.Printf("warning: container mode is on, but DOCKER_HOST points at TCP (DinD). The Manager needs the host Docker socket to create, start and stop runner containers. Remove or comment out DOCKER_HOST=tcp://runner-dind:2375 in .env")
 	}
-	// 启动自检：把配置类问题提前到这里暴露，而不是等第一个 Job 跑挂才发现。
-	// 只做只读检查，任何一项失败都不阻止启动（避免打断既有部署）。
+	// Startup self-check: surface configuration problems here, rather than finding out when the first Job fails.
+	// Only read-only checks are performed, and no failure blocks startup (so existing deployments are not disrupted).
 	preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	runner.LogPreflight(runner.Preflight(preflightCtx, cfg))
 	preflightCancel()
@@ -148,9 +148,9 @@ func main() {
 
 	addr := listenAddr(cfg)
 	srv := newHTTPServer(addr, e)
-	// 把可能留在 Runner 目录里的 PAT 搬到凭据目录，并从 Runner 目录删掉。
-	// 必须赶在拉起 Runner 之前：容器模式下那个目录会被整个挂进 Runner 容器，
-	// 容器一起来，Job 就能读到一个对组织目标而言等于 admin:org 的令牌。
+	// Move any PAT that may have been left in the runner directory to the credentials directory, and delete it from the runner directory.
+	// This must happen before the runner is launched: in container mode that directory is mounted into the runner container in its entirety,
+	// so as soon as the container starts, a Job could read a token that, for an organization target, is effectively admin:org.
 	secrets.MigrateAll(cfg, store)
 	go runAutoStartRunners(*configPath)
 	go runRegistrationCheck(*configPath, store)
@@ -167,21 +167,21 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		// 这里曾经是 log.Fatal：HTTP 没关干净就直接退出，下面停 Runner 的那一步
-		// 根本不会执行——正在跑的 Job 照旧被 SIGKILL。关不干净只是几个在途连接的事，
-		// 不该连带放弃 Runner 的优雅停止。
+		// This used to be log.Fatal: exiting right away without shutting the HTTP server down cleanly meant the step below that stops the runners
+		// never ran, and running Jobs were still SIGKILLed. A failed clean shutdown only affects a few in-flight connections,
+		// and should not also abandon the runners' graceful stop.
 		log.Printf("shutting down the HTTP server failed: %v", err)
 	}
-	// 重新读一次配置：进程活着的这段时间里界面可能改过它（含 container_mode）。
-	// 读不出来就按手上这份走——总比什么都不停好。
+	// Re-read the config: the UI may have changed it while the process has been running (including container_mode).
+	// If it can't be read, proceed with the copy we already have; that is still better than stopping nothing.
 	if reloaded, err := config.Load(*configPath); err == nil {
 		cfg = reloaded
 	} else {
 		log.Printf("cannot reload the configuration while shutting down, using the one loaded at startup: %v", err)
 	}
-	// 容器模式下 Runner 容器有自己的生命周期，与 Manager 无关：Manager 重启或升级
-	// 不该顺手把别人的 Job 停掉。默认模式下则相反——Runner 进程就在本容器里，
-	// Manager 一走，内核就会 SIGKILL 它们。
+	// In container mode the runner container has its own lifecycle, independent of the Manager: restarting or upgrading the Manager
+	// should not stop other people's Jobs as a side effect. In default mode it is the opposite: the runner processes live inside this container,
+	// so once the Manager goes away, the kernel will SIGKILL them.
 	if !cfg.Runners.ContainerMode {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), runnerproc.StopGracePeriod)
 		stopDefaultModeRunners(stopCtx, cfg, runnerproc.StopGracePeriod-runnerproc.ShutdownReserve)
@@ -190,16 +190,16 @@ func main() {
 	log.Println("stopped")
 }
 
-// newHTTPServer 构造 Manager 的 HTTP 服务。
+// newHTTPServer builds the Manager's HTTP server.
 //
-// 不设超时的 http.Server 会无限期地等一个不再说话的对端，一个半开连接就能占住
-// 一个 goroutine 和一个 fd 到进程结束。Manager 常年挂在内网甚至反代后面，值得一层兜底。
+// An http.Server without timeouts can wait indefinitely on a peer that has stopped talking, and a single half-open connection can hold
+// a goroutine and a file descriptor until the process exits. The Manager sits on the internal network, often behind a reverse proxy, so a safety net is worthwhile.
 //
-// **刻意不设 WriteTimeout**：它从「响应头开始写」起算，而写响应之前 handler 得先跑完。
-// RecreateRunner 的 lifecycleContext 最长 90 秒（停容器 + 删 + 建 + 起 + 等 Agent 就绪），
-// 任何小于这个值的 WriteTimeout 都会在操作**已经成功**之后掐断连接：容器重建好了，
-// 界面上却是一个网络错误，人会再点一次。ReadTimeout 与 IdleTimeout 已经能挡住
-// 慢速读与闲置连接这两类占用，写侧交给 lifecycleContext 自己的超时。
+// **WriteTimeout is deliberately left unset**: it counts from when the response headers begin to be written, but the handler has to finish running before any response is written.
+// RecreateRunner's lifecycleContext can last up to 90 seconds (stop the container + remove + create + start + wait for the Agent to be ready),
+// so any WriteTimeout shorter than that would cut the connection after the operation has **already succeeded**: the container is rebuilt,
+// but the UI shows a network error, and the user clicks again. ReadTimeout and IdleTimeout already guard against
+// slow reads and idle connections, and the write side is left to lifecycleContext's own timeout.
 func newHTTPServer(addr string, h http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              addr,
@@ -211,14 +211,14 @@ func newHTTPServer(addr string, h http.Handler) *http.Server {
 	}
 }
 
-// stopDefaultModeRunners 在默认模式下停掉本进程里跑着的 Runner，并等它们退出。
+// stopDefaultModeRunners stops the runners running inside this process in default mode, and waits for them to exit.
 //
-// 默认模式下 run.sh 是 Manager 的子进程，同在一个 PID namespace 里。Manager 一退出，
-// 内核对 namespace 里剩下的进程一律 SIGKILL：Job 不会被优雅取消，GitHub 那边要等
-// 「失去通信」超时才判失败。docker compose restart 或升级镜像都会走到这条路上。
+// In default mode run.sh is a child process of the Manager, in the same PID namespace. When the Manager exits,
+// the kernel SIGKILLs every process remaining in the namespace: Jobs are not canceled gracefully, and GitHub has to wait
+// for the "lost communication" timeout before marking them failed. docker compose restart or upgrading the image both take this path.
 //
-// grace 到了还没退干净就照样返回：再等下去，docker stop 的计时器一到，
-// 连 Manager 自己都是被 SIGKILL 的，日志里连一句「还没停下来」都留不下。
+// If the runners have not exited by the time the grace period ends, return anyway: waiting longer would let docker stop's timer
+// SIGKILL the Manager itself before it can even log a "still not stopped" message.
 func stopDefaultModeRunners(ctx context.Context, cfg *config.Config, grace time.Duration) {
 	var running []runner.RunnerInfo
 	for _, info := range runner.List(cfg) {
@@ -232,8 +232,8 @@ func stopDefaultModeRunners(ctx context.Context, cfg *config.Config, grace time.
 	log.Printf("stopping %d runner(s) before exiting (up to %s)", len(running), grace)
 	var pending []runner.RunnerInfo
 	for _, info := range running {
-		// runner.Stop 按「监护脚本先于监听器」的顺序发 SIGTERM，顺序必须保留：
-		// 反过来先停监听器，run.sh 的 while 循环会立刻再拉起一个新的。
+		// runner.Stop sends SIGTERM to the watchdog script before the listener; this order must be kept:
+		// Stopping the listener first would make run.sh's while loop immediately start a new one.
 		if err := runner.Stop(info.InstallDir); err != nil {
 			log.Printf("stopping runner %s failed: %v", info.Name, err)
 			continue
@@ -272,12 +272,12 @@ func stopDefaultModeRunners(ctx context.Context, cfg *config.Config, grace time.
 	}
 }
 
-// runnerPollInterval 是等 Runner 退出时的轮询间隔。
-// 每次轮询都要扫一遍 procfs，200ms 已经足够快（相对几十秒的宽限期），
-// 又不至于在一个正忙着收尾的容器里跟 Job 抢 CPU。
+// runnerPollInterval is the polling interval while waiting for the Runner to exit.
+// Each poll scans procfs, and 200ms is fast enough (relative to the grace period of tens of seconds)
+// without competing with the Job for CPU in a container that is busy shutting down.
 const runnerPollInterval = 200 * time.Millisecond
 
-// runAutoStartRunners 启动后延迟执行一次：将已注册但未在运行的 runner 全部拉起（便于 DinD/管理器重启后恢复）
+// runAutoStartRunners runs once, delayed after startup: it starts every registered runner that is not running (so DinD/manager restarts recover)
 func runAutoStartRunners(configPath string) {
 	const delay = 15 * time.Second
 	time.Sleep(delay)
@@ -289,11 +289,11 @@ func runAutoStartRunners(configPath string) {
 	startIdleRunners(context.Background(), cfg, "auto-start")
 }
 
-// startIdleRunners 把「已注册但没在跑」的 runner 拉起来，供启动后的一次性拉起与定时巡检共用。
+// startIdleRunners starts registered runners that are not running; used by both the one-time startup launch and the periodic check.
 //
-// 判据取自 ListWithLiveStatus 而不是 List：容器模式下 Manager 与 Runner 不在同一个
-// PID namespace，List 的 Running 恒为 false，照着它拉会把每个 runner 每轮都再起一遍。
-// 探测不出来的（StatusUnknown）一律跳过——不确知它没在跑，就别动它。
+// The check uses ListWithLiveStatus rather than List: in container mode the Manager and Runner are not in the same
+// PID namespace, so List's Running is always false, and starting based on it would relaunch every runner each round.
+// Runners whose status cannot be detected (StatusUnknown) are always skipped: if we are not sure it is not running, leave it alone.
 func startIdleRunners(ctx context.Context, cfg *config.Config, action string) {
 	for _, info := range runner.ListWithLiveStatus(ctx, cfg) {
 		if info.Status != runner.StatusInstalled || info.Running {
@@ -307,19 +307,19 @@ func startIdleRunners(ctx context.Context, cfg *config.Config, action string) {
 	}
 }
 
-// runRegistrationCheck 每 5 分钟加载配置并检查各 runner 是否已在 GitHub 显示，写入 .github_status.json 供界面展示
+// runRegistrationCheck runs every 5 minutes: it loads the config, checks whether each runner shows up on GitHub, and writes .github_status.json for the UI.
 func runRegistrationCheck(configPath string, store *secrets.Store) {
 	const interval = 5 * time.Minute
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	// 启动后稍等再执行第一次，避免与 HTTP 启动竞争
+	// Wait a little after startup before the first run, to avoid racing with HTTP startup.
 	time.Sleep(30 * time.Second)
 	firstRun := true
 	for {
 		cfg, err := config.Load(configPath)
 		if err == nil {
 			githubcheck.Run(cfg, store)
-			// 首次不执行拉起，避免与 runAutoStartRunners(15s) 重叠导致重复启动同一 runner
+			// Do not start runners on the first run, to avoid overlapping with runAutoStartRunners (15s) and starting the same runner twice.
 			if !firstRun {
 				startIdleRunners(context.Background(), cfg, "periodic start")
 			}
@@ -329,7 +329,7 @@ func runRegistrationCheck(configPath string, store *secrets.Store) {
 	}
 }
 
-// httpErrorHandler 统一把错误渲染成 {"message": ...}；echo.HTTPError 保留它自己的状态码
+// httpErrorHandler renders all errors as {"message": ...}; echo.HTTPError keeps its own status code.
 func httpErrorHandler(err error, c echo.Context) {
 	code := http.StatusInternalServerError
 	msg := err.Error()
@@ -342,14 +342,14 @@ func httpErrorHandler(err error, c echo.Context) {
 	_ = c.JSON(code, map[string]string{"message": msg})
 }
 
-// safeMethods 是不改变状态的方法，CSRF 与之无关
+// safeMethods are methods that do not change state; CSRF does not apply to them.
 var safeMethods = map[string]bool{
 	http.MethodGet:     true,
 	http.MethodHead:    true,
 	http.MethodOptions: true,
 }
 
-// trustedOrigins 读取 TRUSTED_ORIGINS（逗号分隔），供 csrfGuardMiddleware 放行额外来源
+// trustedOrigins reads TRUSTED_ORIGINS (comma-separated), allowing extra origins through csrfGuardMiddleware.
 func trustedOrigins() []string {
 	raw := strings.TrimSpace(os.Getenv("TRUSTED_ORIGINS"))
 	if raw == "" {
@@ -364,7 +364,7 @@ func trustedOrigins() []string {
 	return out
 }
 
-// originMatchesHost 判断 Origin 与本次请求的 Host 是否同源（只比较 authority）
+// originMatchesHost reports whether Origin and the request's Host are same-origin (compares only the authority).
 func originMatchesHost(origin, host string) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
@@ -373,20 +373,20 @@ func originMatchesHost(origin, host string) bool {
 	return u.Host == host
 }
 
-// csrfGuardMiddleware 拒绝跨站发起的写请求。
+// csrfGuardMiddleware rejects write requests initiated cross-site.
 //
-// 写接口原先既收 JSON 也收 form 编码，而跨站 form 提交是 CORS 意义上的「简单请求」——
-// 不触发预检，浏览器照发，并自动带上该源已缓存的 Basic Auth 凭据。于是诱导管理员
-// 打开一个恶意页面就能添加或启停 Runner。PUT / DELETE 必定触发预检，本来就到不了这里，
-// 真正敞着的是 POST：/api/runners 与 /api/runners/:name/{start,stop,recreate}。
+// Write endpoints used to accept both JSON and form encoding, and a cross-site form submission is a CORS "simple request":
+// it skips preflight, the browser sends it anyway, and it attaches the origin's cached Basic Auth credentials. So merely getting an admin
+// to open a malicious page could add, start, or stop runners. PUT and DELETE always trigger preflight and never reach this point;
+// the real exposure is POST: /api/runners and /api/runners/:name/{start,stop,recreate}.
 //
-// 判据优先取 Sec-Fetch-Site：它由浏览器本地计算，不受反向代理改写 Host 影响
-// （Chrome 76+ / Firefox 90+ / Safari 16.4+）。取不到时回落到比较 Origin 与 Host——
-// 所有现代浏览器的跨站 POST 都会带 Origin，所以这一层够用。
+// Sec-Fetch-Site is checked first: the browser computes it locally, so reverse proxies that rewrite Host do not affect it
+// (Chrome 76+, Firefox 90+, Safari 16.4+). If it is missing, fall back to comparing Origin with Host;
+// all modern browsers send Origin on cross-site POST, so this layer is sufficient.
 //
-// 两者都没有的请求不是浏览器发的（curl、CI 脚本）：它们不持有用户的 cookie 或
-// Basic Auth 缓存，不构成 CSRF，因此放行——否则这套 API 就没法脚本化了。
-// 反代改写 Host 导致误杀时，用 TRUSTED_ORIGINS 显式放行。
+// Requests with neither header were not sent by a browser (curl, CI scripts). They do not carry the user's cookies or
+// cached Basic Auth, so they are not CSRF and are allowed; otherwise this API could not be scripted.
+// If a reverse proxy rewrites Host and causes false rejections, allow the origin explicitly via TRUSTED_ORIGINS.
 func csrfGuardMiddleware(trusted []string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -402,7 +402,7 @@ func csrfGuardMiddleware(trusted []string) echo.MiddlewareFunc {
 					}
 				}
 			}
-			// 浏览器自报的发起方，最可靠
+			// The browser-reported initiator is the most reliable signal
 			if site := strings.TrimSpace(req.Header.Get("Sec-Fetch-Site")); site != "" {
 				if site == "same-origin" {
 					return next(c)
@@ -410,7 +410,7 @@ func csrfGuardMiddleware(trusted []string) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusForbidden,
 					handler.Trf(c, "api.csrf_cross_site", site))
 			}
-			// 老浏览器不发 Sec-Fetch-Site，但跨站 POST 一定带 Origin
+			// Older browsers do not send Sec-Fetch-Site, but cross-site POST always carries Origin
 			if origin != "" {
 				if originMatchesHost(origin, req.Host) {
 					return next(c)
@@ -418,17 +418,17 @@ func csrfGuardMiddleware(trusted []string) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusForbidden,
 					handler.Trf(c, "api.csrf_origin_mismatch", origin, req.Host))
 			}
-			// 非浏览器请求：不会自动携带凭据，放行
+			// Non-browser requests do not automatically carry credentials, so they are allowed
 			return next(c)
 		}
 	}
 }
 
-// basicAuthMiddleware 按环境变量构造 Basic Auth 中间件，同时返回生效的用户名。
+// basicAuthMiddleware builds the Basic Auth middleware from environment variables and also returns the effective username.
 //
-// 未设置 BASIC_AUTH_PASSWORD 时返回 nil —— 此时整个鉴权中间件不会挂载，
-// 所有接口（不只是 /health）都可无凭据访问。这是刻意保留的默认行为，
-// 便于在内网或 localhost 上零配置起步；对外暴露前务必设置密码。
+// It returns nil when BASIC_AUTH_PASSWORD is unset, in which case the whole auth middleware is not mounted,
+// and every endpoint (not just /health) is accessible without credentials. This default is intentional,
+// so that a LAN or localhost setup works with zero configuration; always set a password before exposing it.
 func basicAuthMiddleware() (echo.MiddlewareFunc, string) {
 	pw := os.Getenv("BASIC_AUTH_PASSWORD")
 	if pw == "" {
@@ -439,17 +439,17 @@ func basicAuthMiddleware() (echo.MiddlewareFunc, string) {
 		expectedUser = "admin"
 	}
 	return middleware.BasicAuthWithConfig(middleware.BasicAuthConfig{
-		// /health 与 /ready 供 Ingress / K8s 探针使用，必须免鉴权：
-		// 探针配置里通常带不了 Basic Auth 凭据
+		// /health and /ready are used by Ingress / K8s probes and must skip auth:
+		// probe configurations usually cannot carry Basic Auth credentials
 		Skipper: func(c echo.Context) bool {
 			return c.Path() == "/health" || c.Path() == "/ready"
 		},
 		Validator: func(username, password string, c echo.Context) (bool, error) {
-			// 定长比较：用 == 会让比对耗时随匹配前缀长度变化。
+			// Fixed-length comparison: using == would make the timing vary with the length of the matching prefix.
 			//
-			// 用 secure.ConstantTimeEqual 而不是 subtle.ConstantTimeCompare：
-			// 后者在两侧长度不等时立即返回 0，于是耗时会随「猜的长度是否等于
-			// 真实长度」而变，把口令长度泄漏出去。前者先把两侧补到同长再比。
+			// Use secure.ConstantTimeEqual rather than subtle.ConstantTimeCompare:
+			// the latter returns 0 immediately when the two lengths differ, so timing would reveal whether the guessed length is correct
+			// vary with the real length, leaking the length of the secret. The former pads both sides to the same length first, then compares.
 			userOk := secure.ConstantTimeEqual(username, expectedUser)
 			passOk := secure.ConstantTimeEqual(password, pw)
 			return userOk && passOk, nil
@@ -457,7 +457,7 @@ func basicAuthMiddleware() (echo.MiddlewareFunc, string) {
 	}), expectedUser
 }
 
-// loadI18n 读取内嵌的语言文件
+// loadI18n reads the embedded language files
 func loadI18n(lang string) (map[string]string, error) {
 	data, err := i18nFS.ReadFile("i18n/" + lang + ".json")
 	if err != nil {
@@ -470,21 +470,21 @@ func loadI18n(lang string) (map[string]string, error) {
 	return t, nil
 }
 
-// newEchoServer 组装整个 HTTP 服务：中间件顺序、错误格式、模板、i18n 与路由表。
+// newEchoServer assembles the whole HTTP service: middleware order, error format, templates, i18n, and the route table.
 //
-// 从 main 里拆出来是为了能整体测试。单独测 csrfGuardMiddleware 只能证明这个函数
-// 判得对，证明不了它真的挂在了写接口前面，而「中间件写好了但没挂上」恰恰是这类
-// 防护最典型的失效方式——v1.6.0 把鉴权、路由表、监听地址拆出来也是同一个理由。 version-check-ignore
+// It is split out of main so the whole thing can be tested. Testing csrfGuardMiddleware alone only proves that the function
+// judges correctly, but cannot prove it is actually attached in front of the write endpoints. "Middleware written but never attached" is exactly the kind of
+// protection's most typical failure mode. v1.6.0 split out auth, the route table, and the listen address for the same reason. version-check-ignore
 func newEchoServer() *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.Use(middleware.Recover(), requestLogger(), middleware.Secure())
-	// 所有写接口收的都是很小的 JSON（一个 Runner 的名字、目标、标签）。没有上限时，
-	// 一个持续发送的请求体会被一路读进内存，而 Basic Auth 是在这之后才校验的。
+	// Every write endpoint takes only a small JSON body (a runner name, target, labels). Without a limit,
+	// a request body that keeps streaming would be read into memory in full, and Basic Auth is only checked after that.
 	e.Use(middleware.BodyLimit("1M"))
 	e.Use(metricsMiddleware())
 	e.HTTPErrorHandler = httpErrorHandler
-	// 放在鉴权之前：跨站请求无论带不带凭据，都该在这里就结束
+	// Place this before auth. Cross-site requests should end here regardless of whether they carry credentials
 	trusted := trustedOrigins()
 	e.Use(csrfGuardMiddleware(trusted))
 	if len(trusted) > 0 {
@@ -495,25 +495,25 @@ func newEchoServer() *echo.Echo {
 		log.Printf("Basic Auth enabled (user: %s)", user)
 	}
 	e.Renderer = newTemplateRenderer()
-	// 换 loader 必须连着清缓存：bundle 会把「查不到」也缓存起来（loader 为 nil 时
-	// 缓存的是空表），装上 loader 却不清，之前缓存的空表会一直挡在前面。生产里
-	// 只装一次，但这条不变式不该靠「只装一次」成立——测试里就是先有请求后装 loader，
-	// 于是断言拿到的是 "api.csrf_cross_site" 这种键名，还断言得很开心。
+	// Swapping the loader must also clear the cache: the bundle caches "not found" results too (when the loader is nil,
+	// it caches an empty table), so installing a loader without clearing it leaves the earlier empty table blocking everything. In production
+	// it is installed only once, but this invariant should not rely on "installed only once" holding; in tests a request runs first and the loader is installed afterward,
+	// so the assertion received the key "api.csrf_cross_site" and happily accepted that key name.
 	handler.I18nLoader = loadI18n
 	handler.ResetI18nCache()
 	registerRoutes(e)
 	return e
 }
 
-// registerRoutes 挂载全部路由
+// registerRoutes mounts all routes
 func registerRoutes(e *echo.Echo) {
 	e.GET("/health", handler.Health)
 	e.GET("/ready", handler.Ready)
 	e.GET("/version", handler.VersionInfo)
-	// 不在 Skipper 里，因此配了 Basic Auth 后 /metrics 同样需要凭据
+	// It is not in the Skipper, so once Basic Auth is configured, /metrics also requires credentials
 	e.GET(metricsPath, metricsHandler())
 	e.GET("/", handler.Index)
-	// HEAD 一并注册：只挂 GET 的话，探活脚本或代理对静态资源发 HEAD 会吃到 405
+	// Register HEAD too: if only GET is mounted, health-check scripts or proxies sending HEAD to static assets get a 405
 	staticH := staticHandler()
 	e.GET("/static/*", staticH)
 	e.HEAD("/static/*", staticH)
@@ -522,7 +522,7 @@ func registerRoutes(e *echo.Echo) {
 	e.GET("/api/runner-rows", handler.RunnerRows)
 	e.GET("/api/runners/:name", handler.GetRunner)
 	e.POST("/api/runners", handler.AddRunner)
-	// 静态路径，放在 /api/runners/:name 之外，避免与名为 check 的 Runner 抢路由
+	// Static paths, placed outside /api/runners/:name so they do not compete with a runner named check for the route
 	e.GET("/api/runner-precheck", handler.PrecheckRunner)
 	e.PUT("/api/runners/:name", handler.UpdateRunner)
 	e.DELETE("/api/runners/:name", handler.RemoveRunnerByName)
@@ -531,7 +531,7 @@ func registerRoutes(e *echo.Echo) {
 	e.POST("/api/runners/:name/recreate", handler.RecreateRunner)
 }
 
-// listenAddr 由配置推出监听地址；未配置端口时回落到 :8080
+// listenAddr derives the listen address from the config; when no port is set it falls back to :8080
 func listenAddr(cfg *config.Config) string {
 	if cfg == nil || cfg.Server.Port <= 0 {
 		return ":8080"

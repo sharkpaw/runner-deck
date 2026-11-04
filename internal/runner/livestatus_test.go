@@ -13,8 +13,8 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/config"
 )
 
-// fakeAgent 起一个本地 Agent，并把 agentBaseURL 指过去。
-// 容器名在测试进程里解析不了，不换基址就只能验到「连不上」那一条路径。
+// fakeAgent starts a local Agent and points agentBaseURL at it.
+// The container name cannot be resolved from the test process. Without swapping the base URL, only the 'unreachable' path can be verified.
 func fakeAgent(t *testing.T, status string, running bool) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +30,7 @@ func fakeAgent(t *testing.T, status string, running bool) {
 	t.Cleanup(func() { agentBaseURL = orig })
 }
 
-// liveStatusConfig 造一份容器模式配置，并把 runner 目录布置成「已注册」
+// liveStatusConfig builds a container-mode config and sets up the runner directory as 'registered'
 func liveStatusConfig(t *testing.T) *config.Config {
 	t.Helper()
 	base := t.TempDir()
@@ -73,36 +73,36 @@ func runningHostSocketInspect(mountSrc string) string {
 	}]`
 }
 
-// 这是「每 5 分钟把所有 runner 重新拉起一遍」的根因回归用例。
+// This is the root-cause regression case for 'restarting every runner every 5 minutes'.
 //
-// 容器模式下 Manager 与 Runner 不在同一个 PID namespace，List 扫自己的 /proc
-// 必然找不到 Runner 进程，Running 恒为 false，后台巡检的判据
-// （Status == installed && !Running）于是每一轮都成立。
-// ListWithLiveStatus 必须去问容器内的 Agent 才能得到真话。
+// In container mode, Manager and Runner are not in the same PID namespace, so List scans its own /proc
+// It inevitably cannot find the Runner process, so Running is always false, and the background check's criterion
+// (Status == installed && !Running) therefore holds in every round.
+// ListWithLiveStatus must ask the Agent inside the container to get the truth.
 func TestListWithLiveStatus_RunningContainerIsNotReportedIdle(t *testing.T) {
 	cfg := liveStatusConfig(t)
 	installDir := cfg.Runners.Items[0].InstallPath(cfg.Runners.BasePath)
 	fakeDocker(t, runningHostSocketInspect(installDir))
 	fakeAgent(t, "installed", true)
 
-	// List 是磁盘视角：容器模式下它看不到别的 namespace 里的进程
+	// List reflects the disk view: in container mode it cannot see processes in other namespaces
 	if plain := List(cfg); len(plain) != 1 || plain[0].Running {
-		t.Fatalf("前提不成立：容器模式下 List 的 Running 应为 false，得到 %+v", plain)
+		t.Fatalf("Premise does not hold: in container mode List's Running should be false, got %+v", plain)
 	}
 
 	live := ListWithLiveStatus(context.Background(), cfg)
 	if len(live) != 1 {
-		t.Fatalf("应返回 1 项，得到 %d", len(live))
+		t.Fatalf("should return 1 item, got %d", len(live))
 	}
 	if !live[0].Running {
-		t.Fatal("Agent 报告 running=true，ListWithLiveStatus 仍报未运行 —— 定时巡检会把正在跑的 runner 再拉起一次")
+		t.Fatal("Agent reports running=true, but ListWithLiveStatus still reports not running - the scheduled check would restart the running runner again")
 	}
 	if live[0].Status != StatusInstalled {
-		t.Fatalf("状态应为 %q，得到 %q", StatusInstalled, live[0].Status)
+		t.Fatalf("status should be %q, got %q", StatusInstalled, live[0].Status)
 	}
 }
 
-// Agent 说没在跑，就该被拉起——修复不能把「该拉起」的情况一并堵死
+// If the Agent says it is not running, it should be started. The fix must not also block the 'should start' case.
 func TestListWithLiveStatus_StoppedRunnerStaysStartable(t *testing.T) {
 	cfg := liveStatusConfig(t)
 	installDir := cfg.Runners.Items[0].InstallPath(cfg.Runners.BasePath)
@@ -111,45 +111,45 @@ func TestListWithLiveStatus_StoppedRunnerStaysStartable(t *testing.T) {
 
 	live := ListWithLiveStatus(context.Background(), cfg)
 	if live[0].Running {
-		t.Fatal("Agent 报告 running=false，不应判定为运行中")
+		t.Fatal("Agent reports running=false, should not be judged as running")
 	}
 	if live[0].Status != StatusInstalled {
-		t.Fatalf("状态应为 %q（巡检据此拉起），得到 %q", StatusInstalled, live[0].Status)
+		t.Fatalf("status should be %q (the check starts it based on this), got %q", StatusInstalled, live[0].Status)
 	}
 }
 
-// 探测失败时必须置为 unknown：拉起的前提是「确知它没在跑」。
-// Docker 或 Agent 不可达时并不确知，此时反复重启容器只会把事情弄得更糟。
+// On probe failure it must be set to unknown: starting requires knowing for certain that it is not running.
+// When Docker or the Agent is unreachable, that is not known for certain, and repeatedly restarting the container would only make things worse.
 func TestListWithLiveStatus_ProbeFailureIsNotTreatedAsIdle(t *testing.T) {
 	cfg := liveStatusConfig(t)
 	installDir := cfg.Runners.Items[0].InstallPath(cfg.Runners.BasePath)
 	fakeDocker(t, runningHostSocketInspect(installDir))
-	// 不起假 Agent：容器在跑但 Agent 连不上
+	// Do not start a fake Agent: the container is running but the Agent is unreachable
 
 	live := ListWithLiveStatus(context.Background(), cfg)
 	if live[0].Status == StatusInstalled {
-		t.Fatalf("探测失败时状态不应为 %q，否则巡检会照样去拉起它", StatusInstalled)
+		t.Fatalf("status should not be %q on probe failure, otherwise the check would still start it", StatusInstalled)
 	}
 	if live[0].Status != StatusUnknown {
-		t.Fatalf("探测失败时状态应为 %q，得到 %q", StatusUnknown, live[0].Status)
+		t.Fatalf("status on probe failure should be %q, got %q", StatusUnknown, live[0].Status)
 	}
 }
 
-// 容器根本不存在：该拉起，交给 StartIfInstalled 去建
+// The container does not exist at all: it should be started, leaving creation to StartIfInstalled
 func TestListWithLiveStatus_MissingContainerStaysStartable(t *testing.T) {
 	cfg := liveStatusConfig(t)
 	fakeDocker(t, `[]`)
 
 	live := ListWithLiveStatus(context.Background(), cfg)
 	if live[0].Running {
-		t.Fatal("容器不存在时不应判定为运行中")
+		t.Fatal("should not be judged as running when the container does not exist")
 	}
 	if live[0].Status != StatusInstalled {
-		t.Fatalf("容器不存在但目录已注册，状态应为 %q，得到 %q", StatusInstalled, live[0].Status)
+		t.Fatalf("container does not exist but directory is registered, status should be %q, got %q", StatusInstalled, live[0].Status)
 	}
 }
 
-// 默认模式下 List 本身就是本机进程的真实状态，不该再绕一圈去问 docker
+// In default mode, List already reflects the real state of local processes, so it should not go around asking docker
 func TestListWithLiveStatus_DefaultModePassesThrough(t *testing.T) {
 	cfg := liveStatusConfig(t)
 	cfg.Runners.ContainerMode = false
@@ -157,15 +157,15 @@ func TestListWithLiveStatus_DefaultModePassesThrough(t *testing.T) {
 
 	live := ListWithLiveStatus(context.Background(), cfg)
 	if len(live) != 1 || live[0].Status != StatusInstalled {
-		t.Fatalf("默认模式应原样返回 List 的结果，得到 %+v", live)
+		t.Fatalf("default mode should return List's result unchanged, got %+v", live)
 	}
 	if calls := dockerCalls(t, logPath); calls != "" {
-		t.Fatalf("默认模式不应调用 docker，实际调用了:\n%s", calls)
+		t.Fatalf("default mode should not call docker, but it called:\n%s", calls)
 	}
 }
 
-// liveStatusConfigUnregistered 与 liveStatusConfig 相同，只是不写 .runner：
-// 配置里有这个 runner，但它从没被注册过
+// liveStatusConfigUnregistered is the same as liveStatusConfig, except it does not write .runner:
+// The config contains this runner, but it has never been registered
 func liveStatusConfigUnregistered(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := liveStatusConfig(t)
@@ -176,23 +176,23 @@ func liveStatusConfigUnregistered(t *testing.T) *config.Config {
 	return cfg
 }
 
-// 没注册过的 runner 不能被探测结果说成「已注册未运行」。
-// 容器不存在时 ContainerRunnerStatus 一律返回 installed，若拿它覆盖磁盘状态，
-// startIdleRunners 就会给一个从没配置过的 runner 建容器并发 /start。
+// A never-registered runner must not be described by the probe result as 'registered but not running'.
+// When the container does not exist, ContainerRunnerStatus always returns installed. If that overwrites the disk state,
+// startIdleRunners would create a container for a runner that was never configured and send /start.
 func TestListWithLiveStatus_UnregisteredRunnerStaysNew(t *testing.T) {
 	cfg := liveStatusConfigUnregistered(t)
-	fakeDocker(t, `[]`) // 容器不存在
+	fakeDocker(t, `[]`) // Container does not exist
 
 	live := ListWithLiveStatus(context.Background(), cfg)
 	if live[0].Status != StatusNew {
-		t.Fatalf("没有 .runner、容器也不存在时应为 %q，得到 %q —— 巡检会据此给它建容器", StatusNew, live[0].Status)
+		t.Fatalf("without .runner and with no container, should be %q, got %q - the check would create a container for it based on this", StatusNew, live[0].Status)
 	}
 	if live[0].Running {
-		t.Fatal("不应判定为运行中")
+		t.Fatal("should not be judged as running")
 	}
 }
 
-// 容器存在但已停止，目录仍未注册：同样不能说成 installed
+// Container exists but is stopped, and the directory is still unregistered: likewise must not be described as installed
 func TestListWithLiveStatus_UnregisteredRunnerWithStoppedContainerStaysNew(t *testing.T) {
 	cfg := liveStatusConfigUnregistered(t)
 	installDir := cfg.Runners.Items[0].InstallPath(cfg.Runners.BasePath)
@@ -200,13 +200,13 @@ func TestListWithLiveStatus_UnregisteredRunnerWithStoppedContainerStaysNew(t *te
 
 	live := ListWithLiveStatus(context.Background(), cfg)
 	if live[0].Status != StatusNew {
-		t.Fatalf("目录未注册时应为 %q，得到 %q", StatusNew, live[0].Status)
+		t.Fatalf("should be %q when the directory is unregistered, got %q", StatusNew, live[0].Status)
 	}
 }
 
-// 安装目录整个不存在时更不能说成 installed：
-// 巡检据此去建容器，bind mount 的源路径会被 Docker 以 root 属主创建出来，
-// 之后 Manager（UID 1001）就写不进去了
+// Even less can it be described as installed when the install directory does not exist at all:
+// the check would create the container based on this, and Docker would create the bind mount source path owned by root,
+// after which Manager (UID 1001) can no longer write to it
 func TestListWithLiveStatus_MissingInstallDirStaysMissing(t *testing.T) {
 	cfg := liveStatusConfig(t)
 	installDir := cfg.Runners.Items[0].InstallPath(cfg.Runners.BasePath)
@@ -217,27 +217,27 @@ func TestListWithLiveStatus_MissingInstallDirStaysMissing(t *testing.T) {
 
 	live := ListWithLiveStatus(context.Background(), cfg)
 	if live[0].Status != StatusMissing {
-		t.Fatalf("安装目录不存在时应为 %q，得到 %q", StatusMissing, live[0].Status)
+		t.Fatalf("Expected %q when the install directory does not exist, got %q", StatusMissing, live[0].Status)
 	}
 }
 
-// 直接钉住 ContainerRunnerStatus 的契约：没有容器可问时回落到磁盘状态，
-// 而不是一律说 installed。界面与后台巡检都建立在这个返回值上。
+// Pin the ContainerRunnerStatus contract directly: with no container to ask,
+// fall back to the on-disk state instead of always reporting installed.
 func TestContainerRunnerStatus_FallsBackToDiskStatus(t *testing.T) {
 	cfg := liveStatusConfig(t)
 	installDir := cfg.Runners.Items[0].InstallPath(cfg.Runners.BasePath)
 	fakeDocker(t, `[]`)
 
-	// 有 .runner：容器不存在也仍是「已注册未运行」
+	// With .runner: still "registered but not running" when the container is missing
 	_, status, _, err := ContainerRunnerStatus(context.Background(), cfg, "droiddesk-2", installDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status != StatusInstalled {
-		t.Fatalf("已注册的目录应为 %q，得到 %q", StatusInstalled, status)
+		t.Fatalf("Expected %q for a registered directory, got %q", StatusInstalled, status)
 	}
 
-	// 删掉 .runner：不能再说 installed
+	// Remove .runner: must no longer report installed
 	if err := os.Remove(filepath.Join(installDir, ".runner")); err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +246,6 @@ func TestContainerRunnerStatus_FallsBackToDiskStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	if status != StatusNew {
-		t.Fatalf("未注册的目录应为 %q，得到 %q", StatusNew, status)
+		t.Fatalf("Expected %q for an unregistered directory, got %q", StatusNew, status)
 	}
 }

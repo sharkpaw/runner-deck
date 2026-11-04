@@ -6,21 +6,21 @@ import (
 	"testing"
 )
 
-// dataRef 匹配对接口返回值的引用，如 data.message、data.install_dir
+// dataRef matches references to interface return values, such as data.message, data.install_dir
 var dataRef = regexp.MustCompile(`data\.[A-Za-z_][A-Za-z0-9_]*`)
 
-// escapedRef 匹配已经过转义的引用：escapeHtml(data.x ...
+// escapedRef matches references that have already been escaped: escapeHtml(data.x ...
 var escapedRef = regexp.MustCompile(`escapeHtml\(\s*data\.[A-Za-z_][A-Za-z0-9_]*`)
 
-// boolRef 匹配只作真假判断、并不拼进字符串的引用：data.x ? / data.x &&
+// boolRef matches references used only for truthiness checks and not concatenated into strings: data.x ? / data.x &&
 var boolRef = regexp.MustCompile(`data\.[A-Za-z_][A-Za-z0-9_]*\s*(\?|&&|\|\||\))`)
 
-// 接口返回值里嵌着用户填的 Runner 名，而名称校验只拦 .. / \，
-// `<img src=x onerror=...>` 这样的名字是收得进来的（会被原样建成目录、写进配置、
-// 再由接口回显）。任何拼进 innerHTML 的地方都必须转义。
+// Interface return values embed the user-entered Runner name, but name validation only blocks .. / \,
+// names like `<img src=x onerror=...>` are accepted (they get created as directories verbatim, written into the config,
+// and then echoed back by the interface). Anywhere concatenated into innerHTML must be escaped.
 //
-// 用扫描而不是只断言某一行：这个 bug 就是「旁边一行老实转义了、这一行漏了」，
-// 钉死某一行挡不住下一处新增的漏网。
+// Scan instead of asserting a single line: this bug is that 'the neighboring line escaped correctly, but this line slipped through',
+// pinning one specific line would not stop a new unescaped spot added elsewhere later.
 func TestIndexTemplate_NoUnescapedDataInInnerHTML(t *testing.T) {
 	b, err := templateFS.ReadFile("templates/index.html")
 	if err != nil {
@@ -38,16 +38,16 @@ func TestIndexTemplate_NoUnescapedDataInInnerHTML(t *testing.T) {
 		}
 	}
 	if len(bad) > 0 {
-		t.Fatalf("以下 innerHTML 赋值里有未经 escapeHtml 的接口字段，Runner 名可借此注入脚本:\n  %s",
+		t.Fatalf("The following innerHTML assignments contain interface fields not passed through escapeHtml, through which a Runner name can inject script:\n  %s",
 			strings.Join(bad, "\n  "))
 	}
 }
 
-// 守住上面那三个正则本身：它们若写错就成了永远通过的空检查
+// Guard the three regexes above themselves: if they are written wrong, they become empty checks that always pass
 func TestIndexTemplate_EscapingScannerCatchesUnescaped(t *testing.T) {
 	cases := []struct {
 		line string
-		want bool // true = 应被判为「有未转义的字段」
+		want bool // true = should be flagged as 'has unescaped fields'
 	}{
 		{`msgEl.innerHTML = data.message + '<br>';`, true},
 		{`el.innerHTML = '<span>' + data.install_dir + '</span>';`, true},
@@ -60,7 +60,7 @@ func TestIndexTemplate_EscapingScannerCatchesUnescaped(t *testing.T) {
 		stripped = boolRef.ReplaceAllString(stripped, "")
 		got := len(dataRef.FindAllString(stripped, -1)) > 0
 		if got != tc.want {
-			t.Errorf("扫描器对 %q 判为 %v，期望 %v", tc.line, got, tc.want)
+			t.Errorf("scanner classified %q as %v, expected %v", tc.line, got, tc.want)
 		}
 	}
 }

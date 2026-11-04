@@ -9,54 +9,54 @@ import (
 	metrics "github.com/soulteary/metrics-kit/v3"
 )
 
-// metricsPath Prometheus 抓取端点。
+// metricsPath is the Prometheus scrape endpoint.
 //
-// 刻意**不**放进 basicAuthMiddleware 的 Skipper：这里会吐出全部接口的调用量与
-// 延迟分布，属于运维数据，没理由比 /api 更公开。Prometheus 的 scrape_config
-// 支持 basic_auth，配一下即可。
+// Deliberately **not** added to basicAuthMiddleware's Skipper: this endpoint exposes call volume and
+// latency distributions for all endpoints, which is operational data and should not be more public than /api. Prometheus' scrape_config
+// supports basic_auth, so configuring it is enough.
 const metricsPath = "/metrics"
 
-// httpMetricsConfig 单独留一份：HTTPMetrics 不把配置暴露出来，
-// 而中间件需要用到其中的 SkipPaths 与 TransformPath。
+// httpMetricsConfig is kept separately: HTTPMetrics does not expose its config,
+// but the middleware needs its SkipPaths and TransformPath.
 var httpMetricsConfig = metrics.HTTPMetricsConfig{
 	Namespace: "runner_deck",
 	Subsystem: "http",
 	SkipPaths: []string{metricsPath, "/health", "/ready"},
 
-	// Echo 的 c.Path() 返回的是**路由模板**（/api/runners/:name），不是请求 URL，
-	// 基数天然有界。kit 对这个选项的说明正是这种情形：
+	// Echo's c.Path() returns the **route template** (/api/runners/:name), not the request URL,
+	// so cardinality is naturally bounded. The kit's note on this option describes exactly this case:
 	// "Only safe where every path is already bounded -- a router that reports
 	//  its route pattern rather than the request URL, say."
 	//
-	// 反过来，若沿用默认的 DefaultPathNormalize 去处理已经是模板的路径，
-	// 等于对着 :name 再做一次猜测性归一化，没有意义。
+	// Conversely, if the default DefaultPathNormalize were applied to a path that is already a template,
+	// it would mean guessing a normalization against :name again, which is pointless.
 	DisablePathNormalization: true,
 }
 
-// httpMetrics 本进程的 HTTP 指标。
+// httpMetrics is this process's HTTP metrics.
 //
-// 它的 Registry 必须留着：NewHTTPMetrics 在 cfg.Registry 为 nil 时会自己建一个，
-// 而 metrics.Handler() 服务的是**默认** registry——用 Handler() 的话，这里记的
-// 所有指标谁也抓不到。kit 自己的注释就在讲这件事，所以下面用 HandlerFor。
+// Its Registry must be kept: NewHTTPMetrics creates its own when cfg.Registry is nil,
+// but metrics.Handler() serves the **default** registry. With Handler(), every metric recorded here
+// would never be scraped. The kit's own comments cover this, so HandlerFor is used below.
 var httpMetrics = metrics.NewHTTPMetrics(httpMetricsConfig)
 
-// metricsHandler /metrics 端点。
+// metricsHandler serves the /metrics endpoint.
 func metricsHandler() echo.HandlerFunc {
 	return echo.WrapHandler(metrics.HandlerFor(httpMetrics.Registry))
 }
 
-// notFoundPathLabel 是没有匹配到路由时用的 path 标签。
+// notFoundPathLabel is the path label used when no route matches.
 //
-// 必须是个固定字符串。404 时 Echo 的 c.Path() 为空，若退回去用 c.Request().URL.Path，
-// 任何人扫一遍随机 URL 就能给每个 URL 造出一条时间序列，把 Prometheus 撑爆——
-// 这正是 kit 在 PathTransformFunc 注释里点名的那种情况。
+// It must be a fixed string. On 404, Echo's c.Path() is empty; falling back to c.Request().URL.Path,
+// anyone scanning random URLs could create a time series per URL and overwhelm Prometheus:
+// this is exactly the case the kit names in its PathTransformFunc comment.
 const notFoundPathLabel = "<not-found>"
 
-// metricsMiddleware 记录每个请求的调用量与延迟。
+// metricsMiddleware records the call volume and latency of each request.
 //
-// metrics-kit v3 的中间件只有 Fiber 版（在 fiberadapter 子包里），
-// net/http 侧 README 明说要自己调 RecordRequest，所以这一层是手写的。
-// 归一化规则仍走 kit 的 TransformPath，不自己另写一套。
+// metrics-kit v3 only ships a Fiber middleware (in the fiberadapter subpackage),
+// and the README for the net/http side says to call RecordRequest yourself, so this layer is hand-written.
+// Normalization still goes through the kit's TransformPath rather than a separate local implementation.
 func metricsMiddleware() echo.MiddlewareFunc {
 	skip := make(map[string]bool, len(httpMetricsConfig.SkipPaths))
 	for _, p := range httpMetricsConfig.SkipPaths {
@@ -70,8 +70,8 @@ func metricsMiddleware() echo.MiddlewareFunc {
 			start := time.Now()
 			err := next(c)
 
-			// 状态码要在 next 之后取，且必须考虑 HTTPErrorHandler：
-			// 它在处理链返回之后才写响应，此时 c.Response().Status 尚未更新。
+			// The status code must be read after next, and HTTPErrorHandler must be considered:
+			// it writes the response only after the handler chain returns, so c.Response().Status is not yet updated at that point.
 			status := c.Response().Status
 			if err != nil {
 				if he, ok := err.(*echo.HTTPError); ok {
@@ -92,7 +92,7 @@ func metricsMiddleware() echo.MiddlewareFunc {
 	}
 }
 
-// routeLabel 取这次请求的 path 标签：路由模板，没匹配上则是固定的 <not-found>。
+// routeLabel is the path label for this request: the route template, or the fixed <not-found> if nothing matched.
 func routeLabel(c echo.Context) string {
 	p := c.Path()
 	if p == "" {

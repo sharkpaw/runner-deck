@@ -11,14 +11,14 @@ import (
 
 var yamlTagRe = regexp.MustCompile(`yaml:"([a-z][a-z0-9_]*)`)
 
-// TestConfigFields_EveryYAMLFieldIsInTheConfigTable config.go 里每个 yaml 字段都要在配置表里。
+// TestConfigFields_EveryYAMLFieldIsInTheConfigTable checks that every yaml field in config.go is in the config table.
 //
-// 审计时这张表漏了六个字段：runners.docker_gid，以及 items[] 的 name / path /
-// target_type / target / labels。结果是想手写 config.yaml 的人只能去读
-// config.yaml.example（只有中文）或者 config.go 的 struct tag——而那正是「有文档」
-// 与「没文档」的实际差别。
+// During the audit, this table was missing six fields: runners.docker_gid, plus items[] name / path /
+// target_type / target / labels. As a result, someone who wants to write config.yaml by hand can only read
+// config.yaml.example (Chinese only) or the struct tags in config.go, and that is the actual difference
+// between "documented" and "undocumented".
 //
-// 比的是字段名出现与否，不比描述：描述该被翻译，字段名不该。
+// It compares whether field names appear, not descriptions: descriptions should be translated, field names should not.
 func TestConfigFields_EveryYAMLFieldIsInTheConfigTable(t *testing.T) {
 	repo := repoRoot(t)
 	conf := loadDocsConf(t, repo)
@@ -32,10 +32,10 @@ func TestConfigFields_EveryYAMLFieldIsInTheConfigTable(t *testing.T) {
 		fields[m[1]] = true
 	}
 	if len(fields) < 15 {
-		// 正则被改坏时会安静地扫不到东西，那样这条用例永远绿。
-		t.Fatalf("只扫到 %d 个 yaml 字段，yamlTagRe 可能已经匹配不上了", len(fields))
+		// If the regex is broken, it silently finds nothing, and this test case would always pass.
+		t.Fatalf("only found %d yaml fields; yamlTagRe may no longer match", len(fields))
 	}
-	// 顶层的两个容器本身不是「字段」，表里也没有单独一行。
+	// The two top-level containers are not "fields" themselves, and the table has no separate row for them.
 	delete(fields, "server")
 	delete(fields, "runners")
 
@@ -56,10 +56,10 @@ func TestConfigFields_EveryYAMLFieldIsInTheConfigTable(t *testing.T) {
 		}
 		text := string(b)
 		for _, name := range names {
-			// 边界匹配的理由与 mentionsEnvVar 相同：target 是 target_type 的前缀，
-			// 只看子串的话，表里少了 target 这一行也发现不了。
+			// The reason for boundary matching is the same as mentionsEnvVar: target is a prefix of target_type,
+			// If only substring matching were used, a missing target row would go undetected.
 			if !mentionsConfigField(text, name) {
-				t.Errorf("%s 没有提到配置字段 %q；配置表缺这一行", filepath.ToSlash(f), name)
+				t.Errorf("%s does not mention config field %q; the config table is missing this row", filepath.ToSlash(f), name)
 			}
 		}
 	}

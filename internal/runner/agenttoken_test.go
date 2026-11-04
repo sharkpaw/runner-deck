@@ -8,11 +8,11 @@ import (
 )
 
 // TestEnsureAgentToken_SingleWinnerUnderConcurrency
-// 启停路径（持 runnerOps 锁）与状态路径（不持锁，它每次列表都要跑，不能被一次几秒的
-// docker create 挡住）会同时走到 EnsureAgentToken。「先读后写」不是原子的：两边各生成一个、
-// 后写的覆盖先写的，而注入进容器的是先写的那个，于是 Agent 认 env 里的 A、Manager 从盘上
-// 读到 B，从此永远 401——而且容器 env 非空，agent_token 漂移检查也修不回来，只能人工介入。
-// 所以这里要求「单一胜者」：无论多少路并发，所有人拿到的必须是同一个、且与磁盘一致。
+// The start/stop path (holds the runnerOps lock) and the status path (no lock, since it runs on every listing and must not be blocked by a
+// several-second docker create) both reach EnsureAgentToken. "Read first, then write" is not atomic: each side generates one,
+// and the later write overwrites the earlier one. The token injected into the container is the earlier one, so the Agent accepts A from env while the Manager reads B from disk,
+// and every request fails with 401 from then on. The container env is non-empty, so the agent_token drift check cannot fix it either; only manual intervention helps.
+// So this requires a "single winner": no matter how many calls run concurrently, everyone must get the same token, and it must match what is on disk.
 func TestEnsureAgentToken_SingleWinnerUnderConcurrency(t *testing.T) {
 	dir := t.TempDir()
 	const n = 16
@@ -23,10 +23,10 @@ func TestEnsureAgentToken_SingleWinnerUnderConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			<-start // 尽量让它们同时进入
+			<-start // Try to make them enter at the same time
 			tok, err := EnsureAgentToken(dir)
 			if err != nil {
-				t.Errorf("第 %d 路 EnsureAgentToken 失败: %v", i, err)
+				t.Errorf("EnsureAgentToken failed on concurrent call %d: %v", i, err)
 				return
 			}
 			tokens[i] = tok
@@ -37,18 +37,18 @@ func TestEnsureAgentToken_SingleWinnerUnderConcurrency(t *testing.T) {
 
 	onDisk := ReadAgentToken(dir)
 	if onDisk == "" {
-		t.Fatal("并发结束后磁盘上没有令牌")
+		t.Fatal("no token on disk after concurrent calls finished")
 	}
 	for i, tok := range tokens {
 		if tok != onDisk {
-			t.Fatalf("第 %d 路拿到 %q，磁盘上却是 %q —— 注入容器的与 Manager 之后读到的会不一致，Agent 将永远返回 401",
+			t.Fatalf("concurrent call %d got %q, but disk holds %q - what is injected into the container will not match what the Manager reads later, and the Agent will return 401 forever",
 				i, tok, onDisk)
 		}
 	}
 }
 
-// TestEnsureAgentToken_ReusesExistingToken 已有令牌时必须原样返回，不能重新生成：
-// 重新生成就意味着已经在跑的容器（env 里是旧令牌）从此对不上。
+// TestEnsureAgentToken_ReusesExistingToken must return an existing token unchanged when one is present, not regenerate it:
+// Regenerating would mean already-running containers (whose env holds the old token) stop matching from then on.
 func TestEnsureAgentToken_ReusesExistingToken(t *testing.T) {
 	dir := t.TempDir()
 	first, err := EnsureAgentToken(dir)
@@ -60,19 +60,19 @@ func TestEnsureAgentToken_ReusesExistingToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	if first != second {
-		t.Fatalf("第二次调用换了令牌: %q → %q", first, second)
+		t.Fatalf("second call changed the token: %q → %q", first, second)
 	}
 	if got := ReadAgentToken(dir); got != first {
-		t.Fatalf("磁盘上的令牌与返回值不一致: %q vs %q", got, first)
+		t.Fatalf("token on disk does not match return value: %q vs %q", got, first)
 	}
 }
 
 // TestEnsureAgentToken_NeverUnlinksExistingFile
-// 回收空文件必然要 unlink，而「等若干毫秒还是空就判定写入者已死」是不成立的：
-// 写入者可能只是被调度走了，或者文件系统写入卡了一下。此时 unlink 会把一个还活着的
-// 写入者的 inode 摘掉，它照样把 A 写进那个没有名字的 inode 并返回 A，
-// 而盘上留下的是回收者发布的 B —— 容器注入 A、Manager 读到 B，从此永远 401。
-// 所以这里的硬性要求是：EnsureAgentToken 绝不删除已经占着正式名字的文件。
+// Reclaiming an empty file necessarily requires unlink, but "if it is still empty after waiting a few milliseconds, the writer is dead" does not hold:
+// The writer may just have been descheduled, or a filesystem write may have stalled briefly. In that case unlink would detach the inode of a writer that is still alive,
+// which would still write A into the nameless inode and return A,
+// while the disk keeps B published by the reclaimer - the container gets A, the Manager reads B, and it returns 401 forever.
+// So the hard requirement here is: EnsureAgentToken must never delete a file that already holds the formal name.
 func TestEnsureAgentToken_NeverUnlinksExistingFile(t *testing.T) {
 	cases := map[string]string{
 		"零字节（早先版本写入失败的残留）": "",
@@ -87,27 +87,27 @@ func TestEnsureAgentToken_NeverUnlinksExistingFile(t *testing.T) {
 			}
 
 			if _, err := EnsureAgentToken(dir); err == nil {
-				t.Fatal("占着名字但读不出内容时应当报错，而不是默默接管")
+				t.Fatal("a file that holds the name but whose content cannot be read should be an error, not silently taken over")
 			}
 			got, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("原文件不该被删除: %v", err)
+				t.Fatalf("original file must not be deleted: %v", err)
 			}
 			if string(got) != content {
-				t.Fatalf("原文件内容被改动了: %q → %q", content, string(got))
+				t.Fatalf("original file content was changed: %q → %q", content, string(got))
 			}
 		})
 	}
 }
 
 // TestEnsureAgentToken_LeavesNoTempFileBehind
-// 临时文件是实现细节，正常与失败路径都不该把它留在 Runner 目录里。
+// The temp file is an implementation detail; neither the success nor the failure path should leave it behind in the Runner directory.
 func TestEnsureAgentToken_LeavesNoTempFileBehind(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := EnsureAgentToken(dir); err != nil {
 		t.Fatal(err)
 	}
-	// 再走一次「名字已被占」的分支
+	// Go through the "name already taken" branch once more
 	if _, err := EnsureAgentToken(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -117,14 +117,14 @@ func TestEnsureAgentToken_LeavesNoTempFileBehind(t *testing.T) {
 	}
 	for _, e := range entries {
 		if e.Name() != AgentTokenFile {
-			t.Fatalf("目录里残留了临时文件: %s", e.Name())
+			t.Fatalf("temp file left behind in directory: %s", e.Name())
 		}
 	}
 }
 
 // TestEnsureAgentToken_PublishedFileIsNeverEmpty
-// 原子发布的意义就在这里：.agent_token 这个名字要么不存在，要么内容完整。
-// 没有「已创建、还没写完」的中间态，也就没有需要回收的空文件。
+// This is the point of atomic publishing: the name .agent_token either does not exist or its content is complete.
+// There is no intermediate "created but not yet fully written" state, so there is no empty file to reclaim.
 func TestEnsureAgentToken_PublishedFileIsNeverEmpty(t *testing.T) {
 	dir := t.TempDir()
 	token, err := EnsureAgentToken(dir)
@@ -136,24 +136,24 @@ func TestEnsureAgentToken_PublishedFileIsNeverEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(b) == 0 || string(b) != token {
-		t.Fatalf("发布出来的文件内容不完整: %q（返回值 %q）", string(b), token)
+		t.Fatalf("published file content is incomplete: %q (return value %q)", string(b), token)
 	}
 }
 
-// TestEnsureAgentToken_Format 钉住令牌的外形：64 个小写十六进制字符。
+// TestEnsureAgentToken_Format pins the token's shape: 64 lowercase hexadecimal characters.
 //
-// 生成实现从 rand.Read(32 字节)+hex.EncodeToString 换成了 secure.RandomHex(32)，
-// 两者必须完全等价。令牌既写进 .agent_token，也作为 AGENT_TOKEN 注入容器，
-// 而 agent_token 的漂移检查只看「容器里有没有一个非空值」、不比对取值
-// （见 drift.go 中的说明）——换一种编码不会触发重建，只会让存量容器
-// 从此一直 401，且界面上看不出原因。
+// The generator changed from rand.Read(32 bytes)+hex.EncodeToString to secure.RandomHex(32),
+// and the two must be fully equivalent. The token is written to .agent_token and also injected into the container as AGENT_TOKEN,
+// but agent_token's drift check only looks at whether the container has a non-empty value, and does not compare the value
+// (see the note in drift.go) - changing the encoding will not trigger a rebuild, it will only leave existing containers
+// returning 401 from then on, with no visible reason in the UI.
 func TestEnsureAgentToken_Format(t *testing.T) {
 	token, err := EnsureAgentToken(t.TempDir())
 	if err != nil {
-		t.Fatalf("生成令牌失败: %v", err)
+		t.Fatalf("failed to generate token: %v", err)
 	}
 	if len(token) != agentTokenBytes*2 {
-		t.Fatalf("令牌长度应为 %d（%d 字节的 hex），得到 %d: %q",
+		t.Fatalf("token length should be %d (hex of %d bytes), got %d: %q",
 			agentTokenBytes*2, agentTokenBytes, len(token), token)
 	}
 	isLowerHex := func(r rune) bool {
@@ -161,7 +161,7 @@ func TestEnsureAgentToken_Format(t *testing.T) {
 	}
 	for _, r := range token {
 		if !isLowerHex(r) {
-			t.Fatalf("令牌应为小写十六进制，出现 %q: %s", r, token)
+			t.Fatalf("token should be lowercase hexadecimal, found %q: %s", r, token)
 		}
 	}
 }

@@ -12,12 +12,12 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runnerproc"
 )
 
-// 容器模式下 Agent 的 AGENT_TOKEN 是 Manager 用 -e 注入的（见 containerSpec.createArgs），
-// 而 Agent 起 run.sh 时把整个环境原样传下去，于是 Job 的环境里有这个令牌。
-// 它只能控制该 Runner 自身，影响比 Basic Auth 密码小，但同样会被一个 env 步骤打进日志。
+// In container mode, the Agent's AGENT_TOKEN is injected by the Manager via -e (see containerSpec.createArgs),
+// and since the Agent passes its entire environment through unchanged when it starts run.sh, the token ends up in the Job's environment.
+// It can only control this Runner itself, so its impact is smaller than the Basic Auth password, but an env step can still print it to the log.
 //
-// 注意这里滤的只是传给子进程的那份副本：Agent 自己每次请求都要 os.Getenv("AGENT_TOKEN")
-// 去鉴权（expectedToken），对本进程 Unsetenv 会直接把鉴权关掉。
+// Note that this filters only the copy passed to the child process: the Agent itself calls os.Getenv("AGENT_TOKEN") on every request
+// to authenticate (expectedToken), so Unsetenv in this process would turn auth off entirely.
 func TestStartRunner_DoesNotLeakAgentToken(t *testing.T) {
 	requireEnvDumpOS(t)
 	t.Setenv("AGENT_TOKEN", "super-secret")
@@ -28,38 +28,38 @@ func TestStartRunner_DoesNotLeakAgentToken(t *testing.T) {
 	killRunnerProcsOnCleanup(t, dir)
 
 	if err := startRunner(dir); err != nil {
-		t.Fatalf("startRunner 失败: %v", err)
+		t.Fatalf("startRunner failed: %v", err)
 	}
 	dump := waitForEnvDump(t, dir)
 
 	if v, ok := envDumpLookup(dump, "AGENT_TOKEN"); ok {
-		t.Errorf("run.sh 的环境里有 AGENT_TOKEN=%q；Job 的一个 env 步骤就能把它打进日志", v)
+		t.Errorf("run.sh environment has AGENT_TOKEN=%q; a Job env step can print it to the log", v)
 	}
-	// Agent 自己还得读得到，否则 /start、/stop 就不鉴权了
+	// The Agent must still be able to read it, or /start and /stop would no longer authenticate
 	if got := expectedToken(); got != "super-secret" {
-		t.Errorf("expectedToken() = %q，Agent 本进程的令牌不该被动过", got)
+		t.Errorf("expectedToken() = %q; the Agent process's own token should not have been modified", got)
 	}
 	if v, ok := envDumpLookup(dump, "DOCKER_HOST"); !ok || v != "tcp://d:2375" {
-		t.Errorf("DOCKER_HOST = %q（存在: %v），期望原样透传的 tcp://d:2375", v, ok)
+		t.Errorf("DOCKER_HOST = %q (present: %v), expected to pass through unchanged as tcp://d:2375", v, ok)
 	}
 }
 
-// ---- 与 internal/runner 那条同名用例共用的做法，两处各有一份 ----
+// ---- Same approach as the identically named test case in internal/runner; each place keeps its own copy ----
 
 func requireEnvDumpOS(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("用例依赖 bash 与 FIFO")
+		t.Skip("test case depends on bash and FIFO")
 	}
 }
 
-// writeEnvDumpingRunScript 写一个先把自己的环境落盘、再一直挂住的 run.sh。
-// 挂住的写法与 writeBlockingRunScript 一致，理由见那里的注释。
+// writeEnvDumpingRunScript writes a run.sh that first dumps its own environment to disk, then blocks indefinitely.
+// The blocking approach matches writeBlockingRunScript; see the comments there for the reasoning.
 func writeEnvDumpingRunScript(t *testing.T, dir string) {
 	t.Helper()
 	fifo := filepath.Join(dir, ".test-block")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatalf("创建 FIFO 失败: %v", err)
+		t.Fatalf("failed to create FIFO: %v", err)
 	}
 	script := "#!/bin/bash\nenv > \"$PWD/" + envDumpFile + ".tmp\"\n" +
 		"mv \"$PWD/" + envDumpFile + ".tmp\" \"$PWD/" + envDumpFile + "\"\n" +
@@ -91,14 +91,14 @@ func waitForEnvDump(t *testing.T, dir string) string {
 			return string(b)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("等不到 %s，run.sh 可能没被拉起来: %v", path, err)
+			t.Fatalf("did not get %s; run.sh may not have been started: %v", path, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-// envDumpLookup 在 env(1) 的输出里按变量名取值，按行比对 KEY=。
-// 不能用 strings.Contains：那样 XAGENT_TOKEN 也算命中。
+// envDumpLookup looks up a value by variable name in env(1) output, matching KEY= line by line.
+// Don't use strings.Contains: that would also match XAGENT_TOKEN.
 func envDumpLookup(dump, name string) (string, bool) {
 	for _, line := range strings.Split(dump, "\n") {
 		k, v, ok := strings.Cut(line, "=")

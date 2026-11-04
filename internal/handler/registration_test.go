@@ -11,13 +11,13 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runner"
 )
 
-// 注册是这个项目里副作用最重的一条路径：它下载 runner、跑 config.sh 向 GitHub 注册、
-// 落盘注册结果、再把进程拉起来，全程在后台 goroutine 里，失败只体现为界面上的一行文字。
-// 这些用例把 config.sh 与 install-runner.sh 都换成本地假脚本，覆盖分支判断与错误措辞。
+// Registration is the path with the most side effects in this project: it downloads the runner, runs config.sh to register with GitHub,
+// writes the registration result to disk, then starts the process. All of it runs in a background goroutine, so a failure only shows up as one line of text in the UI.
+// These cases replace both config.sh and install-runner.sh with local fake scripts to cover branch decisions and error wording.
 
-// newRegDir 造一个安装目录。configScript 非空时在里面放一个假的 config.sh。
-// 刻意不放 run.sh：注册成功后 runRegistrationJob 会调 Start，没有 run.sh 时它
-// 只是返回一个被记进日志的错误，既不会 fork 出进程，也不影响注册结果的断言。
+// newRegDir creates an install directory. When configScript is non-empty, it puts a fake config.sh in it.
+// run.sh is deliberately left out: after a successful registration, runRegistrationJob calls Start, and without run.sh it
+// only returns an error that gets logged, which neither forks a process nor affects the registration result assertions.
 func newRegDir(t *testing.T, configScript string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -48,16 +48,16 @@ func readRegResult(t *testing.T, installDir string) regResult {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(installDir, runner.RegistrationResultFile))
 	if err != nil {
-		t.Fatalf("没有写出注册结果文件: %v", err)
+		t.Fatalf("failed to write registration result file: %v", err)
 	}
 	var r regResult
 	if err := json.Unmarshal(b, &r); err != nil {
-		t.Fatalf("注册结果不是合法 JSON: %s", b)
+		t.Fatalf("registration result is not valid JSON: %s", b)
 	}
 	return r
 }
 
-// isolateConfigPath 把 ConfigPath 指到一个临时文件，免得用例互相影响
+// isolateConfigPath points ConfigPath at a temp file so the cases don't interfere with each other
 func isolateConfigPath(t *testing.T) {
 	t.Helper()
 	old := ConfigPath
@@ -76,9 +76,9 @@ func job(installDir string) registrationJob {
 	}
 }
 
-// ---- 安装分支 ----
+// ---- install branch ----
 
-// config.sh 已在，就不该再跑一次安装：重复下载解压既慢又可能覆盖已注册的凭据
+// If config.sh already exists, install should not run again: re-downloading and extracting is slow and may overwrite already-registered credentials
 func TestRunRegistrationJobSkipsInstallWhenConfigScriptExists(t *testing.T) {
 	isolateConfigPath(t)
 	installDir := newRegDir(t, "exit 0")
@@ -92,21 +92,21 @@ func TestRunRegistrationJobSkipsInstallWhenConfigScriptExists(t *testing.T) {
 	runRegistrationJob(job(installDir))
 
 	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("config.sh 已存在时不应再执行安装脚本")
+		t.Fatal("install script should not run when config.sh already exists")
 	}
 	if r := readRegResult(t, installDir); !r.Success {
-		t.Fatalf("期望注册成功，实际: %+v", r)
+		t.Fatalf("expected registration to succeed, got: %+v", r)
 	}
 }
 
-// config.sh 不在，先装再注册
+// config.sh is missing, so install first, then register
 func TestRunRegistrationJobInstallsWhenConfigScriptMissing(t *testing.T) {
 	isolateConfigPath(t)
-	installDir := newRegDir(t, "") // 没有 config.sh
+	installDir := newRegDir(t, "") // no config.sh
 
 	old := installRunnerScriptPath
 	installRunnerScriptPath = filepath.Join(t.TempDir(), "install.sh")
-	// 假安装脚本的职责就是把 config.sh 放到位，与真脚本一致
+	// The fake install script's job is to put config.sh in place, matching the real script
 	writeScript(t, installRunnerScriptPath,
 		`printf '#!/bin/sh\nexit 0\n' > "$RUNNERS_BASE_PATH/$1/`+runner.ConfigScriptName()+`"
 chmod +x "$RUNNERS_BASE_PATH/$1/`+runner.ConfigScriptName()+`"`)
@@ -115,7 +115,7 @@ chmod +x "$RUNNERS_BASE_PATH/$1/`+runner.ConfigScriptName()+`"`)
 	runRegistrationJob(job(installDir))
 
 	if r := readRegResult(t, installDir); !r.Success {
-		t.Fatalf("期望注册成功，实际: %+v", r)
+		t.Fatalf("expected registration to succeed, got: %+v", r)
 	}
 }
 
@@ -132,36 +132,36 @@ func TestRunRegistrationJobReportsInstallFailure(t *testing.T) {
 
 	r := readRegResult(t, installDir)
 	if r.Success {
-		t.Fatal("安装失败时不应记为成功")
+		t.Fatal("a failed install must not be recorded as success")
 	}
 	if !strings.Contains(r.Message, "installing the runner automatically failed") {
-		t.Fatalf("消息应说明是安装阶段失败，实际: %q", r.Message)
+		t.Fatalf("message should say the install stage failed, got: %q", r.Message)
 	}
 }
 
-// 安装脚本退出码为 0，却没产出 config.sh——真实发生过的形态（下载到的包不完整）。
-// 不单独判这一下的话，接着就会以「找不到文件」的形式报在注册阶段，指错地方。
+// The install script exits with 0 but produces no config.sh, which has really happened (the downloaded package was incomplete).
+// Without a separate check here, the failure would surface during registration as a 'file not found' error, pointing at the wrong place.
 func TestRunRegistrationJobDetectsInstallWithoutConfigScript(t *testing.T) {
 	isolateConfigPath(t)
 	installDir := newRegDir(t, "")
 
 	old := installRunnerScriptPath
 	installRunnerScriptPath = filepath.Join(t.TempDir(), "install.sh")
-	writeScript(t, installRunnerScriptPath, "exit 0") // 装了个寂寞
+	writeScript(t, installRunnerScriptPath, "exit 0") // All that install for nothing
 	t.Cleanup(func() { installRunnerScriptPath = old })
 
 	runRegistrationJob(job(installDir))
 
 	r := readRegResult(t, installDir)
 	if r.Success {
-		t.Fatal("没有 config.sh 就不可能注册成功")
+		t.Fatal("registration cannot succeed without config.sh")
 	}
 	if !strings.Contains(r.Message, "the install finished but") {
-		t.Fatalf("消息应指出安装完成却没有 config 脚本，实际: %q", r.Message)
+		t.Fatalf("message should point out that install finished but there is no config script, got: %q", r.Message)
 	}
 }
 
-// ---- 注册成功 ----
+// ---- registration success ----
 
 func TestRunRegistrationJobPassesNameAndUnattended(t *testing.T) {
 	isolateConfigPath(t)
@@ -173,24 +173,24 @@ exit 0`)
 
 	b, err := os.ReadFile(argsFile)
 	if err != nil {
-		t.Fatalf("config.sh 没有被调用: %v", err)
+		t.Fatalf("config.sh was not called: %v", err)
 	}
 	args := string(b)
-	// --name：不传的话 config.sh 会取 Manager 容器的 hostname，一个部署里每个 Runner
-	// 都用同一个名字注册，GitHub 上只看得到一个（v1.5.1 修过） version-check-ignore
+	// --name: if omitted, config.sh takes the Manager container's hostname, so every Runner in one deployment
+	// registers under the same name, so GitHub shows only one (fixed in v1.5.1) version-check-ignore
 	if !strings.Contains(args, "--name demo") {
-		t.Errorf("必须传 --name，实际参数: %s", args)
+		t.Errorf("--name must be passed, actual args: %s", args)
 	}
-	// --unattended：重名时才会立刻失败退出，否则进交互重试循环耗到超时，
-	// 把单 worker 队列里后面排队的 Runner 全堵住（同为 v1.5.1 所修） version-check-ignore
+	// --unattended: it only makes the process fail and exit immediately on a name clash; otherwise it enters an interactive retry loop until timeout,
+	// blocking every Runner queued behind it in the single-worker queue (also fixed in v1.5.1) version-check-ignore
 	if !strings.Contains(args, "--unattended") {
-		t.Errorf("必须传 --unattended，实际参数: %s", args)
+		t.Errorf("--unattended must be passed, actual args: %s", args)
 	}
 	if !strings.Contains(args, "--labels self-hosted,linux") {
-		t.Errorf("标签应逗号拼接后传入，实际参数: %s", args)
+		t.Errorf("labels should be passed comma-joined, actual args: %s", args)
 	}
 	if !strings.Contains(args, "--url https://github.com/o/r") || !strings.Contains(args, "--token AAAA") {
-		t.Errorf("url/token 应原样传入，实际参数: %s", args)
+		t.Errorf("url/token should be passed through unchanged, actual args: %s", args)
 	}
 }
 
@@ -202,23 +202,23 @@ func TestRunRegistrationJobWritesTimestampedResult(t *testing.T) {
 
 	r := readRegResult(t, installDir)
 	if !r.Success || r.Message != "registered" {
-		t.Fatalf("期望成功，实际: %+v", r)
+		t.Fatalf("expected success, got: %+v", r)
 	}
 	if _, err := time.Parse(time.RFC3339, r.At); err != nil {
-		t.Fatalf("at 应为 RFC3339 时间戳，实际 %q: %v", r.At, err)
+		t.Fatalf("at should be an RFC3339 timestamp, got %q: %v", r.At, err)
 	}
 }
 
-// ---- 失败时的措辞 ----
+// ---- failure wording ----
 
-// 这些提示是用户唯一能看到的东西。config.sh 的原始输出只说「哪里错了」，
-// 说不了「该去哪儿改」，补充的那一句才是能照着做的部分。
+// These hints are all the user ever sees. config.sh's raw output only says what went wrong,
+// it cannot say where to fix it. The extra sentence is the part the user can actually act on.
 func TestRunRegistrationJobEnrichesKnownFailures(t *testing.T) {
 	cases := []struct {
 		name       string
 		scriptOut  string
 		wantInMsg  string
-		wantOrigin string // 原始输出也要保留
+		wantOrigin string // keep the raw output too
 	}{
 		{
 			name:       "重名",
@@ -260,19 +260,19 @@ func TestRunRegistrationJobEnrichesKnownFailures(t *testing.T) {
 
 			r := readRegResult(t, installDir)
 			if r.Success {
-				t.Fatal("config.sh 退出码非 0，不该记为成功")
+				t.Fatal("config.sh exited non-zero, must not be recorded as success")
 			}
 			if !strings.Contains(r.Message, tc.wantInMsg) {
-				t.Errorf("消息里应补上可操作的提示 %q，实际: %q", tc.wantInMsg, r.Message)
+				t.Errorf("message should include an actionable hint %q, actual: %q", tc.wantInMsg, r.Message)
 			}
 			if !strings.Contains(r.Message, tc.wantOrigin) {
-				t.Errorf("消息里应保留 config.sh 的原始输出 %q，实际: %q", tc.wantOrigin, r.Message)
+				t.Errorf("message should keep the raw config.sh output %q, actual: %q", tc.wantOrigin, r.Message)
 			}
 		})
 	}
 }
 
-// 不认识的失败照样要落盘，并且带上原始输出——否则界面上只有「注册失败」四个字
+// Unrecognized failures must still be persisted, with the raw output attached; otherwise the UI only shows "registration failed"
 func TestRunRegistrationJobKeepsUnknownFailureOutput(t *testing.T) {
 	isolateConfigPath(t)
 	installDir := newRegDir(t, "echo 'Http response code: NotFound from POST' >&2\nexit 1")
@@ -281,14 +281,14 @@ func TestRunRegistrationJobKeepsUnknownFailureOutput(t *testing.T) {
 
 	r := readRegResult(t, installDir)
 	if r.Success {
-		t.Fatal("不该记为成功")
+		t.Fatal("must not be recorded as success")
 	}
 	if !strings.Contains(r.Message, "NotFound") {
-		t.Fatalf("消息应保留原始输出，实际: %q", r.Message)
+		t.Fatalf("message should keep the raw output, actual: %q", r.Message)
 	}
 }
 
-// config.sh 一句话都不说就失败时，退而用 error 本身，不能写出一条空消息
+// If config.sh fails without saying anything, fall back to the error itself so the message is never empty
 func TestRunRegistrationJobFallsBackToErrWhenScriptSilent(t *testing.T) {
 	isolateConfigPath(t)
 	installDir := newRegDir(t, "exit 3")
@@ -297,17 +297,17 @@ func TestRunRegistrationJobFallsBackToErrWhenScriptSilent(t *testing.T) {
 
 	r := readRegResult(t, installDir)
 	if r.Success {
-		t.Fatal("不该记为成功")
+		t.Fatal("must not be recorded as success")
 	}
 	if strings.TrimSpace(r.Message) == "" {
-		t.Fatal("消息不能为空")
+		t.Fatal("message must not be empty")
 	}
 }
 
-// ---- 队列 ----
+// ---- queue ----
 
-// 队列是单 worker 顺序消费的：并发跑 config.sh 会同时占满 CPU 和网络，
-// 而且 actions/runner 的注册本身就不适合并行。这里确认任务确实被逐个执行。
+// The queue is consumed sequentially by a single worker: running config.sh concurrently would saturate CPU and network at once,
+// and actions/runner registration is not suited to parallel execution. This confirms jobs are run one at a time.
 func TestRegistrationWorkerProcessesQueueSequentially(t *testing.T) {
 	isolateConfigPath(t)
 	queue := make(chan registrationJob, 128)
@@ -320,7 +320,7 @@ func TestRegistrationWorkerProcessesQueueSequentially(t *testing.T) {
 	const n = 3
 	dirs := make([]string, n)
 	for i := range dirs {
-		// 每个脚本写一行到共用的日志里，顺序执行时不会交错
+		// Each script writes one line to the shared log; sequential execution keeps lines from interleaving
 		dirs[i] = newRegDir(t, "exit 0")
 	}
 	for i, d := range dirs {
@@ -336,14 +336,14 @@ func TestRegistrationWorkerProcessesQueueSequentially(t *testing.T) {
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("超时：%s 的注册结果一直没写出来", d)
+				t.Fatalf("timeout: the registration result for %s was never written", d)
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
 	for _, d := range dirs {
 		if r := readRegResult(t, d); !r.Success {
-			t.Fatalf("%s 应注册成功，实际: %+v", d, r)
+			t.Fatalf("%s should register successfully, actual: %+v", d, r)
 		}
 	}
 }

@@ -14,12 +14,12 @@ import (
 	"testing"
 )
 
-// 这个文件里的两条用例都是护栏：它们不验证 Sanitize 做得对，而是防止下一次有人
-// 绕过它。四个调用点改完就绿了，但真正让这件事不复发的是「新增一个 os.Environ()
-// 调用点」和「新增一个凭据类环境变量」这两种改动会当场变红。
+// These two test cases are guardrails: they don't verify that Sanitize works correctly, but prevent the next person from
+// bypassing it. The four call sites are green after the change, but what really keeps this from recurring is that adding a new
+// os.Environ() call site or a new credential-type environment variable turns red immediately.
 
-// repoRoot 从本包目录向上找 go.mod。
-// go test 把工作目录设成被测包的源码目录，所以这里的起点是 internal/childenv。
+// repoRoot walks up from this package directory to find go.mod.
+// go test sets the working directory to the tested package's source directory, so the starting point here is internal/childenv.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -33,25 +33,25 @@ func repoRoot(t *testing.T) string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("从 %s 一路向上都没找到 go.mod", start)
+			t.Fatalf("no go.mod found walking up from %s", start)
 		}
 		dir = parent
 	}
 }
 
-// scanDirs 是本仓库全部 Go 代码所在的两棵树。
+// scanDirs are the two trees holding all Go code in this repo.
 var scanDirs = []string{"cmd", "internal"}
 
-// exemptPkgDir 是唯一允许出现 os.Environ() 的地方——过滤总得有人先把原始环境拿到手。
+// exemptPkgDir is the only place allowed to call os.Environ(), since someone has to get the raw environment first before filtering.
 const exemptPkgDir = "internal/childenv"
 
-// TestNoRawEnvironForChildProcesses 非测试代码里不得再出现 os.Environ()。
+// TestNoRawEnvironForChildProcesses forbids os.Environ() in non-test code.
 //
-// 用 go/parser 而不是 grep：注释和字符串里提到这个名字是正常的（本包的包注释就提了好几次），
-// 按文本扫会把它们一起报出来，于是这条用例很快会被加一堆例外，最后没人看得懂它到底在管什么。
-// AST 只看调用表达式。
+// Uses go/parser instead of grep: mentioning this name in comments and strings is fine (this package's doc comment mentions it several times),
+// a text scan would flag those too, and the test would soon need a pile of exceptions and nobody could tell what it guards.
+// The AST only looks at call expressions.
 //
-// 变异验证：把任意一个调用点改回 os.Environ()，这条用例报出该文件与行号。
+// Mutation check: change any one call site back to os.Environ() and this test reports that file and line.
 func TestNoRawEnvironForChildProcesses(t *testing.T) {
 	repo := repoRoot(t)
 	fset := token.NewFileSet()
@@ -75,8 +75,8 @@ func TestNoRawEnvironForChildProcesses(t *testing.T) {
 			}
 			scanned++
 			for _, line := range osEnvironCallLines(t, fset, path) {
-				t.Errorf("%s:%d 调用了 os.Environ()；子进程的环境改用 childenv.Environ()，"+
-					"它会去掉 Manager / Agent 自己的凭据", rel, line)
+				t.Errorf("%s:%d calls os.Environ(); child process environments must use childenv.Environ(),"+
+					"which strips the Manager / Agent's own credentials", rel, line)
 			}
 			return nil
 		})
@@ -85,29 +85,29 @@ func TestNoRawEnvironForChildProcesses(t *testing.T) {
 		}
 	}
 
-	// 走错了根目录或者匹配器被改坏时，这条用例会安静地什么都扫不到、永远绿。
+	// If the root directory is wrong or the matcher is broken, this test would quietly scan nothing and stay green forever.
 	if scanned < 20 {
-		t.Fatalf("只扫到 %d 个非测试 .go 文件，扫描范围可能不对", scanned)
+		t.Fatalf("only scanned %d non-test .go files; the scan scope may be wrong", scanned)
 	}
 
-	// 匹配器自检：本包自己那一处 os.Environ() 必须还认得出来。
-	// 少了它，上面的遍历即使一个调用点都发现不了也照样是绿的。
+	// Matcher self-check: the one os.Environ() in this package itself must still be recognized.
+	// Without it, the walk above would stay green even if it found no call sites at all.
 	self := filepath.Join(repo, exemptPkgDir, "childenv.go")
 	if lines := osEnvironCallLines(t, fset, self); len(lines) != 1 {
 		t.Fatalf("在 %s 里找到 %d 处 os.Environ()（期望 1 处）；"+
-			"要么 Environ 的实现变了，要么 osEnvironCallLines 已经匹配不上了", exemptPkgDir+"/childenv.go", len(lines))
+			"either Environ's implementation changed or osEnvironCallLines no longer matches", exemptPkgDir+"/childenv.go", len(lines))
 	}
 }
 
-// osEnvironCallLines 返回文件里每一处 os.Environ() 调用的行号。
+// osEnvironCallLines returns the line number of every os.Environ() call in the file.
 //
-// 只认包名字面量 os：本仓库没有给 os 起别名，也没有叫 os 的局部变量，
-// 为这两种不存在的情况引入类型检查器只会让这条用例更难懂。
+// Only the literal package name os is matched: this repo has no import alias for os and no local variable named os,
+// and adding a type checker for these nonexistent cases would only make this test harder to read.
 func osEnvironCallLines(t *testing.T, fset *token.FileSet, path string) []int {
 	t.Helper()
 	file, err := parser.ParseFile(fset, path, nil, 0)
 	if err != nil {
-		t.Fatalf("%s 解析失败: %v", path, err)
+		t.Fatalf("%s failed to parse: %v", path, err)
 	}
 	var lines []int
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -127,28 +127,28 @@ func osEnvironCallLines(t *testing.T, fset *token.FileSet, path string) []int {
 	return lines
 }
 
-// envCallRe 与 internal/docsconsistency/envvars_test.go 里的是同一条，刻意照抄一份：
-// 那是另一个包的测试文件，符号跨不过来，而把它提成非测试代码只为共享一条正则并不值得。
-// 两边一起改的场面不会出现——它认的是 os.Getenv("X") 这种调用形状，不是某个具体名字。
+// envCallRe is the same pattern as in internal/docsconsistency/envvars_test.go, copied on purpose:
+// that is a test file in another package, so the symbol can't be shared, and promoting it to non-test code just to share one regex isn't worth it.
+// The case of both being changed together won't happen, since it matches the call shape os.Getenv("X"), not any specific name.
 var envCallRe = regexp.MustCompile(`(?:os\.Getenv|env\.Get\w*)\(\s*"([A-Z][A-Z0-9_]*)"`)
 
-// credentialNameRe 认的是"名字本身就说明它是凭据"的那一类。
-// 命名约定不是强制的，所以这条模式给不出完备性；它要挡的是最常见的那种疏忽——
-// 加一个 *_TOKEN 就忘了它也会随 environ 传进 Job。漏网的只能靠人往 Denied 里加，
-// BASIC_AUTH_USER 就是这么进去的。
+// credentialNameRe matches names that by themselves indicate a credential.
+// Naming conventions aren't enforced, so this pattern can't be complete; it targets the most common oversight:
+// adding a *_TOKEN and forgetting that it also gets passed through environ into the Job. Anything that slips through can only be caught by someone adding it to Denied manually,
+// which is how BASIC_AUTH_USER got in.
 var credentialNameRe = regexp.MustCompile(`PASSWORD|TOKEN|SECRET|_KEY$`)
 
-// TestDenied_CoversCredentialEnvVars 代码读的环境变量里，名字像凭据的都必须在 Denied 里。
+// TestDenied_CoversCredentialEnvVars requires that every environment variable the code reads whose name looks like a credential be in Denied.
 //
-// 当前应当命中 BASIC_AUTH_PASSWORD 与 AGENT_TOKEN 两个。Denied 里的第三项
-// BASIC_AUTH_USER 不会被这条模式扫到——它不是漏网，是刻意加进去的：用户名不是秘密，
-// 但它同样只属于 Manager，一起去掉，泄露出去的就不是"半个凭据"。
+// Currently it should match BASIC_AUTH_PASSWORD and AGENT_TOKEN. The third entry in Denied,
+// BASIC_AUTH_USER, is not matched by this pattern. It isn't a miss; it was added on purpose: a username isn't a secret,
+// but it still belongs only to the Manager, so it is stripped too, so that what leaks isn't "half a credential".
 //
-// 变异验证：从 Denied 里删掉 AGENT_TOKEN，这条用例报出它和读它的文件。
+// Mutation check: delete AGENT_TOKEN from Denied and this test reports it along with the file that reads it.
 func TestDenied_CoversCredentialEnvVars(t *testing.T) {
 	repo := repoRoot(t)
 
-	readers := map[string]string{} // 变量名 -> 读它的文件，仅用于报错
+	readers := map[string]string{} // variable name -> file that reads it, used only for error messages
 	for _, root := range scanDirs {
 		err := filepath.WalkDir(filepath.Join(repo, root), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -174,9 +174,9 @@ func TestDenied_CoversCredentialEnvVars(t *testing.T) {
 		}
 	}
 
-	// 正则被改坏时它同样是安静地什么都扫不到。
+	// If the regex is broken, this also quietly scans nothing.
 	if len(readers) < 10 {
-		t.Fatalf("只扫到 %d 个环境变量，envCallRe 可能已经匹配不上了: %v", len(readers), sortedKeys(readers))
+		t.Fatalf("only found %d environment variables; envCallRe may no longer match: %v", len(readers), sortedKeys(readers))
 	}
 
 	hits := 0
@@ -186,12 +186,12 @@ func TestDenied_CoversCredentialEnvVars(t *testing.T) {
 		}
 		hits++
 		if !slices.Contains(Denied, name) {
-			t.Errorf("%s（%s 读它）名字像凭据，却不在 childenv.Denied 里；"+
-				"它会随 environ 传进 run.sh 跑的 Job", name, readers[name])
+			t.Errorf("%s (reads it with %s) has a credential-like name but is not in childenv.Denied;"+
+				"it gets passed to the Job run by run.sh via environ", name, readers[name])
 		}
 	}
 	if hits == 0 {
-		t.Fatal("一个凭据类变量都没扫到，credentialNameRe 可能已经匹配不上了")
+		t.Fatal("no credential-type variables were matched at all; credentialNameRe may no longer match anything")
 	}
 }
 

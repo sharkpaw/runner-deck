@@ -11,56 +11,56 @@ import (
 	health "github.com/soulteary/health-kit/v4"
 )
 
-// serviceName 出现在 /health 与 /ready 的响应体里。
+// serviceName appears in the response bodies of /health and /ready.
 const serviceName = "runner-deck"
 
-// livenessAgg 是 /health 用的聚合器：**一个探针都不挂**。
+// livenessAgg is the aggregator for /health: **it registers no checks**.
 //
-// 这是刻意的，不是没写完。/health 一直被文档写成「Ingress/K8s 探针用」，而 K8s 的
-// livenessProbe 失败意味着**重启容器**。配置文件坏掉、挂载卷掉了这类问题，重启一次
-// 也不会变好——只会变成 crashloop，比一个还在跑、只是报错的进程更难排查。
-// 所以 /health 保持原语义：进程活着就是 200。
+// This is intentional, not unfinished. /health has always been documented as "for Ingress/K8s probes", but K8s'
+// livenessProbe failure means **restarting the container**. A broken config file or a lost mount volume will not be fixed by one restart
+// either. It just becomes a crashloop, which is harder to debug than a live process that only reports errors.
+// So /health keeps its original meaning: if the process is alive, it returns 200.
 //
-// 真正的依赖检查在 /ready，见 readinessAgg。
+// The real dependency checks live in /ready; see readinessAgg.
 var livenessAgg = health.NewAggregator(
 	health.DefaultConfig().WithServiceName(serviceName),
 )
 
-// Health 健康检查，供负载均衡或 K8s 探针使用。
+// Health is a health check for load balancers or K8s probes.
 //
-// 响应体由 {"status":"ok"} 变成 {"status":"ok","service":"runner-deck"}——
-// status 取值没变（health-kit 的 StatusHealthy 就是 "ok"），只多了一个字段。
-// 状态码同样没变：进程活着恒为 200。
+// The response body changes from {"status":"ok"} to {"status":"ok","service":"runner-deck"} —
+// The status value is unchanged (StatusHealthy in health-kit is "ok"); only one field is added.
+// The status code is also unchanged: it is always 200 while the process is alive.
 //
-// 这个端点**始终免鉴权**（basicAuthMiddleware 里有 Skipper 放行），所以用
-// DefaultConfig：IncludeDetails 与 IncludeChecks 都是 false，不吐任何内部细节。
+// This endpoint is **always exempt from auth** (basicAuthMiddleware has a Skipper that lets it through), so use
+// DefaultConfig: IncludeDetails and IncludeChecks are both false, so no internal details are leaked.
 func Health(c echo.Context) error {
 	return writeHealth(c, livenessAgg)
 }
 
-// readinessAgg 是 /ready 用的聚合器，挂的是「现在能不能干活」的检查。
+// readinessAgg is the aggregator for /ready; it registers the checks for "can it do work right now".
 //
-// 两个探针都只读配置与文件系统元数据，不起子进程、不发网络请求——探针可能每几秒
-// 打一次，不能让它去 docker exec 或者拨网络。
+// Both probes only read config and filesystem metadata; they spawn no subprocesses and make no network requests. Probes may run every few seconds
+// so they must not run docker exec or open network connections.
 var readinessAgg = health.NewAggregator(
 	health.DefaultConfig().
 		WithServiceName(serviceName).
-		// 必须显式标成关键项。非关键项失败只算 degraded，而 health-kit 把
-		// degraded 映射成 200（"Degraded is still functional"）——那样这两个
-		// 探针就成了摆设，永远不会把实例摘出负载。
+		// They must be explicitly marked as critical. A non-critical failure only counts as degraded, and health-kit maps
+		// degraded to 200 ("Degraded is still functional"), which would make these two
+		// probes useless: they would never take the instance out of rotation.
 		WithCriticalChecks([]string{"config", "base_path"}),
 ).AddCheckers(
 	health.NewCustomChecker("config", checkConfigLoads),
 	health.NewCustomChecker("base_path", checkBasePathUsable),
 )
 
-// Ready 就绪检查：配置能不能读、runner 根目录在不在且可写。
+// Ready is the readiness check: can the config be read, and does the runner base directory exist and is it writable.
 //
-// 与 /health 分开是因为两者失败时该做的事不一样：/health 失败 K8s 会重启容器，
-// 而配置坏了重启治不好；/ready 失败只是把这个实例摘出负载，正是想要的效果。
+// It is separate from /health because the right response to failure differs: if /health fails, K8s restarts the container,
+// but a restart does not fix a broken config; if /ready fails, the instance is just taken out of rotation, which is exactly what we want.
 //
-// 同样免鉴权（探针拿不到 Basic Auth 凭据），所以也用 DefaultConfig——
-// 失败时只说 "status":"unhealthy"，不说是哪一项、更不说路径。
+// It is also exempt from auth (probes cannot supply Basic Auth credentials), so it also uses DefaultConfig:
+// on failure it only returns "status":"unhealthy", without naming the failing check or, much less, any path.
 func Ready(c echo.Context) error {
 	return writeHealth(c, readinessAgg)
 }
@@ -68,13 +68,13 @@ func Ready(c echo.Context) error {
 func writeHealth(c echo.Context, agg *health.Aggregator) error {
 	d := health.Decide(c.Request().Context(), agg, health.RequestSource(c.Request()))
 	if d.Forbidden {
-		// 没配 IPWhitelist 时走不到这里；留着是为了将来配上后不会静默变成 200
+		// This is not reached when IPWhitelist is not configured; it is kept so that once one is set, the check does not silently turn into a 200
 		return echo.NewHTTPError(d.StatusCode, "Forbidden")
 	}
 	return c.JSON(d.StatusCode, d.Body)
 }
 
-// checkConfigLoads 配置文件能不能读、能不能解析。
+// checkConfigLoads checks whether the config file can be read and parsed.
 func checkConfigLoads(context.Context) error {
 	if _, err := config.Load(ConfigPath); err != nil {
 		return fmt.Errorf("cannot load the configuration: %w", err)
@@ -82,10 +82,10 @@ func checkConfigLoads(context.Context) error {
 	return nil
 }
 
-// checkBasePathUsable runner 根目录在不在、是不是目录、能不能写。
+// checkBasePathUsable checks whether the runner base path exists, is a directory, and is writable.
 //
-// 只 stat + 建删一个临时文件，不递归。挂载卷掉了是这里最想抓的情况：
-// 目录还在（挂载点本身），但写不进去，此时 Manager 建不了任何 runner。
+// It only stats the path and creates and deletes one temp file, without recursing. A dropped mount volume is the case this most needs to catch:
+// the directory still exists (the mount point itself), but writes fail, so the Manager cannot create any runner.
 func checkBasePathUsable(context.Context) error {
 	cfg, err := config.Load(ConfigPath)
 	if err != nil {
@@ -103,7 +103,7 @@ func checkBasePathUsable(context.Context) error {
 	if err := os.WriteFile(probe, []byte{}, 0o600); err != nil {
 		return fmt.Errorf("the runner base directory is not writable: %w", err)
 	}
-	// 删不掉不算失败：写成功已经证明了要证明的事，留个空文件也不影响什么
+	// Failing to delete does not count as a failure: a successful write has already proven what needs proving, and a leftover empty file does no harm.
 	_ = os.Remove(probe)
 	return nil
 }

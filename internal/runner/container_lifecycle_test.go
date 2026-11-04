@@ -12,21 +12,21 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runnerproc"
 )
 
-// wantStopArgs 是 docker stop 该带的参数前缀。
+// wantStopArgs is the argument prefix that docker stop should get.
 //
-// 从 runnerproc.StopGracePeriod 推出来而不是写「stop -t 30」：宽限期只该在那一个
-// 常量里定义。写死 30 的话，把常量调大之后这里依然绿着——而 Agent 已经在按新的
-// 宽限期等 Runner 退出，docker 却还是 30 秒就 SIGKILL，Job 照样被拦腰砍断。
+// Derived from runnerproc.StopGracePeriod instead of writing "stop -t 30": the grace period should only be defined in that one
+// constant. If 30 were hardcoded, raising the constant would leave this test green, while the agent already waits for the Runner to exit
+// using the new grace period, but docker would still SIGKILL after 30 seconds, so the Job gets cut off mid-run.
 func wantStopArgs(runnerName string) string {
 	secs := strconv.Itoa(int(runnerproc.StopGracePeriod / time.Second))
 	return "stop -t " + secs + " " + ContainerName(runnerName)
 }
 
-// fakeDockerProgram 在 PATH 前面放一个假 docker，行为完全由 body 决定。
+// fakeDockerProgram puts a fake docker at the front of PATH; its behavior is entirely determined by body.
 //
-// 与 recreate_test.go 里的 fakeDocker 的区别是它能失败：退出码与输出都可控，
-// 而启停 / 删除这条路径上几乎所有分支（容器不存在、权限不足、daemon 连不上）
-// 都只在 docker 返回非 0 时才走到。body 是一段 sh，可以直接 case "$1" in。
+// Unlike fakeDocker in recreate_test.go, this one can fail: its exit code and output are both controllable,
+// and nearly every branch on the stop/remove path (container missing, insufficient permissions, daemon unreachable)
+// is only reached when docker returns non-zero. body is a sh script, so it can directly use case "$1" in.
 func fakeDockerProgram(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -37,7 +37,7 @@ func fakeDockerProgram(t *testing.T, body string) string {
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// 只前置，不替换：脚本自身还要用到 cat、printf 等
+	// Prepend only, don't replace: the script itself still needs cat, printf, etc.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return logPath
 }
@@ -56,16 +56,16 @@ func readCalls(t *testing.T, logPath string) string {
 func TestStopRunnerContainerSucceeds(t *testing.T) {
 	logPath := fakeDockerProgram(t, "exit 0")
 	if err := StopRunnerContainer(context.Background(), "demo"); err != nil {
-		t.Fatalf("停止失败: %v", err)
+		t.Fatalf("Stop failed: %v", err)
 	}
 	calls := readCalls(t, logPath)
 	if !strings.Contains(calls, wantStopArgs("demo")) {
-		t.Fatalf("没有按预期调用 %q，实际调用:\n%s", wantStopArgs("demo"), calls)
+		t.Fatalf("Expected %q to be called, actual calls:\n%s", wantStopArgs("demo"), calls)
 	}
 }
 
-// 停一个已经不存在的容器不是错误：删除流程、界面重复点击都会走到这里，
-// 报错只会让调用方以为自己漏了什么。
+// Stopping a container that no longer exists is not an error: the delete flow and repeated UI clicks both reach this,
+// and reporting an error would only make the caller think they missed something.
 func TestStopRunnerContainerTreatsMissingContainerAsDone(t *testing.T) {
 	logPath := fakeDockerProgram(t, `
 case "$1" in
@@ -74,15 +74,15 @@ case "$1" in
 esac
 exit 0`)
 	if err := StopRunnerContainer(context.Background(), "demo"); err != nil {
-		t.Fatalf("容器不存在时应视作已停止，却返回: %v", err)
+		t.Fatalf("Container that doesn't exist should be treated as stopped, but returned: %v", err)
 	}
-	// 判定「容器是否真的不在了」必须另外 inspect 一次，不能只看 stop 的输出
+	// Determining whether the container is really gone must use a separate inspect, not just the stop output
 	if !strings.Contains(readCalls(t, logPath), "inspect") {
-		t.Fatal("stop 失败后应再 inspect 确认容器是否存在")
+		t.Fatal("After stop fails, inspect again to check whether the container exists")
 	}
 }
 
-// 容器还在却停不下来，是真失败，不能吞掉
+// If the container is still running and cannot be stopped, that is a real failure and must not be swallowed
 func TestStopRunnerContainerReportsRealFailure(t *testing.T) {
 	fakeDockerProgram(t, `
 case "$1" in
@@ -92,15 +92,15 @@ esac
 exit 0`)
 	err := StopRunnerContainer(context.Background(), "demo")
 	if err == nil {
-		t.Fatal("容器仍在时 stop 失败应返回错误")
+		t.Fatal("Stop failure should return an error while the container is still running")
 	}
 	if !strings.Contains(err.Error(), "cannot stop container") {
-		t.Fatalf("错误里应带上 docker 的原始输出，实际: %v", err)
+		t.Fatalf("The error should include docker's raw output, actual: %v", err)
 	}
 }
 
-// 权限 / daemon 连不上是这套部署里最常见的一类失败，错误必须直接给出处理办法，
-// 否则用户只能看到一句 exit status 1
+// Permission or daemon-unreachable errors are the most common failures in this deployment, so the error must directly state the remedy,
+// otherwise the user only sees a bare "exit status 1"
 func TestStopRunnerContainerPermissionErrorCarriesHint(t *testing.T) {
 	fakeDockerProgram(t, `
 case "$1" in
@@ -110,10 +110,10 @@ esac
 exit 0`)
 	err := StopRunnerContainer(context.Background(), "demo")
 	if err == nil {
-		t.Fatal("期望返回错误")
+		t.Fatal("Expected an error to be returned")
 	}
 	if !strings.Contains(err.Error(), "DOCKER_GID") {
-		t.Fatalf("权限类错误应附带 group_add / DOCKER_GID 的处理提示，实际: %v", err)
+		t.Fatalf("Permission errors should include a hint about group_add / DOCKER_GID, actual: %v", err)
 	}
 }
 
@@ -122,22 +122,22 @@ exit 0`)
 func TestRemoveRunnerContainerStopsThenRemoves(t *testing.T) {
 	logPath := fakeDockerProgram(t, "exit 0")
 	if err := RemoveRunnerContainer(context.Background(), "demo"); err != nil {
-		t.Fatalf("删除失败: %v", err)
+		t.Fatalf("Remove failed: %v", err)
 	}
 	calls := readCalls(t, logPath)
 	cn := ContainerName("demo")
 	stopAt := strings.Index(calls, wantStopArgs("demo"))
 	rmAt := strings.Index(calls, "rm -f "+cn)
 	if stopAt < 0 || rmAt < 0 {
-		t.Fatalf("stop 与 rm 都应被调用，实际调用:\n%s", calls)
+		t.Fatalf("Both stop and rm should be called, actual calls:\n%s", calls)
 	}
-	// 先停再删：直接 rm -f 会把正在跑的 Job 拦腰砍断，而 stop 给了 30 秒收尾
+	// Stop before removing: a direct rm -f would cut off a Job that is still running, whereas stop gives it 30 seconds to wrap up
 	if stopAt > rmAt {
-		t.Fatalf("应先 stop 再 rm，实际调用:\n%s", calls)
+		t.Fatalf("stop should be called before rm, actual calls:\n%s", calls)
 	}
 }
 
-// stop 失败不该挡住 rm：容器可能已经退出，甚至已经不在了
+// A stop failure must not block rm: the container may have already exited, or may no longer exist at all
 func TestRemoveRunnerContainerIgnoresStopFailure(t *testing.T) {
 	logPath := fakeDockerProgram(t, `
 case "$1" in
@@ -146,10 +146,10 @@ case "$1" in
 esac
 exit 0`)
 	if err := RemoveRunnerContainer(context.Background(), "demo"); err != nil {
-		t.Fatalf("stop 失败不应中断删除: %v", err)
+		t.Fatalf("A stop failure should not abort removal: %v", err)
 	}
 	if !strings.Contains(readCalls(t, logPath), "rm -f ") {
-		t.Fatal("stop 失败后仍应继续执行 rm")
+		t.Fatal("rm should still run after stop fails")
 	}
 }
 
@@ -160,7 +160,7 @@ case "$1" in
 esac
 exit 0`)
 	if err := RemoveRunnerContainer(context.Background(), "demo"); err != nil {
-		t.Fatalf("容器不存在时应视作已删除，却返回: %v", err)
+		t.Fatalf("Container that doesn't exist should be treated as removed, but returned: %v", err)
 	}
 }
 
@@ -172,10 +172,10 @@ esac
 exit 0`)
 	err := RemoveRunnerContainer(context.Background(), "demo")
 	if err == nil {
-		t.Fatal("rm 真失败时应返回错误")
+		t.Fatal("rm should return an error on a real failure")
 	}
 	if !strings.Contains(err.Error(), "device or resource busy") {
-		t.Fatalf("错误里应带上 docker 的原始输出，实际: %v", err)
+		t.Fatalf("The error should include docker's raw output, actual: %v", err)
 	}
 }
 
@@ -193,15 +193,15 @@ esac
 exit 0`)
 	exists, status, err := ContainerState(context.Background(), "github-runner-demo")
 	if err != nil {
-		t.Fatalf("不应报错: %v", err)
+		t.Fatalf("Should not report an error: %v", err)
 	}
 	if !exists || status != "running" {
-		t.Fatalf("得到 exists=%v status=%q，期望 true/running", exists, status)
+		t.Fatalf("Got exists=%v status=%q, expected true/running", exists, status)
 	}
 }
 
-// 「名字有没有被占用」是这个函数最主要的用途（添加 Runner 前的冲突预检），
-// 所以容器不存在是正常答案，不是错误
+// "Is this name already taken" is the main purpose of this function (the conflict precheck before adding a Runner),
+// so a missing container is the normal answer, not an error
 func TestContainerStateMissingIsNotAnError(t *testing.T) {
 	cases := []struct {
 		name string
@@ -223,17 +223,17 @@ exit 0`},
 			fakeDockerProgram(t, tc.body)
 			exists, status, err := ContainerState(context.Background(), "github-runner-demo")
 			if err != nil {
-				t.Fatalf("容器不存在不应报错: %v", err)
+				t.Fatalf("A missing container should not report an error: %v", err)
 			}
 			if exists || status != "" {
-				t.Fatalf("得到 exists=%v status=%q，期望 false/空", exists, status)
+				t.Fatalf("got exists=%v status=%q, expected false/empty", exists, status)
 			}
 		})
 	}
 }
 
-// 连不上 daemon 与「容器不存在」必须区分开：前者说明整个 Docker 不可用，
-// 把它当成「名字没被占用」会让添加流程一路走到 docker create 才炸
+// Failing to reach the daemon must be told apart from "container does not exist":
+// treating it as "name is free" lets the add flow run all the way to docker create before failing
 func TestContainerStateDockerUnreachableIsAnError(t *testing.T) {
 	fakeDockerProgram(t, `
 case "$1" in
@@ -242,14 +242,14 @@ esac
 exit 0`)
 	exists, _, err := ContainerState(context.Background(), "github-runner-demo")
 	if err == nil {
-		t.Fatal("Docker 不可用时应返回错误，而不是报告「容器不存在」")
+		t.Fatal("Should return an error when Docker is unavailable, not report \"container does not exist\"")
 	}
 	if exists {
-		t.Fatal("出错时 exists 应为 false")
+		t.Fatal("exists should be false on error")
 	}
 }
 
-// ---- 输出判别（纯函数，但决定上面每条路径走哪个分支）----
+// ---- Output classification (pure functions, but they decide which branch each path above takes) ----
 
 func TestContainerNotFound(t *testing.T) {
 	cases := []struct {
@@ -258,19 +258,19 @@ func TestContainerNotFound(t *testing.T) {
 	}{
 		{"Error response from daemon: No such container: abc", true},
 		{"Error: No such object: abc", true},
-		{"error: NO SUCH CONTAINER", true}, // 判别不分大小写
+		{"error: NO SUCH CONTAINER", true}, // Classification is case-insensitive
 		{"Error response from daemon: 没有此容器", true},
 		{"未找到容器 abc", true},
 		{"没有找到容器 abc", true},
 		{"", false},
 		{"permission denied", false},
-		// 容器存在、只是停不下来，不能被当成「不存在」而静默成功
+		// The container exists but cannot be stopped; it must not be silently treated as "does not exist" and succeed
 		{"Error response from daemon: cannot stop container", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.out, func(t *testing.T) {
 			if got := containerNotFound([]byte(tc.out)); got != tc.want {
-				t.Fatalf("containerNotFound(%q) = %v，期望 %v", tc.out, got, tc.want)
+				t.Fatalf("containerNotFound(%q) = %v, expected %v", tc.out, got, tc.want)
 			}
 		})
 	}
@@ -288,13 +288,13 @@ func TestContainerStartUnrecoverable(t *testing.T) {
 		{"failed to get network during CreateEndpoint", true},
 		{"No such object: whatever", false},
 		{"", false},
-		// 端口占用是可恢复的，删容器重建救不了，别误判
+		// Port conflicts are recoverable; deleting and recreating the container cannot fix them, so don't misclassify
 		{"Error starting userland proxy: address already in use", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.out, func(t *testing.T) {
 			if got := containerStartUnrecoverable([]byte(tc.out)); got != tc.want {
-				t.Fatalf("containerStartUnrecoverable(%q) = %v，期望 %v", tc.out, got, tc.want)
+				t.Fatalf("containerStartUnrecoverable(%q) = %v, expected %v", tc.out, got, tc.want)
 			}
 		})
 	}
@@ -308,13 +308,13 @@ func TestManagerDockerHostIsDind(t *testing.T) {
 		{"", false},
 		{"unix:///var/run/docker.sock", false},
 		{"tcp://runner-dind:2375", true},
-		{"  tcp://runner-dind:2375  ", true}, // .env 里常见的多余空格
+		{"  tcp://runner-dind:2375  ", true}, // Extra spaces commonly found in .env files
 	}
 	for _, tc := range cases {
 		t.Run(tc.env, func(t *testing.T) {
 			t.Setenv("DOCKER_HOST", tc.env)
 			if got := ManagerDockerHostIsDind(); got != tc.want {
-				t.Fatalf("DOCKER_HOST=%q 得到 %v，期望 %v", tc.env, got, tc.want)
+				t.Fatalf("DOCKER_HOST=%q got %v, expected %v", tc.env, got, tc.want)
 			}
 		})
 	}

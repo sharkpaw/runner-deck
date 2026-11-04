@@ -8,29 +8,29 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// 服务端消息的本地化。
+// Localization of server-side messages.
 //
-// 界面外壳早就有六种语言，但用户操作之后真正读到的那一句——toast 里的提示、
-// 失败时的错误——一直是 handler 里的中文字面量。把界面切到 English，外壳是英文，
-// 每一个 toast 是中文。文档承诺了六种语言的使用体验，产品此前只兑现了外壳。
+// The UI shell has supported six languages for a while, but the lines users actually read after an action -- the toast notices,
+// and the errors on failure -- have always been Chinese string literals in the handler. Switch the UI to English and the shell is English,
+// but every toast is still Chinese. The docs promise a six-language experience, but the product has so far only delivered on the shell.
 //
-// 做法上没有新东西：resolveLang 与 I18nLoader 都已经存在（前者给模板选语言，
-// 后者由 main 从 embed 注入），这里只是把它们接到 API 响应这一侧。
+// There is nothing new in the approach: resolveLang and I18nLoader already exist (the former picks the language for templates,
+// the latter is injected by main from embed); this only wires them into the API response side.
 //
-// 选择在**服务端**翻译而不是返回错误码由浏览器翻译，有两个理由：
-//   - API 的 message 字段仍然是给人读的散文。返回 "api.name_required" 会让
-//     curl 与 CI 脚本拿到一个码，而它们恰恰是最没有翻译表可查的调用方。
-//   - Detector 的默认语言是 en，所以不带 Accept-Language 的脚本会拿到英文——
-//     比今天拿到中文严格更好。
+// There are two reasons to translate on the **server** rather than return error codes for the browser to translate:
+//   - The API's message field is still prose meant for humans. Returning "api.name_required" would leave
+//     curl and CI scripts with a bare code, and those are exactly the callers with no translation table to look it up in.
+//   - Detector's default language is en, so scripts without Accept-Language get English --
+//     strictly better than getting Chinese today.
 //
-// 键一律以 api. 开头，与界面自己的 msg.* 分开：那些由 app.js 查表，
-// 这些由这里查表，两套的生命周期不一样，混在一个前缀下迟早会有人删错。
+// Keys always start with api., separate from the UI's own msg.* keys: those are looked up by app.js,
+// these are looked up here. The two sets have different lifecycles, and mixing them under one prefix would sooner or later lead someone to delete the wrong one.
 
-// bundleCache 缓存「语言 -> 翻译表」。
+// bundleCache caches "language -> translation table".
 //
-// I18nLoader 每次调用都要读一遍内嵌文件并 json.Unmarshal，而 API 这一侧是每个
-// 请求都要查表的——列表页 15 秒轮询一次，每次都重新解析一份 JSON 属于白烧。
-// 翻译表在进程生命周期内不变（内容编译进二进制），所以缓存不设过期。
+// I18nLoader re-reads the embedded file and calls json.Unmarshal on every call, and on the API side every
+// request does a lookup -- the list page polls every 15 seconds, so re-parsing a JSON file each time is wasted work.
+// The translation tables don't change for the life of the process (the content is compiled into the binary), so the cache never expires.
 var bundleCache sync.Map // string -> map[string]string
 
 func bundle(lang string) map[string]string {
@@ -49,17 +49,17 @@ func bundle(lang string) map[string]string {
 	return m
 }
 
-// ResetI18nCache 丢掉已缓存的翻译表，供测试在替换 I18nLoader 之后调用。
+// ResetI18nCache drops the cached translation tables; tests call it after replacing I18nLoader.
 //
-// 导出是因为 cmd/runner-manager 的用例也会换掉 I18nLoader：不清缓存的话，
-// 先跑的那个用例装进去的表会被后面的用例读到，而那种串扰只在改了测试顺序时才暴露。
+// It is exported because the cmd/runner-manager test cases also swap out I18nLoader: without clearing the cache,
+// a table installed by an earlier case would be read by later cases, and that kind of cross-talk only shows up when the test order changes.
 func ResetI18nCache() { bundleCache = sync.Map{} }
 
-// tr 取当前请求语言下 key 对应的文案。
+// tr returns the message for the key in the current request language.
 //
-// 三级回落：请求语言 → 英文 → 键本身。最后一级刻意不回落成中文：键漏了的时候，
-// 界面上出现 "api.start_failed" 是一眼能看出的缺陷，而出现一句中文只会被当成
-// 「这条还没翻译」，在一个号称六语言的界面里混过去。
+// Three-level fallback: request language → English → the key itself. The last level deliberately does not fall back to Chinese: when a key is missing,
+// a visible "api.start_failed" on the screen is an obvious defect, whereas a Chinese sentence would be taken as
+// "this one isn't translated yet" and slip through in a UI that claims to support six languages.
 func tr(c echo.Context, key string) string {
 	if s, ok := lookup(c, key); ok {
 		return s
@@ -67,12 +67,12 @@ func tr(c echo.Context, key string) string {
 	return key
 }
 
-// trf 同 tr，再按 fmt.Sprintf 填参数。
+// trf is like tr, then fills the arguments with fmt.Sprintf.
 //
-// 键缺失时**不做** Sprintf。回落值是键本身，里面没有任何动词，Sprintf 会把参数
-// 追加成 "api.start_failed%!(EXTRA string=new)" 这种噪音——那串东西既不像译文缺失，
-// 也不像参数，读到的人只会以为程序坏了。改成 "键: 参数" 至少把两件事都留着，
-// 而且一眼看得出是缺了一条译文。
+// When the key is missing, Sprintf is **not** applied. The fallback value is the key itself, which contains no verbs, so Sprintf would append
+// noise such as "api.start_failed%!(EXTRA string=new)" — which looks neither like a missing translation
+// nor like an argument, so readers would think the program is broken. Using "key: args" keeps both facts,
+// and makes it obvious that a translation entry is missing.
 func trf(c echo.Context, key string, args ...any) string {
 	if s, ok := lookup(c, key); ok {
 		return fmt.Sprintf(s, args...)
@@ -85,7 +85,7 @@ func trf(c echo.Context, key string, args ...any) string {
 	return strings.Join(parts, ": ")
 }
 
-// lookup 三级回落：请求语言 → 英文 → 没有。
+// lookup: three-level fallback — request language → English → nothing.
 func lookup(c echo.Context, key string) (string, bool) {
 	lang := resolveLang(c)
 	if s, ok := bundle(lang)[key]; ok && s != "" {
@@ -99,13 +99,13 @@ func lookup(c echo.Context, key string) (string, bool) {
 	return "", false
 }
 
-// trEnf 渲染英文文案，供没有请求语境的地方用——主要是日志。
+// trEnf renders the English message for places without a request context, mainly logging.
 //
-// 日志固定英文是定过的：一条日志没有请求可依，它的读者是运维，而运维的工具链
-// （grep、Loki 查询、告警规则）最怕的就是同一件事换着语言出现。API 响应跟随请求语言，
-// 日志固定英文，两者的读者和约束本来就不是一回事。
+// Logs are always in English by design: a log line has no request to follow, its readers are operators, and their tooling
+// (grep, Loki queries, alert rules) is most hurt when the same thing appears in different languages. API responses follow the request language,
+// while logs are always English; the readers and constraints of the two are simply different.
 //
-// 缺键时与 trf 一样退成「键: 参数」，不做 Sprintf。
+// When the key is missing, it falls back to "key: args" just like trf, without Sprintf.
 func trEnf(key string, args ...any) string {
 	if s, ok := bundle("en")[key]; ok && s != "" {
 		return fmt.Sprintf(s, args...)
@@ -118,9 +118,9 @@ func trEnf(key string, args ...any) string {
 	return strings.Join(parts, ": ")
 }
 
-// Trf 把 trf 暴露给 handler 包外的中间件。
+// Trf exposes trf to middleware outside the handler package.
 //
-// CSRF 守卫拦在路由之前，代码在 cmd/runner-manager，但它返回的 403 和 handler
-// 里的错误走同一条路进到界面的 toast。界面说法语、这一条说中文，读到的人不会
-// 认为是「有一条没翻」，只会认为撞上了另一个服务。
+// The CSRF guard sits in front of the routes; its code lives in cmd/runner-manager, but the 403 it returns travels the same path
+// as handler errors into the UI toast. The UI is in French while this one is in Chinese, and readers will not
+// assume "one string was missed in translation"; they will assume they hit a different service.
 func Trf(c echo.Context, key string, args ...any) string { return trf(c, key, args...) }

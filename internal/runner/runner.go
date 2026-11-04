@@ -18,23 +18,23 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runnerproc"
 )
 
-// 与 handler 写入的文件名一致，供 cron 与 API 读取
+// Matches the file name written by the handler, read by cron and the API
 const (
 	RegistrationResultFile = ".registration_result.json"
 	GitHubStatusFile       = ".github_status.json"
 )
 
-// Status 表示 runner 目录状态
+// Status is the runner directory state
 type Status string
 
 const (
 	StatusUnknown   Status = "unknown"
-	StatusInstalled Status = "installed" // 已配置（存在 .runner 等）
-	StatusNew       Status = "new"       // 仅目录存在，未注册
-	StatusMissing   Status = "missing"   // 目录不存在
+	StatusInstalled Status = "installed" // Configured (.runner and related files exist)
+	StatusNew       Status = "new"       // Directory exists only, not registered
+	StatusMissing   Status = "missing"   // Directory does not exist
 )
 
-// RunnerInfo 供前端展示的 runner 信息
+// RunnerInfo is the runner information shown in the frontend
 type RunnerInfo struct {
 	Name                  string     `json:"name"`
 	Path                  string     `json:"path"`
@@ -43,43 +43,43 @@ type RunnerInfo struct {
 	Labels                []string   `json:"labels"`
 	Status                Status     `json:"status"`
 	InstallDir            string     `json:"install_dir"`
-	Running               bool       `json:"running"`                      // 进程是否在跑
-	Probe                 *ProbeInfo `json:"probe,omitempty"`              // 结构化探测信息（error/type/suggestion/check_command/fix_command）
-	JobDockerBackend      string     `json:"job_docker_backend"`           // 容器模式下 Job 内 Docker 后端：dind / host-socket / none
-	ContainerDrift        string     `json:"container_drift,omitempty"`    // 容器创建参数与当前配置的差异，非空表示容器是按旧配置建的
-	RegistrationMessage   string     `json:"registration_message"`         // 最近一次注册结果信息（成功或失败原因）
-	RegistrationCheckedAt string     `json:"registration_checked_at"`      // 注册结果时间
-	RegisteredOnGitHub    *bool      `json:"registered_on_github"`         // cron 通过 GitHub API 检查是否在 GitHub 显示，nil 表示未检查或查不到答案
-	GitHubCheckAt         string     `json:"github_check_at"`              // 最近一次 GitHub 检查时间
-	GitHubCheckError      string     `json:"github_check_error,omitempty"` // 查不到答案时的原因（令牌过期、限流、网络不通等）
-	GitHubBusy            *bool      `json:"github_busy,omitempty"`        // GitHub 侧该 Runner 是否正在跑 Job，nil 表示不知道（没查、没查到、或没配 PAT）
-	GitHubPublic          *bool      `json:"github_public,omitempty"`      // 目标仓库是否公开，nil 表示不知道（组织目标、查不到、或还没查过）
-	GitHubURL             string     `json:"github_url,omitempty"`         // 该目标在 GitHub 上的 Actions Runners 设置页，target 非法时为空
+	Running               bool       `json:"running"`                      // Whether the process is running
+	Probe                 *ProbeInfo `json:"probe,omitempty"`              // Structured probe info (error/type/suggestion/check_command/fix_command)
+	JobDockerBackend      string     `json:"job_docker_backend"`           // Docker backend inside the job in container mode: dind / host-socket / none
+	ContainerDrift        string     `json:"container_drift,omitempty"`    // Differences between container creation parameters and the current config; non-empty means the container was built from an old config
+	RegistrationMessage   string     `json:"registration_message"`         // Result of the latest registration (success or failure reason)
+	RegistrationCheckedAt string     `json:"registration_checked_at"`      // Time of the registration result
+	RegisteredOnGitHub    *bool      `json:"registered_on_github"`         // Cron checks via the GitHub API whether it shows on GitHub; nil means not checked or no answer found
+	GitHubCheckAt         string     `json:"github_check_at"`              // Time of the latest GitHub check
+	GitHubCheckError      string     `json:"github_check_error,omitempty"` // Reason no answer was found (token expired, rate limited, network unreachable, etc.)
+	GitHubBusy            *bool      `json:"github_busy,omitempty"`        // Whether this runner is running a job on the GitHub side; nil means unknown (not checked, not found, or no PAT configured)
+	GitHubPublic          *bool      `json:"github_public,omitempty"`      // Whether the target repository is public; nil means unknown (organization target, not found, or not checked yet)
+	GitHubURL             string     `json:"github_url,omitempty"`         // The Actions Runners settings page for this target on GitHub; empty when the target is invalid
 }
 
-// GitHubYes / GitHubNo / GitHubUnknown 供模板判断三态。
+// GitHubYes / GitHubNo / GitHubUnknown let templates check the three states.
 //
-// 模板里不能直接写 {{if .RegisteredOnGitHub}}：html/template 对指针只看是否为 nil，
-// 指向 false 的指针同样为真，于是「GitHub 上没有这个 Runner」会被渲染成「GitHub ✓」。
+// Templates cannot use {{if .RegisteredOnGitHub}} directly: html/template only checks whether a pointer is nil,
+// a pointer to false is also truthy, so "not on GitHub" would render as "GitHub ✓".
 func (r RunnerInfo) GitHubYes() bool { return r.RegisteredOnGitHub != nil && *r.RegisteredOnGitHub }
 
-// GitHubNo 表示查到了答案且答案是「没有」
+// GitHubNo means an answer was found and it is "not present"
 func (r RunnerInfo) GitHubNo() bool { return r.RegisteredOnGitHub != nil && !*r.RegisteredOnGitHub }
 
-// GitHubUnknown 表示这次检查没能得出答案（与「从未检查」由 GitHubCheckAt 区分）
+// GitHubUnknown means this check could not reach an answer (distinguished from "never checked" by GitHubCheckAt)
 func (r RunnerInfo) GitHubUnknown() bool { return r.RegisteredOnGitHub == nil }
 
-// GitHubBusyYes 表示上次查询时 GitHub 说它正在跑 Job。
-// 和上面三个同理：GitHubBusy 是 *bool，模板里写 {{if .GitHubBusy}} 会把
-// 指向 false 的指针也当成真，于是「空闲」显示成「忙碌中」。
+// GitHubBusyYes means that at the last query GitHub reported it was running a job.
+// Same as the three above: GitHubBusy is *bool, so {{if .GitHubBusy}} in a template would treat
+// a pointer to false as true, so "idle" would show as "busy".
 func (r RunnerInfo) GitHubBusyYes() bool { return r.GitHubBusy != nil && *r.GitHubBusy }
 
-// GitHubPublicYes 表示上次查询时 GitHub 说这个目标仓库是公开的。
-// 同样不能在模板里写 {{if .GitHubPublic}}：指向 false 的指针也为真，
-// 于是每个私有仓库都会挂上「公开仓库」徽标——恰好是最不该误报的那一个。
+// GitHubPublicYes means that at the last query GitHub reported this target repository as public.
+// Likewise, {{if .GitHubPublic}} cannot be used in templates: a pointer to false is also truthy,
+// so every private repository would get a "public repo" badge, which is exactly the one that must not be misreported.
 func (r RunnerInfo) GitHubPublicYes() bool { return r.GitHubPublic != nil && *r.GitHubPublic }
 
-// ProbeInfo 为容器探测失败的结构化信息。
+// ProbeInfo is the structured info for a failed container probe.
 type ProbeInfo struct {
 	Error        string `json:"error"`
 	Type         string `json:"type"`
@@ -88,7 +88,7 @@ type ProbeInfo struct {
 	FixCommand   string `json:"fix_command"`
 }
 
-// GetByName 根据名称获取单个 runner 信息，不存在返回 nil；cfg 为 nil 时安全返回 nil
+// GetByName gets a single runner's info by name, returns nil if it does not exist; returns nil safely when cfg is nil
 func GetByName(cfg *config.Config, name string) *RunnerInfo {
 	if cfg == nil {
 		return nil
@@ -121,10 +121,10 @@ func GetByName(cfg *config.Config, name string) *RunnerInfo {
 	return nil
 }
 
-// List 根据配置与磁盘状态列出所有 runner。
+// List lists all runners based on the config and disk state.
 //
-// 注意：容器模式下每项的 Running 不可信——Runner 进程在各自的容器里，
-// 本进程扫 /proc 看不到它们。需要真实运行状态的调用方请用 ListWithLiveStatus。
+// Note: in container mode, each item's Running is unreliable, because the runner processes are in their own containers,
+// so this process scanning /proc cannot see them. Callers that need the real running state should use ListWithLiveStatus.
 func List(cfg *config.Config) []RunnerInfo {
 	if cfg == nil {
 		return nil
@@ -155,7 +155,7 @@ func List(cfg *config.Config) []RunnerInfo {
 		list = append(list, info)
 		dirs = append(dirs, installDir)
 	}
-	// 一次扫描认领所有安装目录：逐个判定等于把整张进程表读 len(list) 遍
+	// Claim all install directories in one scan: judging each one separately would read the whole process table len(list) times
 	procs := runnerproc.FindMany(dirs)
 	for i := range list {
 		list[i].Running = list[i].Status == StatusInstalled && len(procs[list[i].InstallDir]) > 0
@@ -163,15 +163,15 @@ func List(cfg *config.Config) []RunnerInfo {
 	return list
 }
 
-// ListWithLiveStatus 在 List 之上补齐真实运行状态：容器模式下逐个问容器内的 Agent，
-// 默认模式下 List 已经是本机进程的真实状态，直接返回。
+// ListWithLiveStatus fills in the real running state on top of List: in container mode it asks the Agent inside each container one by one,
+// In default mode, List already reflects the real state of local processes, so it returns directly.
 //
-// 后台的「已注册未运行则拉起」两个循环必须用这个，不能用 List：容器模式下
-// List 的 Running 恒为 false（Manager 与 Runner 不在同一个 PID namespace），
-// 于是每一轮巡检都会把每个 runner 再拉起一遍。
+// The two background loops that start "registered but not running" runners must use this, not List: in container mode
+// List's Running is always false (Manager and Runner are not in the same PID namespace),
+// so every inspection round would start every runner again.
 //
-// 探测失败时把该项置为 StatusUnknown 而不是保留 installed：拉起的前提是
-// 「确知它没在跑」，Docker 不可达时并不确知，此时什么都不做比反复重启稳妥。
+// On probe failure, set the status to StatusUnknown instead of keeping installed: starting requires
+// knowing it is not running. Docker being unreachable doesn't prove that, so doing nothing is safer than restarting repeatedly.
 func ListWithLiveStatus(ctx context.Context, cfg *config.Config) []RunnerInfo {
 	if cfg == nil {
 		return nil
@@ -193,8 +193,8 @@ func ListWithLiveStatus(ctx context.Context, cfg *config.Config) []RunnerInfo {
 	return list
 }
 
-// diskStatus 只看目录本身：不存在为 missing，有 .runner 为 installed，否则 new。
-// 与进程探测分开，好让 List 用一次 /proc 扫描判定一整批 runner。
+// diskStatus looks only at the directory: missing if it doesn't exist, installed if it has .runner, otherwise new.
+// Kept separate from process probing so List can classify a whole batch of runners with one /proc scan.
 func diskStatus(installDir string) Status {
 	if installDir == "" {
 		return StatusMissing
@@ -203,7 +203,7 @@ func diskStatus(installDir string) Status {
 	if err != nil || !fi.IsDir() {
 		return StatusMissing
 	}
-	// 已注册的 runner 会有 .runner 文件
+	// A registered runner has a .runner file
 	if _, err := os.Stat(filepath.Join(installDir, ".runner")); err == nil {
 		return StatusInstalled
 	}
@@ -218,7 +218,7 @@ func getStatus(installDir string) (Status, bool) {
 	return status, isProcessRunning(installDir)
 }
 
-// readRegistrationResult 读取 handler 写入的注册结果，返回 message 与 at
+// readRegistrationResult reads the registration result written by the handler, returning message and at
 func readRegistrationResult(installDir string) (message, at string) {
 	b, err := os.ReadFile(filepath.Join(installDir, RegistrationResultFile))
 	if err != nil {
@@ -235,37 +235,37 @@ func readRegistrationResult(installDir string) (message, at string) {
 	return v.Message, v.At
 }
 
-// GitHubStatus 是 .github_status.json 的内容：上一次 GitHub 查询留下的结论。
+// GitHubStatus is the content of .github_status.json: the conclusions left by the last GitHub query.
 //
-// 三个 *bool 都是三态，nil 一律是「不知道」而不是 false。把「没查出来」写成 false，
-// 界面上就会对一个根本没查到的东西打包票——这正是本文件里那几条注释反复在说的事。
+// The three *bool fields are tri-state: nil always means unknown, not false. Writing an unqueried result as false
+// would make the UI vouch for something that was never checked, which is exactly what the other comments in this file keep warning about.
 type GitHubStatus struct {
-	// Registered 该 Runner 是否已在 GitHub 上登记
+	// Registered whether the Runner is registered on GitHub
 	Registered *bool `json:"registered"`
-	// Busy GitHub 是否说它正在跑 Job
+	// Busy whether GitHub says it is running a Job
 	Busy *bool `json:"busy,omitempty"`
-	// Public 目标仓库是否公开。组织目标、查不到、从未查过都是 nil。
+	// Public whether the target repository is public. Organization targets, lookup failures, and never-checked cases are all nil.
 	Public *bool `json:"public,omitempty"`
-	// LastCheck 最近一次「是否已登记」查询的时间（RFC3339）。
+	// LastCheck the time (RFC3339) of the most recent "is registered" query.
 	//
-	// 由调用方填，不在写入时顺手盖上当前时间：界面靠它是否为空把「从未检查」
-	// 与「查过但失败」分开说，而没有 PAT 时这个查询根本不会发生——
-	// 可见性那一半却仍然会写文件（匿名也能查）。盖上时间就等于对着一个
-	// 从未查过的 Runner 说「查过了，失败」。
+	// Set by the caller, not stamped with the current time on write: the UI uses emptiness to tell "never checked"
+	// apart from "checked but failed". Without a PAT this query never happens,
+	// but the visibility half still writes the file (it works anonymously). Stamping the time would mean
+	// claiming "checked, failed" for a runner that was never checked.
 	LastCheck string `json:"last_check,omitempty"`
-	// Error 查不到答案时的原因（令牌过期、限流、网络不通等）
+	// Error the reason the query could not produce an answer (expired token, rate limiting, network unreachable, etc.)
 	Error string `json:"error,omitempty"`
-	// VisibilityCheckedAt 最近一次问过仓库可见性的时间（RFC3339），空表示从未问过。
+	// VisibilityCheckedAt the time (RFC3339) of the most recent visibility lookup; empty means never asked.
 	//
-	// 可见性几乎不变，而匿名请求每小时只有 60 次，靠它把查询压到每个仓库一天一次。
+	// Visibility rarely changes, while anonymous requests are limited to 60 per hour; this keeps the lookup to once per repository per day.
 	VisibilityCheckedAt string `json:"visibility_checked_at,omitempty"`
 }
 
-// ReadGitHubStatus 读取上一次 GitHub 查询的结论。
+// ReadGitHubStatus reads the conclusions of the last GitHub query.
 //
-// 文件不存在、或解析不了，一律读成零值——那是「从未查过」，所有字段都为空。
-// 老版本写下的文件里 registered 是普通 bool，反序列化成非 nil 指针，语义不变；
-// 没有 public / visibility_checked_at 的老文件读出 nil 与空串，也就是「还没查过可见性」。
+// A missing or unparseable file is read as the zero value, meaning "never checked", with every field empty.
+// In files written by older versions, registered was a plain bool, which deserializes to a non-nil pointer; the meaning is unchanged.
+// Old files without public or visibility_checked_at read back as nil and an empty string, meaning "visibility not yet checked".
 func ReadGitHubStatus(installDir string) GitHubStatus {
 	var v GitHubStatus
 	b, err := os.ReadFile(filepath.Join(installDir, GitHubStatusFile))
@@ -278,38 +278,38 @@ func ReadGitHubStatus(installDir string) GitHubStatus {
 	return v
 }
 
-// WriteGitHubStatus 记录一次 GitHub 查询的结论。
+// WriteGitHubStatus records the conclusions of a GitHub query.
 //
-// 整个文件一次写完，所以调用方要把这次没重查的字段原样带上——
-// 典型做法是先 ReadGitHubStatus 拿到上一次的结论再改其中几项，
-// 否则每五分钟一次的登记检查会把一天只查一次的可见性结论抹掉。
+// The whole file is written at once, so the caller must carry over the fields it did not re-query:
+// the usual approach is to call ReadGitHubStatus first to get the previous conclusions, then change only some fields,
+// otherwise the registration check every five minutes would wipe the visibility conclusion that is only queried once a day.
 func WriteGitHubStatus(installDir string, st GitHubStatus) error {
 	b, err := json.Marshal(st)
 	if err != nil {
 		return err
 	}
-	// 原子替换：列表渲染随时可能在读这个文件，就地截断重写会让它读到半截 JSON，
-	// 那会被当成「这个 Runner 没有 GitHub 状态」显示出来。
+	// Atomic replace: list rendering may read this file at any time, and an in-place truncate-and-rewrite could expose half-written JSON,
+	// which would be displayed as "this Runner has no GitHub status".
 	return atomicfile.WriteFile(filepath.Join(installDir, GitHubStatusFile), b, 0644)
 }
 
-// applyGitHubStatus 把磁盘上那份结论填进 info。
+// applyGitHubStatus fills info with the conclusions stored on disk.
 func (r *RunnerInfo) applyGitHubStatus(installDir string) {
 	gh := ReadGitHubStatus(installDir)
 	r.RegisteredOnGitHub, r.GitHubBusy, r.GitHubPublic = gh.Registered, gh.Busy, gh.Public
 	r.GitHubCheckAt, r.GitHubCheckError = gh.LastCheck, gh.Error
 }
 
-// isProcessRunning 检测本机是否有属于该安装目录的 Runner 进程存活。
+// isProcessRunning checks whether a Runner process belonging to this install directory is alive on this machine.
 //
-// 只对「Runner 进程与 Manager 同在一个 PID namespace」的默认模式有意义。
-// 容器模式下 Runner 跑在各自的容器里，Manager 扫自己的 /proc 必然找不到，
-// 判定要走 ContainerRunnerStatus 问容器内的 Agent——见 ListWithLiveStatus。
+// Only meaningful in the default mode, where the Runner process shares a PID namespace with the Manager.
+// In container mode each Runner runs in its own container, so the Manager's scan of its own /proc will never find it;
+// that check goes through ContainerRunnerStatus, which asks the Agent inside the container. See ListWithLiveStatus.
 func isProcessRunning(installDir string) bool {
 	return runnerproc.Running(installDir)
 }
 
-// EnsureRunnerDir 确保 runner 目录存在并返回路径，且必须在 base_path 之下（防路径穿越）
+// EnsureRunnerDir ensures the runner directory exists and returns its path; it must be under base_path (prevents path traversal)
 func EnsureRunnerDir(cfg *config.Config, name, subPath string) (string, error) {
 	dir := subPath
 	if dir == "" {
@@ -328,31 +328,31 @@ func EnsureRunnerDir(cfg *config.Config, name, subPath string) (string, error) {
 	if err != nil {
 		abs = filepath.Join(baseAbs, dir)
 	}
-	// 确保安装目录在 base_path 之下
+	// Ensure the install directory is under base_path
 	rel, err := filepath.Rel(baseAbs, abs)
 	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
 		return "", os.ErrInvalid
 	}
-	// base_path 本身沿用 0755 创建，只把 Runner 自己的安装目录收到 0700。
+	// base_path itself is created with 0755 as before; only the Runner's own install directory is tightened to 0700.
 	//
-	// config.sh 会往这个目录里写 .credentials_rsaparams——Runner 向 GitHub 表明身份用的
-	// RSA 私钥。actions/runner 不给这些文件设权限（ConfigurationStore 只在 Windows 上打
-	// Hidden 属性，Unix 侧完全跟 umask 走，通常是 0644），所以目录若可被他人进入，
-	// 宿主机上任何本地用户都能读走它，进而冒充这个 Runner 领 Job、看到传给 Job 的 secrets。
+	// config.sh writes .credentials_rsaparams into this directory: the RSA private key the Runner uses to identify itself to GitHub.
+	// actions/runner does not set permissions on these files (ConfigurationStore only does so on Windows
+	// the Hidden attribute. On Unix it follows umask entirely (usually 0644), so if others can enter the directory,
+	// any local user on the host can read it, and then impersonate this Runner to claim Jobs and see the secrets passed to Jobs.
 	//
-	// MkdirAll 对已存在的目录不改权限：老部署里的目录仍是 0755，由启动自检点名并给出
-	// chmod 命令，而不是在这里替用户改——UID 不匹配的部署下收紧权限会把本来能跑的弄坏。
+	// MkdirAll does not change permissions of existing directories: in older deployments they are still 0755, and the startup self-check names them and gives the
+	// chmod command instead of changing them here for the user; tightening permissions in a deployment with a mismatched UID would break things that currently work.
 	if err := os.MkdirAll(baseAbs, 0755); err != nil {
 		return "", err
 	}
 	return abs, os.MkdirAll(abs, RunnerDirMode)
 }
 
-// RunnerDirMode 是 Runner 安装目录的权限：只有属主可进入。
-// 目录里有 GitHub 凭据，见 EnsureRunnerDir 的说明。
+// RunnerDirMode is the permission for the Runner install directory: only the owner can enter it.
+// The directory holds GitHub credentials; see the EnsureRunnerDir notes.
 const RunnerDirMode = 0o700
 
-// ConfigScriptName 返回当前系统的配置脚本名
+// ConfigScriptName returns the configuration script name for the current system
 func ConfigScriptName() string {
 	if runtime.GOOS == "windows" {
 		return "config.cmd"
@@ -360,7 +360,7 @@ func ConfigScriptName() string {
 	return "config.sh"
 }
 
-// RunScriptName 返回当前系统的运行脚本名
+// RunScriptName returns the run script name for the current system
 func RunScriptName() string {
 	if runtime.GOOS == "windows" {
 		return "run.cmd"
@@ -370,8 +370,8 @@ func RunScriptName() string {
 
 var execCommand = exec.Command
 
-// Start 在 installDir 下后台启动 runner（执行 run.sh/run.cmd）
-// 将 installDir 转为绝对路径，避免相对路径在 exec 时随进程 CWD 解析导致找不到 run.sh
+// Start launches the runner in the background under installDir (runs run.sh/run.cmd)
+// Convert installDir to an absolute path, so a relative path is not resolved against the process CWD at exec time, which would fail to find run.sh
 func Start(installDir string) error {
 	absDir, err := filepath.Abs(installDir)
 	if err != nil {
@@ -384,7 +384,7 @@ func Start(installDir string) error {
 	}
 	cmd := execCommand(script)
 	cmd.Dir = installDir
-	// run.sh 跑的是用户的 Job：不能把 Manager 自己的凭据传下去，见 internal/childenv
+	// run.sh runs users' Jobs: do not pass the Manager's own credentials down to it, see internal/childenv
 	cmd.Env = childenv.Environ()
 	if runtime.GOOS != "windows" {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -392,15 +392,15 @@ func Start(installDir string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	// 必须对子进程 Wait，否则在容器内（主进程为 PID 1）退出的 run.sh 会变成僵尸进程。
-	// 在后台 goroutine 中 Wait，不阻塞 Start 返回。
+	// The child process must be waited on, otherwise an exited run.sh becomes a zombie process when running inside a container (where the main process is PID 1).
+	// Wait in a background goroutine, so Start returns without blocking.
 	go func() {
 		_ = cmd.Wait()
 	}()
 	return nil
 }
 
-// StartIfInstalled 若已注册则启动：容器模式调 StartRunnerContainer，否则调 Start。供 main 与 handler 统一“已注册未运行则启动”逻辑
+// StartIfInstalled starts the runner if it is registered: in container mode it calls StartRunnerContainer, otherwise it calls Start. Used by main and the handler to share the same 'start if registered but not running' logic
 func StartIfInstalled(ctx context.Context, cfg *config.Config, name, installDir string) error {
 	if cfg == nil {
 		return fmt.Errorf("the configuration is empty")
@@ -411,11 +411,11 @@ func StartIfInstalled(ctx context.Context, cfg *config.Config, name, installDir 
 	return Start(installDir)
 }
 
-// Stop 向该安装目录下的 Runner 进程发送 SIGTERM。
+// Stop sends SIGTERM to the Runner processes under this install directory.
 //
-// runnerproc.Find 把监护脚本排在监听器之前，这里按序发信号：先让 run.sh 退出，
-// 它的 while 循环才不会在监听器被终止后又拉起一个新的。
-// 一个都没找到时返回错误——调用方（界面上的「停止」）需要知道没停成。
+// runnerproc.Find orders the supervising script ahead of the listener, so here signals are sent in order: first let run.sh exit,
+// so that its while loop does not respawn a new listener after the first one is killed.
+// Return an error when none are found; the caller (the 'Stop' button in the UI) needs to know it did not stop anything.
 func Stop(installDir string) error {
 	absDir, err := filepath.Abs(installDir)
 	if err != nil {
@@ -435,7 +435,7 @@ func Stop(installDir string) error {
 			}
 			continue
 		}
-		// 进程可能在扫描与发信号之间自己退了，ESRCH 不算失败
+		// A process may exit on its own between the scan and the signal, so ESRCH does not count as a failure
 		if err := process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			if firstErr == nil {
 				firstErr = err

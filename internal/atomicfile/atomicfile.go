@@ -1,21 +1,21 @@
-// Package atomicfile 以「同目录临时文件 + fsync + rename」替换文件，
-// 让并发读者只会看到旧内容或新内容之一，进程中途被杀也不会留下半截文件。
+// Package atomicfile replaces a file by writing a temp file in the same directory, fsync, then rename,
+// so concurrent readers only ever see either the old or the new content, and a process killed midway leaves no half-written file.
 //
-// 替代的是 os.WriteFile：它的顺序是 O_TRUNC、写入、关闭，于是这两件事都会发生——
-// 读者在这中间读到空文件或半截内容（config.yaml 读空时 yaml.Unmarshal 并不报错，
-// 界面上会短暂出现「一个 Runner 都没有」），以及进程在截断之后、写完之前退出时，
-// 盘上永久留下一个坏掉的文件。rename 是同一文件系统内的原子操作，两者一并解决：
-// 目标这个名字要么指向旧 inode，要么指向新 inode，没有中间态。
+// It replaces os.WriteFile, which runs O_TRUNC, write, close in that order, so two things can happen:
+// a reader sees an empty or partial file in between (if config.yaml is read empty, yaml.Unmarshal reports no error,
+// and the UI briefly shows 'no Runners at all'), and if the process exits after truncation but before the write finishes,
+// a broken file stays on disk permanently. rename is an atomic operation within one filesystem, and together they solve both:
+// the target name either points to the old inode or the new inode, with no intermediate state.
 //
-// 有一处行为与 os.WriteFile 不同，属主：rename 挂上的是新建的 inode，属主是 Manager 的 UID，
-// 而就地写入保留原属主。按文档推荐的部署方式，config/ 与 runners/ 本来就 chown 给 1001，
-// 所以没有影响；属主是其他 UID、而目录对 Manager 可写的少见情况下，写完属主会变成 Manager 的。
+// One behavior differs from os.WriteFile: ownership. rename attaches the newly created inode, owned by the Manager's UID,
+// whereas in-place writes keep the original owner. In the documented deployment, config/ and runners/ are already chowned to 1001,
+// so this makes no difference. In the rare case where the owner is another UID and the directory is writable by the Manager, the owner becomes the Manager after writing.
 //
-// 另一处是新建文件的权限：本包显式 chmod 到 perm，不经 umask，而 os.WriteFile 的 perm 要过 umask。
-// 这是有意的——config.yaml 该是 0644 就该是 0644，不应随容器的 umask 变。
+// The other difference is the permissions of a newly created file: this package explicitly chmods to perm, bypassing umask, whereas os.WriteFile's perm goes through umask.
+// This is intentional: config.yaml should stay 0644 when it is 0644, and should not change with the container's umask.
 //
-// internal/runner/agenttoken.go 的 EnsureAgentToken 不走这里：那里要的是「只允许第一个
-// 写者」（os.Link 不覆盖已有的名字），这里要的是「最后一个写者覆盖」，语义相反。
+// EnsureAgentToken in internal/runner/agenttoken.go does not use this: it needs 'only the first writer wins'
+// (os.Link does not overwrite an existing name), whereas here we need 'the last writer overwrites', which is the opposite semantics.
 package atomicfile
 
 import (
@@ -29,19 +29,19 @@ import (
 	"syscall"
 )
 
-// rename 供测试注入。生产路径恒为 os.Rename。
+// rename is injected for tests. The production path is always os.Rename.
 var rename = os.Rename
 
-// WriteFile 把 data 写入 path，语义对齐 os.WriteFile：
-//   - 目标已存在时沿用其权限位（os.WriteFile 对已存在文件不改权限，这里保持一致）；
-//   - 目标不存在时使用 perm。
+// WriteFile writes data to path, aligning with os.WriteFile semantics:
+//   - if the target exists, keep its permission bits (os.WriteFile does not change permissions of an existing file, and neither does this);
+//   - if the target does not exist, use perm.
 //
-// 两种环境下拿不到原子替换，此时回退为就地写入（即旧行为）并按路径告警一次，
-// 而不是让一次本该成功的保存失败——升级不该把已经在跑的部署弄停：
-//   - 目录不可写但文件可写，例如只 chown 了 config.yaml、没 chown config/，
-//     此时同目录建不出临时文件；
-//   - 目标是单文件 bind mount（-v ./config.yaml:/app/config/config.yaml），
-//     此时 rename 报 EBUSY；临时文件与目标跨文件系统时报 EXDEV。
+// When atomic replacement is unavailable in these two environments, fall back to in-place writing (the old behavior) and warn once per path,
+// rather than failing a save that should succeed; an upgrade should not stop a deployment that is already running:
+//   - the directory is not writable but the file is, e.g. only config.yaml was chowned, not config/,
+//     so a temp file cannot be created in the same directory;
+//   - the target is a single-file bind mount (-v ./config.yaml:/app/config/config.yaml),
+//     in which case rename fails with EBUSY; EXDEV occurs when the temp file and target are on different filesystems.
 func WriteFile(path string, data []byte, perm os.FileMode) error {
 	mode := perm
 	if fi, err := os.Stat(path); err == nil {
@@ -49,9 +49,9 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 
 	dir := filepath.Dir(path)
-	// 临时文件必须与目标同目录：rename 只在同一文件系统内是原子的，
-	// 放 /tmp 则跨文件系统时直接 EXDEV，等于这个包白做。
-	// 名字以 . 开头，避免恰好被某些按目录列举配置的工具扫到。
+	// The temp file must be in the same directory as the target: rename is atomic only within one filesystem,
+	// so placing it in /tmp would give EXDEV across filesystems, making this package pointless.
+	// The name starts with a dot, so tools that list configuration files in a directory won't pick it up.
 	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		if errors.Is(err, fs.ErrPermission) {
@@ -78,21 +78,21 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-// writeTemp 写满临时文件并关闭。失败时已关闭 f，删除临时文件由调用方负责。
+// writeTemp writes all data to the temp file and closes it. On failure f is already closed; deleting the temp file is the caller's responsibility.
 func writeTemp(f *os.File, data []byte, mode os.FileMode) error {
 	tmp := f.Name()
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("cannot write the temporary file %s: %w", tmp, err)
 	}
-	// 先 fsync 再 rename。反过来的话，崩溃后可能出现「名字已经挂上、内容还在页缓存里」，
-	// 那正是这个包要消灭的空文件，只是换了个地方产生。
+	// fsync before rename. In the reverse order, after a crash the name may be attached while the content is still in the page cache,
+	// which is exactly the empty file this package is meant to eliminate, just produced somewhere else.
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("cannot flush the temporary file %s: %w", tmp, err)
 	}
-	// os.CreateTemp 建出来的是 0600，改成目标应有的权限。用 f.Chmod 而不是 os.Chmod(tmp)：
-	// 改的是这个 fd 指向的 inode，不依赖临时文件那个名字仍然有效。
+	// os.CreateTemp creates the file with 0600; change it to the target's intended permissions. Use f.Chmod rather than os.Chmod(tmp):
+	// it changes the inode the fd points to and does not depend on the temp file's name still being valid.
 	if err := f.Chmod(mode); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("cannot set the mode of the temporary file %s: %w", tmp, err)
@@ -103,14 +103,14 @@ func writeTemp(f *os.File, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-// writeInPlace 回退为 os.WriteFile 的旧行为，并按路径告警一次。
+// writeInPlace falls back to the old os.WriteFile behavior and warns once per path.
 func writeInPlace(path string, data []byte, mode os.FileMode, cause error) error {
 	warnOnce(path, cause)
 	return os.WriteFile(path, data, mode)
 }
 
-// warnedPaths 同一个路径只告警一次：config.yaml 的每次保存都会走到这里，
-// 每次都打就成了刷屏；完全不打则是把「这台机器上保存不是崩溃安全的」咽了下去。
+// warnedPaths warns only once per path: every save of config.yaml goes through here,
+// and printing each time would be spam; never printing would swallow the fact that 'saving on this machine is not crash-safe'.
 var warnedPaths sync.Map // path -> *sync.Once
 
 func warnOnce(path string, cause error) {
@@ -121,10 +121,10 @@ func warnOnce(path string, cause error) {
 	})
 }
 
-// syncDir 尽力把目录项刷到盘上。rename 之后不 fsync 目录，崩溃后可能出现
-// 「新 inode 的内容已落盘、目录里指向它的那个名字还没落盘」——文件会回到旧内容，
-// 不会损坏，所以这一步失败只是少一层保障，不值得让一次已经成功的替换返回错误。
-// 只读打开目录再 fsync 也不是所有文件系统都支持，同样忽略。
+// syncDir flushes the directory entry to disk on a best-effort basis. Without fsync on the directory after rename, after a crash
+// the new inode's content may be on disk while the name pointing to it is not; the file reverts to the old content,
+// without corruption, so a failure here only means one fewer layer of protection and is not worth returning an error for an already successful replacement.
+// Opening the directory read-only and fsyncing it is also not supported by every filesystem, so this error is ignored too.
 func syncDir(dir string) {
 	d, err := os.Open(dir)
 	if err != nil {

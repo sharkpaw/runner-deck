@@ -20,7 +20,7 @@ func findCheck(t *testing.T, results []CheckResult, name string) CheckResult {
 			return r
 		}
 	}
-	t.Fatalf("未找到自检项 %q，实际: %+v", name, results)
+	t.Fatalf("self-check item %q not found, actual: %+v", name, results)
 	return CheckResult{}
 }
 
@@ -29,20 +29,20 @@ func TestCheckBasePath_WritableDir(t *testing.T) {
 	cfg.Runners.BasePath = t.TempDir()
 	got := checkBasePath(cfg)
 	if got.Level != CheckOK {
-		t.Fatalf("可写目录应通过: %+v", got)
+		t.Fatalf("writable directory should pass: %+v", got)
 	}
-	// 探测文件必须清理干净，否则会混进 runner 列表
+	// Probe files must be fully cleaned up, or they will leak into the runner list
 	entries, err := os.ReadDir(cfg.Runners.BasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 0 {
-		t.Errorf("自检不应留下文件: %v", entries)
+		t.Errorf("self-check should not leave files behind: %v", entries)
 	}
 }
 
 func TestCheckBasePath_DoesNotTouchExistingFile(t *testing.T) {
-	// 自检用固定文件名时会把同名的用户文件打开又删掉；探测必须用唯一名
+	// A fixed filename would make the self-check open and delete a user file with the same name; probes must use a unique name
 	dir := t.TempDir()
 	victim := filepath.Join(dir, ".preflight-write-test")
 	if err := os.WriteFile(victim, []byte("用户数据"), 0600); err != nil {
@@ -51,14 +51,14 @@ func TestCheckBasePath_DoesNotTouchExistingFile(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Runners.BasePath = dir
 	if got := checkBasePath(cfg); got.Level != CheckOK {
-		t.Fatalf("目录可写应通过: %+v", got)
+		t.Fatalf("writable directory should pass: %+v", got)
 	}
 	data, err := os.ReadFile(victim)
 	if err != nil {
-		t.Fatalf("同名文件被自检删除了: %v", err)
+		t.Fatalf("same-named file was deleted by the self-check: %v", err)
 	}
 	if string(data) != "用户数据" {
-		t.Errorf("同名文件内容被改写: %q", data)
+		t.Errorf("same-named file content was overwritten: %q", data)
 	}
 }
 
@@ -67,10 +67,10 @@ func TestCheckBasePath_Missing(t *testing.T) {
 	cfg.Runners.BasePath = filepath.Join(t.TempDir(), "not-created")
 	got := checkBasePath(cfg)
 	if got.Level != CheckError {
-		t.Fatalf("目录不存在应报 error: %+v", got)
+		t.Fatalf("missing directory should report error: %+v", got)
 	}
 	if !strings.Contains(got.Hint, "mkdir -p") {
-		t.Errorf("应给出可照做的建议: %q", got.Hint)
+		t.Errorf("should give an actionable suggestion: %q", got.Hint)
 	}
 }
 
@@ -82,13 +82,13 @@ func TestCheckBasePath_NotADirectory(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Runners.BasePath = f
 	if got := checkBasePath(cfg); got.Level != CheckError {
-		t.Fatalf("普通文件应报 error: %+v", got)
+		t.Fatalf("regular file should report error: %+v", got)
 	}
 }
 
 func TestCheckBasePath_Unwritable(t *testing.T) {
 	if os.Getuid() == 0 {
-		t.Skip("root 会绕过目录权限位，无法构造不可写场景")
+		t.Skip("root bypasses directory permission bits, so an unwritable case cannot be constructed")
 	}
 	dir := filepath.Join(t.TempDir(), "ro")
 	if err := os.Mkdir(dir, 0500); err != nil {
@@ -98,12 +98,12 @@ func TestCheckBasePath_Unwritable(t *testing.T) {
 	cfg.Runners.BasePath = dir
 	got := checkBasePath(cfg)
 	if got.Level != CheckError || !strings.Contains(got.Hint, "chown") {
-		t.Fatalf("不可写目录应报 error 并提示 chown: %+v", got)
+		t.Fatalf("unwritable directory should report error and suggest chown: %+v", got)
 	}
 }
 
 func TestCheckDefaultModeDocker_DinDReachable(t *testing.T) {
-	// 起一个真实监听端口，确认可达时才报 ok
+	// Start a real listening port, and report ok only once it is confirmed reachable
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -113,32 +113,32 @@ func TestCheckDefaultModeDocker_DinDReachable(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "tcp://"+ln.Addr().String())
 	got := checkDefaultModeDocker(context.Background())
 	if got.Level != CheckOK || !strings.Contains(got.Message, "reachable") {
-		t.Fatalf("DinD 可达时应为 ok: %+v", got)
+		t.Fatalf("DinD should be ok when reachable: %+v", got)
 	}
 }
 
 func TestCheckDefaultModeDocker_DinDUnreachable(t *testing.T) {
-	// 只看 tcp:// 前缀就报 ok，会在 DinD 没起来时给出假绿灯
+	// Reporting ok based only on the tcp:// prefix would show a false green when DinD is not running
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	addr := ln.Addr().String()
-	_ = ln.Close() // 立刻关掉，确保该端口不可连
+	_ = ln.Close() // Close it immediately so the port is guaranteed unreachable
 
 	t.Setenv("DOCKER_HOST", "tcp://"+addr)
 	got := checkDefaultModeDocker(context.Background())
 	if got.Level != CheckWarn {
-		t.Fatalf("DinD 不可达时不能报 ok: %+v", got)
+		t.Fatalf("must not report ok when DinD is unreachable: %+v", got)
 	}
 }
 
 func TestTCPAddr(t *testing.T) {
 	if got := tcpAddr("runner-dind"); got != "runner-dind:2375" {
-		t.Errorf("缺省端口应补 2375: %q", got)
+		t.Errorf("default port should be filled in as 2375: %q", got)
 	}
 	if got := tcpAddr("runner-dind:2376"); got != "runner-dind:2376" {
-		t.Errorf("已带端口不应改动: %q", got)
+		t.Errorf("an existing port should not be changed: %q", got)
 	}
 }
 
@@ -146,12 +146,12 @@ func TestCheckDefaultModeDocker_MissingSocket(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "absent.sock"))
 	got := checkDefaultModeDocker(context.Background())
 	if got.Level != CheckWarn {
-		t.Fatalf("socket 不存在应 warn: %+v", got)
+		t.Fatalf("missing socket should warn: %+v", got)
 	}
 }
 
 func TestPreflight_DefaultModeSkipsContainerChecks(t *testing.T) {
-	// 默认模式下不应去 inspect 网络/镜像，避免在没有 docker 的宿主机上刷一堆无关报错
+	// In default mode, networks and images should not be inspected, to avoid flooding hosts without docker with unrelated errors
 	cfg := &config.Config{}
 	cfg.Runners.BasePath = t.TempDir()
 	cfg.Runners.ContainerMode = false
@@ -163,13 +163,13 @@ func TestPreflight_DefaultModeSkipsContainerChecks(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "tcp://"+ln.Addr().String())
 
 	results := Preflight(context.Background(), cfg)
-	// 按名字断言而不是按条数：加一项无关的检查不该让这个用例失败，
-	// 它要钉的是「默认模式下不碰容器」
+	// Assert by name rather than by count: adding an unrelated check should not fail this case,
+	// What it pins down is 'default mode does not touch containers'
 	var names []string
 	for _, r := range results {
 		names = append(names, r.Name)
 		if r.Name == "container network" || r.Name == "runner image" {
-			t.Errorf("默认模式不应执行容器相关检查: %+v", r)
+			t.Errorf("default mode should not run container-related checks: %+v", r)
 		}
 	}
 	want := []string{"runners directory", "runner directory permissions", "runner isolation", "Docker in jobs"}
@@ -177,15 +177,15 @@ func TestPreflight_DefaultModeSkipsContainerChecks(t *testing.T) {
 		findCheck(t, results, w)
 	}
 	if len(results) != len(want) {
-		t.Fatalf("默认模式的检查项应为 %v，实际 %v", want, names)
+		t.Fatalf("default mode checks should be %v, actual %v", want, names)
 	}
 }
 
-// TestCheckDefaultModeIsolation_WarnsOnlyWithMoreThanOneRunner 钉住这项检查的阈值。
+// TestCheckDefaultModeIsolation_WarnsOnlyWithMoreThanOneRunner pins the threshold of this check.
 //
-// 分档点是「有没有别的 Runner 可以被读」：0 个和 1 个时没有，2 个起才有。
-// 把条件写成 n < 2 或干脆删掉这项检查，下面三个子用例会一起变红——
-// 前者让 0/1 报 warn 而 2 报 ok，后者让 findCheck 找不到这一项。
+// The tier boundary is whether another runner can be read: none with 0 or 1, present from 2 on.
+// If the condition is written as n < 2, or this check is simply removed, the three subtests below all turn red together:
+// The former makes 0/1 warn while 2 reports ok; the latter makes findCheck fail to find this item.
 func TestCheckDefaultModeIsolation_WarnsOnlyWithMoreThanOneRunner(t *testing.T) {
 	item := func(n int) []config.RunnerItem {
 		items := make([]config.RunnerItem, 0, n)
@@ -207,35 +207,35 @@ func TestCheckDefaultModeIsolation_WarnsOnlyWithMoreThanOneRunner(t *testing.T) 
 		cfg.Runners.Items = item(tc.n)
 		got := checkDefaultModeIsolation(cfg)
 		if got.Level != tc.want {
-			t.Errorf("%d 个 Runner 的级别为 %v，应为 %v（%+v）", tc.n, got.Level, tc.want, got)
+			t.Errorf("%d runners have level %v, should be %v (%+v)", tc.n, got.Level, tc.want, got)
 		}
 		if got.Name != "runner isolation" {
-			t.Errorf("%d 个 Runner 的检查项名为 %q", tc.n, got.Name)
+			t.Errorf("the check name for %d runners is %q", tc.n, got.Name)
 		}
 	}
 }
 
-// TestCheckDefaultModeIsolation_WarningNamesTheCount 警告里必须带上实际条目数：
-// 「有几个 Runner 在共用这一个容器」是读者判断严重程度的唯一依据，
-// 少了它这条消息就退化成一句无从判断的通告。
+// TestCheckDefaultModeIsolation_WarningNamesTheCount: the warning must include the actual entry count:
+// 'How many runners share this one container' is the only basis readers have for judging severity,
+// Without it, the message degrades into a notice that gives no basis for judgment.
 func TestCheckDefaultModeIsolation_WarningNamesTheCount(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Runners.Items = []config.RunnerItem{{Name: "a"}, {Name: "b"}}
 	got := checkDefaultModeIsolation(cfg)
 	if got.Level != CheckWarn {
-		t.Fatalf("2 个 Runner 应报 warn: %+v", got)
+		t.Fatalf("2 runners should report warn: %+v", got)
 	}
 	if !strings.Contains(got.Message, "2") {
-		t.Errorf("消息里没有条目数 2: %q", got.Message)
+		t.Errorf("message does not contain entry count 2: %q", got.Message)
 	}
-	// hint 要能直接照着改配置，否则读者知道有问题却不知道下一步做什么
+	// The hint must let the reader directly follow it to change the config, otherwise readers know there is a problem but not what to do next
 	if !strings.Contains(got.Hint, "container_mode") {
-		t.Errorf("hint 没有给出 container_mode: %q", got.Hint)
+		t.Errorf("hint did not give container_mode: %q", got.Hint)
 	}
 }
 
-// TestPreflight_DefaultModeWithTwoRunnersWarnsAboutIsolation 端到端确认这一项
-// 真的挂在默认模式的分支上：单元测试直接调函数，看不出它有没有被接进 Preflight。
+// TestPreflight_DefaultModeWithTwoRunnersWarnsAboutIsolation checks this end to end
+// since it sits on the default-mode branch. Unit tests call the function directly and can't tell whether it is wired into Preflight.
 func TestPreflight_DefaultModeWithTwoRunnersWarnsAboutIsolation(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Runners.BasePath = t.TempDir()
@@ -243,12 +243,12 @@ func TestPreflight_DefaultModeWithTwoRunnersWarnsAboutIsolation(t *testing.T) {
 	cfg.Runners.Items = []config.RunnerItem{{Name: "a"}, {Name: "b"}}
 	got := findCheck(t, Preflight(context.Background(), cfg), "runner isolation")
 	if got.Level != CheckWarn {
-		t.Fatalf("默认模式 2 个 Runner 应报 warn: %+v", got)
+		t.Fatalf("default mode with 2 runners should report warn: %+v", got)
 	}
 }
 
-// TestPreflight_ContainerModeHasNoIsolationCheck 容器模式下每个 Runner 独占容器，
-// 这一项无从谈起，报出来只会让人以为容器模式也有同一个问题。
+// TestPreflight_ContainerModeHasNoIsolationCheck: in container mode each runner gets its own container,
+// so this check makes no sense there. Reporting it would only suggest container mode has the same problem.
 func TestPreflight_ContainerModeSkipsTheIsolationCheck(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Runners.BasePath = t.TempDir()
@@ -256,7 +256,7 @@ func TestPreflight_ContainerModeSkipsTheIsolationCheck(t *testing.T) {
 	cfg.Runners.Items = []config.RunnerItem{{Name: "a"}, {Name: "b"}}
 	for _, r := range Preflight(context.Background(), cfg) {
 		if r.Name == "runner isolation" {
-			t.Errorf("容器模式不应有 runner isolation 这一项: %+v", r)
+			t.Errorf("container mode should have no runner isolation check: %+v", r)
 		}
 	}
 }
@@ -264,7 +264,7 @@ func TestPreflight_ContainerModeSkipsTheIsolationCheck(t *testing.T) {
 func TestPreflight_NilConfig(t *testing.T) {
 	got := Preflight(context.Background(), nil)
 	if len(got) != 1 || got[0].Level != CheckError {
-		t.Fatalf("配置为空应返回单条 error: %+v", got)
+		t.Fatalf("empty config should return a single error: %+v", got)
 	}
 }
 
@@ -272,16 +272,16 @@ func TestCheckJobDockerBackend_None(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Runners.JobDockerBackend = "none"
 	if got := checkJobDockerBackend(context.Background(), cfg); got.Level != CheckOK {
-		t.Fatalf("none 后端无前置条件，应通过: %+v", got)
+		t.Fatalf("none backend has no prerequisites and should pass: %+v", got)
 	}
 }
 
 func TestInGroup(t *testing.T) {
 	if !inGroup(os.Getgid()) {
-		t.Error("当前进程应属于自己的主组")
+		t.Error("current process should belong to its own primary group")
 	}
 	if inGroup(-1) {
-		t.Error("不存在的 GID 不应判为属于")
+		t.Error("a nonexistent GID should not be judged as a member")
 	}
 }
 
@@ -299,23 +299,23 @@ func TestLogPreflight_FormatsByLevel(t *testing.T) {
 		fail("C", "挂了", "建议 C"),
 	})
 	if len(lines) != 3 {
-		t.Fatalf("应输出 3 行: %v", lines)
+		t.Fatalf("should output 3 lines: %v", lines)
 	}
 	if !strings.Contains(lines[0], "✓") || strings.Contains(lines[0], "建议") {
-		t.Errorf("ok 项不应带建议: %q", lines[0])
+		t.Errorf("ok item should not carry a suggestion: %q", lines[0])
 	}
 	if !strings.Contains(lines[1], "!") || !strings.Contains(lines[1], "建议 B") {
-		t.Errorf("warn 项应带建议: %q", lines[1])
+		t.Errorf("warn item should carry a suggestion: %q", lines[1])
 	}
 	if !strings.Contains(lines[2], "✗") || !strings.Contains(lines[2], "建议 C") {
-		t.Errorf("error 项应带建议: %q", lines[2])
+		t.Errorf("error item should carry a suggestion: %q", lines[2])
 	}
 }
 
-// 六种语言的排障第一步都是 `docker compose logs runner-manager | grep '\[preflight'`。
-// 那个关键词就是这里的行首标记，而标记是普通字符串常量——改掉它不会有任何东西报错，
-// 排障第一步只会静默地一行都 grep 不到。这条守住每一级都带标记；
-// internal/docsconsistency 那边再守住文档里写的关键词与这个常量对得上。
+// The first troubleshooting step in all six languages is `docker compose logs runner-manager | grep '\[preflight'`.
+// That keyword is the line-start marker here, and the marker is a plain string constant. Changing it raises no error,
+// and the first troubleshooting step would silently find no lines. This test ensures every level carries the marker;
+// internal/docsconsistency separately ensures the keyword written in the docs matches this constant.
 func TestLogPreflight_EveryLineCarriesTheDocumentedMarker(t *testing.T) {
 	var lines []string
 	orig := preflightLogf
@@ -331,13 +331,13 @@ func TestLogPreflight_EveryLineCarriesTheDocumentedMarker(t *testing.T) {
 	})
 	for _, l := range lines {
 		if !strings.HasPrefix(l, PreflightLogMarker) {
-			t.Errorf("自检日志没有以 %q 开头，文档里的 grep 会捞不到它: %q", PreflightLogMarker, l)
+			t.Errorf("self-check log does not start with %q, so the grep in the docs won't find it: %q", PreflightLogMarker, l)
 		}
 	}
-	// 标记必须是语言无关的：混进汉字就等于让五份非中文文档里的 grep 又打不出来了。
+	// The marker must be language-neutral: mixing in Chinese characters would bring back the grep failures in the five non-Chinese docs.
 	for _, r := range PreflightLogMarker {
 		if r > 0x7f {
-			t.Fatalf("标记 %q 含非 ASCII 字符 %q；它要能被任何键盘打出来", PreflightLogMarker, r)
+			t.Fatalf("marker %q contains non-ASCII character %q; it must be typeable on any keyboard", PreflightLogMarker, r)
 		}
 	}
 }
@@ -366,8 +366,8 @@ func TestRunnerImages_DedupAndPerRunnerOverride(t *testing.T) {
 	cfg.Runners.ContainerImage = "reg/global:1"
 	cfg.Runners.Items = []config.RunnerItem{
 		{Name: "a", ContainerImage: "reg/custom:1"},
-		{Name: "b"}, // 回落全局
-		{Name: "c", ContainerImage: "reg/custom:1"}, // 与 a 相同，应去重
+		{Name: "b"}, // fall back to global
+		{Name: "c", ContainerImage: "reg/custom:1"}, // same as a, should be deduplicated
 		{Name: "d", ContainerImage: "reg/other:2"},
 	}
 	got := RunnerImages(cfg)
@@ -378,7 +378,7 @@ func TestRunnerImages_DedupAndPerRunnerOverride(t *testing.T) {
 }
 
 func TestRunnerImages_FallsBackToDefault(t *testing.T) {
-	// 全局与 items 都没配镜像时，仍要检查实际会用到的默认镜像
+	// when neither global nor items configure a mirror, still check the default mirror actually used
 	cfg := &config.Config{}
 	cfg.Runners.ContainerMode = true
 	got := RunnerImages(cfg)
@@ -389,7 +389,7 @@ func TestRunnerImages_FallsBackToDefault(t *testing.T) {
 
 func TestRunnerImages_NilConfig(t *testing.T) {
 	if got := RunnerImages(nil); got != nil {
-		t.Errorf("nil 配置应返回 nil，实际 %v", got)
+		t.Errorf("nil config should return nil, got %v", got)
 	}
 }
 
@@ -398,19 +398,19 @@ func TestFirstLine(t *testing.T) {
 		t.Errorf("firstLine = %q, want %q", got, "first")
 	}
 	if got := firstLine([]byte("  only  \n"), nil); got != "only" {
-		t.Errorf("firstLine 应去掉两侧空白: %q", got)
+		t.Errorf("firstLine should trim surrounding whitespace: %q", got)
 	}
-	// 输出为空时退回 error 文本，否则自检结果会是一句没有信息量的话
+	// Fall back to the error text when output is empty, otherwise the self-check result would be an uninformative sentence
 	if got := firstLine(nil, errors.New("exit status 125")); got != "exit status 125" {
 		t.Errorf("firstLine = %q", got)
 	}
 	if got := firstLine(nil, nil); got != "" {
-		t.Errorf("两者皆空应返回空串: %q", got)
+		t.Errorf("when both are empty, an empty string should be returned: %q", got)
 	}
 }
 
 func TestRequiredRunnerTools_CoversTheKnownFailureModes(t *testing.T) {
-	// 这两个是实际踩过的：缺 git 时 checkout 静默退化，缺 unzip 时 setup-gradle 中途失败
+	// These two were hit in practice: without git, checkout silently degrades; without unzip, setup-gradle fails midway
 	for _, want := range []string{"git", "unzip"} {
 		found := false
 		for _, tool := range requiredRunnerTools {
@@ -420,15 +420,15 @@ func TestRequiredRunnerTools_CoversTheKnownFailureModes(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("requiredRunnerTools 应包含 %q", want)
+			t.Errorf("requiredRunnerTools should include %q", want)
 		}
 	}
 }
 
 func TestParseMissingTools(t *testing.T) {
 	const marker = missingToolMarker
-	// docker 在 arm64 主机运行 amd64 镜像时输出的真实告警，退出码仍为 0。
-	// dockerCmd 用 CombinedOutput，它会混进探测输出里。
+	// Real warning docker prints when running an amd64 image on an arm64 host; the exit code is still 0.
+	// dockerCmd uses CombinedOutput, which mixes this into the probe output.
 	platformWarning := "WARNING: The requested image's platform (linux/amd64) does not match " +
 		"the detected host platform (linux/arm64/v8) and no specific platform was requested\n"
 
@@ -455,41 +455,41 @@ func TestParseMissingTools(t *testing.T) {
 }
 
 func TestParseMissingTools_RecognisesEveryRequiredTool(t *testing.T) {
-	// 探测脚本用 requiredRunnerTools 生成，解析端必须认得其中每一个，
-	// 否则今后往列表里加命令会得到「检查了但永远报不出来」的假绿灯
+	// The probe script is generated from requiredRunnerTools, so the parser must recognize every one of them,
+	// otherwise adding a command to the list later would yield a false green that is checked but never reported
 	var out strings.Builder
 	for _, tool := range requiredRunnerTools {
 		out.WriteString(missingToolMarker + tool + "\n")
 	}
 	got := parseMissingTools([]byte(out.String()))
 	if len(got) != len(requiredRunnerTools) {
-		t.Fatalf("解析出 %v，期望全部 %v", got, requiredRunnerTools)
+		t.Fatalf("parsed %v, expected all of %v", got, requiredRunnerTools)
 	}
 }
 
-// 自检崩了不该把 Manager 的启动一起带走。
+// A crash in the self-check should not take Manager's startup down with it.
 //
-// 改用 preflight-kit 之前，Preflight 是直接顺序调用各项检查的，没有任何兜底——
-// 而 checkRunnerImages / checkJobDockerBackend 这些都要起子进程去问 docker，
-// 正是最容易出意外的地方。一次 panic 就等于 Manager 起不来，
-// 而它本来只是想在启动时多告诉你几句环境状况。
+// Before switching to preflight-kit, Preflight called each check directly in sequence with no fallback at all --
+// and checkRunnerImages / checkJobDockerBackend both spawn subprocesses to query docker,
+// which is exactly where surprises most often happen. One panic means Manager cannot start,
+// when all it was meant to do was report a few more environment details at startup.
 func TestRunCheck_PanicBecomesAnErrorResultInsteadOfCrashing(t *testing.T) {
 	got := runCheck(context.Background(), "会炸的检查", func(context.Context) CheckResult {
 		panic("docker 客户端里的某个 nil")
 	})
 
 	if got.Level != CheckError {
-		t.Fatalf("Level = %q，期望 %q", got.Level, CheckError)
+		t.Fatalf("Level = %q, expected %q", got.Level, CheckError)
 	}
 	if got.Name != "会炸的检查" {
-		t.Errorf("Name = %q，兜底结果应当带上检查名，否则日志里看不出是哪一项炸了", got.Name)
+		t.Errorf("Name = %q; the fallback result should carry the check name, otherwise the log cannot show which check blew up", got.Name)
 	}
 	if !strings.Contains(got.Message, "docker 客户端里的某个 nil") {
-		t.Errorf("Message 里应当保留 panic 的内容，实得 %q", got.Message)
+		t.Errorf("Message should keep the panic content, got %q", got.Message)
 	}
 }
 
-// 正常返回的检查不受兜底影响，结果原样透传。
+// Checks that return normally are unaffected by the fallback; their results pass through unchanged.
 func TestRunCheck_PassesThroughNormalResults(t *testing.T) {
 	for _, want := range []CheckResult{
 		ok("甲", "一切正常"),
@@ -498,13 +498,13 @@ func TestRunCheck_PassesThroughNormalResults(t *testing.T) {
 	} {
 		got := runCheck(context.Background(), "名字用不上", func(context.Context) CheckResult { return want })
 		if got != want {
-			t.Errorf("结果被改动了：%+v -> %+v", want, got)
+			t.Errorf("result was modified: %+v -> %+v", want, got)
 		}
 	}
 }
 
-// Preflight 整体也要有兜底：用例没法往真实检查里塞 panic，
-// 这里退一步——确认每一项都确实经过了 runCheck，即没有哪条路径绕开它。
+// Preflight as a whole also needs a fallback: a test case cannot inject a panic into the real checks,
+// so here we step back -- confirm that every item actually goes through runCheck, i.e. no path bypasses it.
 func TestPreflight_EveryCheckGoesThroughRunCheck(t *testing.T) {
 	src, err := os.ReadFile("preflight.go")
 	if err != nil {
@@ -513,39 +513,39 @@ func TestPreflight_EveryCheckGoesThroughRunCheck(t *testing.T) {
 	body := string(src)
 	start := strings.Index(body, "func Preflight(")
 	if start < 0 {
-		t.Fatal("找不到 Preflight")
+		t.Fatal("Preflight not found")
 	}
 	end := strings.Index(body[start:], "\n}\n")
 	if end < 0 {
-		t.Fatal("找不到 Preflight 的结尾")
+		t.Fatal("Preflight end not found")
 	}
 	fn := body[start : start+end]
 
-	// 函数体里出现的 check* 调用都必须包在 runCheck 里。
-	// checkRunnerImages 是例外：它自己内部逐项调 runCheck（每个镜像两项）。
+	// Every check* call in the function body must be wrapped in runCheck.
+	// checkRunnerImages is the exception: it calls runCheck for each item internally (two items per image).
 	for _, name := range []string{
 		"checkBasePath", "checkRunnerDirPermissions", "checkDefaultModeIsolation",
 		"checkDefaultModeDocker", "checkDockerReachable", "checkNetwork", "checkNetworkMembers",
 		"checkJobDockerBackend",
 	} {
 		if !strings.Contains(fn, name) {
-			t.Errorf("Preflight 里没有 %s，用例该更新了", name)
+			t.Errorf("%s is missing from Preflight; the test case needs updating", name)
 		}
 	}
 	if strings.Count(fn, "runCheck(") < 8 {
-		t.Errorf("Preflight 里 runCheck 的调用数 %d 少于检查项数，可能有路径绕开了 panic 兜底:\n%s",
+		t.Errorf("runCheck call count %d in Preflight is less than the number of checks; some path may bypass the panic fallback:\n%s",
 			strings.Count(fn, "runCheck("), fn)
 	}
 }
 
 // ---- container network members ----
 
-// TestUnexpectedNetworkMembers 纯函数部分：谁算本部署的，谁不算。
+// TestUnexpectedNetworkMembers pure function part: which members count as belonging to this deployment, and which don't.
 //
-// self 每个用例单独给，因为「取不到 hostname」是其中一条要钉的行为，
-// 而它恰好是最容易写错成「永远绿」的那条。
+// Each case gives self separately, because 'hostname unavailable' is one of the behaviors to pin down,
+// and it is exactly the one most easily written wrong as 'always green'.
 func TestUnexpectedNetworkMembers(t *testing.T) {
-	const self = "1a2b3c4d5e6f" // Manager 容器的 hostname：Docker 未指定时取 12 位短 ID
+	const self = "1a2b3c4d5e6f" // Manager container hostname: when Docker does not specify one, it is the 12-character short ID
 	selfID := self + strings.Repeat("0", 52)
 	expected := map[string]bool{"runner-dind": true, "runner-a": true}
 
@@ -591,8 +591,8 @@ func TestUnexpectedNetworkMembers(t *testing.T) {
 			want: []string{"alpha", "mid", "zoo"},
 		},
 		{
-			// 空前缀会让 HasPrefix 恒为真，把整张网络算成自己——
-			// 那样这项检查会静默地变成永远不报
+			// An empty prefix would make HasPrefix always true, counting the whole network as self;
+			// then this check would silently never report anything
 			name:    "取不到 hostname 时不把整张网络算成自身",
 			self:    "",
 			members: map[string]string{selfID: "runner-manager", "c0ffee77": "grafana"},
@@ -608,18 +608,18 @@ func TestUnexpectedNetworkMembers(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// map 的遍历顺序每次都不同，跑多遍才能说明结果真的稳定
+			// Map iteration order differs each time, so running several passes is needed to show the result is truly stable
 			for i := 0; i < 20; i++ {
 				got := unexpectedNetworkMembers(tc.members, tc.self, expected)
 				if strings.Join(got, ",") != strings.Join(tc.want, ",") {
-					t.Fatalf("第 %d 次得到 %v，期望 %v", i+1, got, tc.want)
+					t.Fatalf("run %d got %v, want %v", i+1, got, tc.want)
 				}
 			}
 		})
 	}
 }
 
-// TestListNetworkMembers 超过十个就收成计数，否则一行日志会被一张网络的成员表撑满
+// TestListNetworkMembers collapses to a count beyond ten, otherwise one log line would be flooded by a single network's member list
 func TestListNetworkMembers(t *testing.T) {
 	var many []string
 	for i := 0; i < maxListedNetworkMembers+3; i++ {
@@ -627,18 +627,18 @@ func TestListNetworkMembers(t *testing.T) {
 	}
 
 	if got, want := listNetworkMembers([]string{"a", "b"}), "a, b"; got != want {
-		t.Errorf("没超出上限时应原样列出：got %q, want %q", got, want)
+		t.Errorf("under the limit, the list should be printed as-is: got %q, want %q", got, want)
 	}
 	got := listNetworkMembers(many)
 	if !strings.HasSuffix(got, "…and 3 more") {
-		t.Errorf("超出的部分应收成计数，实得 %q", got)
+		t.Errorf("the overflow should collapse into a count, got %q", got)
 	}
 	if strings.Count(got, ", ") != maxListedNetworkMembers {
-		t.Errorf("应只点名 %d 个，实得 %q", maxListedNetworkMembers, got)
+		t.Errorf("should name only %d entries, got %q", maxListedNetworkMembers, got)
 	}
 }
 
-// TestAnyDindBackend items[].job_docker_backend 能逐个覆盖，所以全局值两个方向都不是结论
+// TestAnyDindBackend: items[].job_docker_backend can override each item individually, so the global value proves nothing in either direction
 func TestAnyDindBackend(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -675,13 +675,13 @@ func TestAnyDindBackend(t *testing.T) {
 			cfg.Runners.JobDockerBackend = tc.global
 			cfg.Runners.Items = tc.items
 			if got := anyDindBackend(cfg); got != tc.want {
-				t.Fatalf("anyDindBackend = %v，期望 %v", got, tc.want)
+				t.Fatalf("anyDindBackend = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-// networkMembersConfig 一份容器模式、dind 后端、注册了 runner-a 的配置
+// networkMembersConfig: a config with container mode, the dind backend, and runner-a registered
 func networkMembersConfig(t *testing.T) *config.Config {
 	t.Helper()
 	return &config.Config{Runners: config.RunnersConfig{
@@ -692,13 +692,13 @@ func networkMembersConfig(t *testing.T) *config.Config {
 		JobDockerBackend: "dind",
 		DindHost:         "runner-dind",
 		AgentPort:        8081,
-		// 容器名不等于 Runner 名：ContainerName("a") 是 github-runner-a，
-		// 预期成员表必须按容器名比，否则本部署自己的 Runner 会被报成意外成员
+		// Container name is not the Runner name: ContainerName("a") is github-runner-a,
+		// The expected member table must be compared by container name, otherwise this deployment's own Runner would be reported as an unexpected member
 		Items: []config.RunnerItem{{Name: "a", TargetType: "repo", Target: "o/r"}},
 	}}
 }
 
-// fakeNetworkInspect 让假 docker 对 network inspect 返回给定的 .Containers
+// fakeNetworkInspect makes the fake docker return the given .Containers for network inspect
 func fakeNetworkInspect(t *testing.T, containersJSON string) string {
 	t.Helper()
 	return fakeDockerProgram(t, "case \"$1\" in\n"+
@@ -710,13 +710,13 @@ func fakeNetworkInspect(t *testing.T, containersJSON string) string {
 }
 
 // TestCheckNetworkMembers_WarnsAboutContainersOutsideTheDeployment
-// 网上多出来的容器要被点名：它们拿到的是一个免认证的 privileged daemon。
+// Extra containers on the network must be named: they get an unauthenticated privileged daemon.
 func TestCheckNetworkMembers_WarnsAboutContainersOutsideTheDeployment(t *testing.T) {
 	host, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Manager 自己的那一项：容器 ID 全长 64 位，hostname 是它的前缀
+	// Manager's own entry: the full container ID is 64 characters, and the hostname is its prefix
 	logPath := fakeNetworkInspect(t, fmt.Sprintf(`{
   %q: {"Name": "runner-manager"},
   "c0ffee11deadbeef": {"Name": "runner-dind"},
@@ -727,31 +727,31 @@ func TestCheckNetworkMembers_WarnsAboutContainersOutsideTheDeployment(t *testing
 
 	got := checkNetworkMembers(context.Background(), networkMembersConfig(t))
 	if got.Level != CheckWarn {
-		t.Fatalf("网上有无关容器时应 warn: %+v", got)
+		t.Fatalf("should warn when unrelated containers are on the network: %+v", got)
 	}
 	if got.Name != "container network members" {
 		t.Errorf("Name = %q", got.Name)
 	}
 	for _, want := range []string{"2 containers on runner-net", "grafana", "prometheus"} {
 		if !strings.Contains(got.Message, want) {
-			t.Errorf("消息里应含 %q，实得 %q", want, got.Message)
+			t.Errorf("message should contain %q, got %q", want, got.Message)
 		}
 	}
-	// 本部署自己的三个容器被报成「不属于本部署」，这项检查就没人会再看第二眼
+	// This deployment's own three containers are reported as "not belonging to this deployment", so no one will look at this check twice
 	for _, unwanted := range []string{"runner-manager", "runner-dind", "github-runner-a"} {
 		if strings.Contains(got.Message, unwanted) {
-			t.Errorf("消息里不该含 %q（那是本部署自己的容器），实得 %q", unwanted, got.Message)
+			t.Errorf("The message should not contain %q (that is this deployment's own container), got %q", unwanted, got.Message)
 		}
 	}
 	if !strings.Contains(got.Hint, "docker network disconnect runner-net") {
-		t.Errorf("hint 应给出可照做的命令，实得 %q", got.Hint)
+		t.Errorf("The hint should give a command the user can follow, got %q", got.Hint)
 	}
 	if calls := readCalls(t, logPath); !strings.Contains(calls, "network inspect runner-net --format {{json .Containers}}") {
-		t.Errorf("应只取 .Containers 一段，实际执行了: %s", calls)
+		t.Errorf("Should only take the .Containers segment, but actually executed: %s", calls)
 	}
 }
 
-// TestCheckNetworkMembers_OnlyTheDeploymentsOwnContainers 只有本部署的容器时报 ok
+// TestCheckNetworkMembers_OnlyTheDeploymentsOwnContainers reports ok when the network has only this deployment's containers
 func TestCheckNetworkMembers_OnlyTheDeploymentsOwnContainers(t *testing.T) {
 	host, err := os.Hostname()
 	if err != nil {
@@ -765,16 +765,16 @@ func TestCheckNetworkMembers_OnlyTheDeploymentsOwnContainers(t *testing.T) {
 
 	got := checkNetworkMembers(context.Background(), networkMembersConfig(t))
 	if got.Level != CheckOK {
-		t.Fatalf("网上只有本部署的容器时应 ok: %+v", got)
+		t.Fatalf("When the network has only this deployment's containers it should be ok: %+v", got)
 	}
 	if want := "the network runner-net has no unexpected members"; got.Message != want {
-		t.Errorf("Message = %q，期望 %q", got.Message, want)
+		t.Errorf("Message = %q, expected %q", got.Message, want)
 	}
 }
 
 // TestCheckNetworkMembers_UnreadableInspectIsSkippedNotReported
-// 读不到成员表时报 ok：「网络不存在」这类情形 checkNetwork 已经报过 fail，
-// 这里再报一遍等于同一件事说两次，而且是用一句更绕的话说。
+// When the member table can't be read, report ok: cases like "network does not exist" are already reported as fail by checkNetwork,
+// reporting it again here would say the same thing twice, in a more roundabout way.
 func TestCheckNetworkMembers_UnreadableInspectIsSkippedNotReported(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -787,17 +787,17 @@ func TestCheckNetworkMembers_UnreadableInspectIsSkippedNotReported(t *testing.T)
 			fakeDockerProgram(t, tc.body)
 			got := checkNetworkMembers(context.Background(), networkMembersConfig(t))
 			if got.Level != CheckOK {
-				t.Fatalf("读不到成员表应跳过而不是报错: %+v", got)
+				t.Fatalf("When the member table can't be read it should skip rather than error: %+v", got)
 			}
 			if !strings.Contains(got.Message, "skipped") {
-				t.Errorf("消息应说明这一项被跳过了，实得 %q", got.Message)
+				t.Errorf("The message should say this item was skipped, got %q", got.Message)
 			}
 		})
 	}
 }
 
 // TestPreflight_NetworkMembersOnlyWhenADindBackendIsInUse
-// 没有 Runner 用 dind 时网上没有那个免认证的 daemon，这一项不该出现在结果里。
+// When no Runner uses dind, the unauthenticated daemon does not exist on the network, so this item should not appear in the results.
 func TestPreflight_NetworkMembersOnlyWhenADindBackendIsInUse(t *testing.T) {
 	const checkName = "container network members"
 
@@ -812,7 +812,7 @@ func TestPreflight_NetworkMembersOnlyWhenADindBackendIsInUse(t *testing.T) {
 		cfg.Runners.JobDockerBackend = "none"
 		for _, r := range Preflight(context.Background(), cfg) {
 			if r.Name == checkName {
-				t.Fatalf("没有 Runner 用 dind，不该执行这一项: %+v", r)
+				t.Fatalf("When no Runner uses dind, this item should not be executed: %+v", r)
 			}
 		}
 	})

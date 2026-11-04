@@ -17,7 +17,7 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/secrets"
 )
 
-// fakeAPI 把 apiBase 指向一个本地服务，返回它记录下的请求路径
+// fakeAPI points apiBase at a local service and returns the request paths it recorded
 func fakeAPI(t *testing.T, h http.HandlerFunc) *[]string {
 	t.Helper()
 	var seen []string
@@ -41,10 +41,10 @@ func runnersJSON(total int, names ...string) string {
 	return string(b)
 }
 
-// withToken 建一个 Runner 安装目录，并把 PAT 放进 Manager 侧的凭据目录。
+// withToken creates a runner install directory and puts the PAT in the manager-side credentials directory.
 //
-// 凭据目录刻意与安装目录分开：新位置在配置目录下，而配置目录不会被挂进
-// Runner 容器。两者同根只是为了 t.TempDir 好清理。
+// The credentials directory is deliberately kept apart from the install directory: the new location is under the config directory, which is not mounted into
+// the runner container. Both share a root only so t.TempDir can clean them up.
 func withToken(t *testing.T, token string) (string, *secrets.Store) {
 	t.Helper()
 	root := t.TempDir()
@@ -68,8 +68,8 @@ func withToken(t *testing.T, token string) (string, *secrets.Store) {
 	return dir, store
 }
 
-// withLegacyToken 建一个安装目录，并把 PAT 放进旧位置（Runner 目录下），
-// 用来验证迁移：读取前会把它搬走。
+// withLegacyToken creates an install directory and puts the PAT in the legacy location (under the runner directory),
+// used to test migration: it is moved away before being read.
 func withLegacyToken(t *testing.T, token string) (string, *secrets.Store) {
 	t.Helper()
 	dir, store := withToken(t, "")
@@ -91,12 +91,12 @@ func statusOf(t *testing.T, dir string) (registered *bool, checkAt, checkErr str
 		Error      string `json:"error"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("状态文件不是合法 JSON: %v", err)
+		t.Fatalf("state file is not valid JSON: %v", err)
 	}
 	return v.Registered, v.LastCheck, v.Error
 }
 
-// busyOf 单独读 busy，免得改动 statusOf 的签名牵动上面一长串用例
+// busyOf reads busy on its own, so changing the statusOf signature doesn't ripple through the long list of cases above
 func busyOf(t *testing.T, dir string) *bool {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(dir, runner.GitHubStatusFile))
@@ -107,12 +107,12 @@ func busyOf(t *testing.T, dir string) *bool {
 		Busy *bool `json:"busy"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("状态文件不是合法 JSON: %v", err)
+		t.Fatalf("state file is not valid JSON: %v", err)
 	}
 	return v.Busy
 }
 
-// busyRunnersJSON 与 runnersJSON 相同，但把第一个 runner 标成正在跑 Job
+// busyRunnersJSON is the same as runnersJSON, but marks the first runner as running a job
 func busyRunnersJSON(busy bool, names ...string) string {
 	var rs []ghRunner
 	for i, n := range names {
@@ -129,7 +129,7 @@ func cfgFor(base, name, path, targetType, target string) *config.Config {
 	}}
 }
 
-// runCfgIn 让 Run 落在给定的安装目录上：base + path 拼出来就是它
+// runCfgIn makes Run land in the given install directory: base + path joins to it
 func runCfgIn(installDir, name, targetType, target string) *config.Config {
 	return cfgFor(filepath.Dir(installDir), name, filepath.Base(installDir), targetType, target)
 }
@@ -143,13 +143,13 @@ func TestRun_RegisteredWritesTrue(t *testing.T) {
 
 	reg, at, errMsg := statusOf(t, dir)
 	if reg == nil || !*reg {
-		t.Fatalf("应记为已登记，得到 %v", reg)
+		t.Fatalf("should be recorded as registered, got %v", reg)
 	}
 	if at == "" {
-		t.Fatal("应记录检查时间")
+		t.Fatal("should record the check time")
 	}
 	if errMsg != "" {
-		t.Fatalf("成功时不应有错误说明，得到 %q", errMsg)
+		t.Fatalf("there should be no error message on success, got %q", errMsg)
 	}
 }
 
@@ -162,13 +162,13 @@ func TestRun_NotRegisteredWritesFalse(t *testing.T) {
 
 	reg, _, _ := statusOf(t, dir)
 	if reg == nil || *reg {
-		t.Fatalf("目标不在列表里，应记为未登记，得到 %v", reg)
+		t.Fatalf("target is not in the list, should be recorded as not registered, got %v", reg)
 	}
 }
 
-// 这是本次修复的核心：查不出答案不等于没登记。
-// 把它写成 false 会在界面上变成一句确定的「未显示」，
-// 让人去排查一个并不存在的注册问题。
+// This is the core of this fix: failing to get an answer is not the same as not being registered.
+// Writing it as false would show up in the UI as a definitive 'not shown',
+// sending people to chase a registration problem that does not exist.
 func TestRun_FailureIsUnknownNotUnregistered(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -199,28 +199,28 @@ func TestRun_FailureIsUnknownNotUnregistered(t *testing.T) {
 
 			reg, at, errMsg := statusOf(t, dir)
 			if reg != nil {
-				t.Fatalf("查不出答案时应记为未知，却记成了 %v", *reg)
+				t.Fatalf("when no answer can be determined it should be recorded as unknown, but was recorded as %v", *reg)
 			}
 			if at == "" {
-				t.Fatal("即便失败也应记录检查时间，界面才能区分「查过但失败」与「从未查过」")
+				t.Fatal("the check time should be recorded even on failure, so the UI can tell 'checked but failed' apart from 'never checked'")
 			}
 			if !strings.Contains(errMsg, tc.wantInMsg) {
-				t.Fatalf("原因说明 %q 里应含 %q", errMsg, tc.wantInMsg)
+				t.Fatalf("reason %q should contain %q", errMsg, tc.wantInMsg)
 			}
 		})
 	}
 }
 
-// 没有 PAT 就不查「是否已登记」，界面上仍是「从未检查」。
+// Without a PAT, registration is not checked, so the UI still shows 'never checked'.
 //
-// 可见性那一半是匿名也能查的，所以这时状态文件会被写出来——但 last_check 必须留空：
-// 界面正是靠它区分「从未检查」与「查过但失败」，盖上时间就等于对着一个从没查过的
-// Runner 说「查过了，失败」。
+// The visibility half can be checked anonymously, so the state file is written out; but last_check must stay empty:
+// The UI uses it to tell 'never checked' from 'checked but failed'. A time stamp here would tell a runner that was never checked
+// that it was checked and failed.
 func TestRun_NoTokenSkipsTheRegistrationCheck(t *testing.T) {
 	dir, store := withToken(t, "")
 	seen := fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {
-			t.Errorf("没有 PAT 时不该带 Authorization，得到 %q", r.Header.Get("Authorization"))
+			t.Errorf("should not send Authorization without a PAT, got %q", r.Header.Get("Authorization"))
 		}
 		_, _ = fmt.Fprint(w, `{"private":true}`)
 	})
@@ -228,16 +228,16 @@ func TestRun_NoTokenSkipsTheRegistrationCheck(t *testing.T) {
 
 	for _, req := range *seen {
 		if strings.Contains(req, "actions/runners") {
-			t.Fatalf("没有令牌时不应查登记状态，实际请求: %v", *seen)
+			t.Fatalf("should not check registration status without a token, actual requests: %v", *seen)
 		}
 	}
 	reg, at, errMsg := statusOf(t, dir)
 	if reg != nil || at != "" || errMsg != "" {
-		t.Fatalf("没有令牌时登记状态应一概为空，得到 %v/%q/%q", reg, at, errMsg)
+		t.Fatalf("without a token, registration status should always be empty, got %v/%q/%q", reg, at, errMsg)
 	}
 }
 
-// 超过一页的组织：只取第一页会把后面的 Runner 判成没登记
+// Organization with more than one page: fetching only the first page would mark runners on later pages as unregistered
 func TestRun_PaginatesBeyondFirstPage(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	first := make([]string, apiPerPage)
@@ -256,21 +256,21 @@ func TestRun_PaginatesBeyondFirstPage(t *testing.T) {
 
 	reg, _, errMsg := statusOf(t, dir)
 	if reg == nil || !*reg {
-		t.Fatalf("alpha 在第二页，应判为已登记，得到 %v（err=%q）", reg, errMsg)
+		t.Fatalf("alpha is on page two and should be marked registered, got %v (err=%q)", reg, errMsg)
 	}
 	if len(*seen) < 2 {
-		t.Fatalf("应翻到第二页，实际请求: %v", *seen)
+		t.Fatalf("should go to page two, actual requests: %v", *seen)
 	}
 }
 
-// 第一页不满就该停，不能白白多打一次 API
+// Stop when the first page is not full; don't waste an extra API call
 func TestRun_StopsAfterShortPage(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	seen := fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, runnersJSON(1, "alpha"))
 	})
 	Run(runCfgIn(dir, "alpha", "repo", "o/r"), store)
-	// 只数列 Runner 的请求：同一轮里还有一次可见性查询，它打的是另一个端点
+	// Count only the runner-list requests: the same round also makes a visibility query, which hits a different endpoint
 	pages := 0
 	for _, req := range *seen {
 		if strings.Contains(req, "actions/runners") {
@@ -278,14 +278,14 @@ func TestRun_StopsAfterShortPage(t *testing.T) {
 		}
 	}
 	if pages != 1 {
-		t.Fatalf("单页即可取完，不应继续翻页，实际请求: %v", *seen)
+		t.Fatalf("One page is enough, pagination should not continue, actual requests: %v", *seen)
 	}
 }
 
-// 可见性是三态，而且 404 这一格是最容易写错、代价也最大的一格：
-// 匿名请求下私有仓库与压根不存在的仓库都是 404，带 PAT 时权限不够也是 404。
-// 记成 false 就等于对着一个打错了名字的目标肯定地说「私有」——而「公开」正是
-// 这个检查唯一要喊出来的结论，说错方向比不说更糟。
+// Visibility has three states, and the 404 case is the easiest to get wrong and the most costly:
+// For anonymous requests, private repos and nonexistent repos both return 404; with a PAT, insufficient permissions also return 404.
+// Recording it as false is the same as confidently calling a mistyped target 'private' -- and 'public' is exactly
+// the one conclusion this check exists to announce, so getting the direction wrong is worse than saying nothing.
 func TestRepoVisibility_ThreeStates(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -308,26 +308,26 @@ func TestRepoVisibility_ThreeStates(t *testing.T) {
 			got, err := repoVisibility(context.Background(), &http.Client{}, tokenRef{value: "pat"}, "o/r")
 			switch {
 			case tc.wantErr == "" && err != nil:
-				t.Fatalf("不该报错，得到 %v", err)
+				t.Fatalf("should not error, got %v", err)
 			case tc.wantErr != "" && err == nil:
-				t.Fatal("应带回原因，得到 nil")
+				t.Fatal("should return a reason, got nil")
 			case tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr):
-				t.Fatalf("原因 %q 里应含 %q", err, tc.wantErr)
+				t.Fatalf("reason %q should contain %q", err, tc.wantErr)
 			}
 			switch {
 			case tc.want == nil && got != nil:
-				t.Fatalf("应记为不知道，却记成了 %v", *got)
+				t.Fatalf("should be recorded as unknown, but was recorded as %v", *got)
 			case tc.want != nil && got == nil:
-				t.Fatalf("应记为 %v，却记成了不知道", *tc.want)
+				t.Fatalf("should be recorded as %v, but was recorded as unknown", *tc.want)
 			case tc.want != nil && *got != *tc.want:
-				t.Fatalf("应记为 %v，得到 %v", *tc.want, *got)
+				t.Fatalf("should be recorded as %v, got %v", *tc.want, *got)
 			}
 		})
 	}
 }
 
-// 没有 PAT 时匿名发：绝大多数部署不配 PAT，而它们正是最需要这个提示的一批。
-// 带一个空的 Bearer 比不带更糟——GitHub 会当成坏令牌返回 401。
+// Without a PAT, send anonymously: most deployments have no PAT, and they are exactly the ones that most need this hint.
+// Sending an empty Bearer is worse than sending none -- GitHub treats it as a bad token and returns 401.
 func TestRepoVisibility_AnonymousWhenNoToken(t *testing.T) {
 	var auth string
 	var sawHeader bool
@@ -340,18 +340,18 @@ func TestRepoVisibility_AnonymousWhenNoToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !sawHeader {
-		t.Fatal("没发出请求")
+		t.Fatal("no request was sent")
 	}
 	if auth != "" {
-		t.Fatalf("没有 PAT 时不该带 Authorization，得到 %q", auth)
+		t.Fatalf("should not send Authorization without a PAT, got %q", auth)
 	}
 	if got == nil || !*got {
-		t.Fatalf("private:false 应记为公开，得到 %v", got)
+		t.Fatalf("private:false should be recorded as public, got %v", got)
 	}
 }
 
-// 每个仓库一天最多问一次。这个检查每五分钟跑一轮，匿名配额每小时只有 60 次，
-// 照每轮都问的话十来个 Runner 就能把配额烧干，连带把带 PAT 的那半边拖进限流。
+// Ask at most once a day per repo. This check runs every five minutes, and the anonymous quota is only 60 requests per hour,
+// so asking every round would let about ten runners burn through the quota and drag the PAT-backed half into rate limiting too.
 func TestRun_VisibilityIsCheckedAtMostOncePerDay(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	visits := 0
@@ -367,31 +367,31 @@ func TestRun_VisibilityIsCheckedAtMostOncePerDay(t *testing.T) {
 
 	Run(cfg, store)
 	if visits != 1 {
-		t.Fatalf("第一轮应查一次可见性，实际 %d 次", visits)
+		t.Fatalf("first round should check visibility once, actually %d times", visits)
 	}
 	if p := publicOf(t, dir); p == nil || !*p {
-		t.Fatalf("private:false 应记为公开，得到 %v", p)
+		t.Fatalf("private:false should be recorded as public, got %v", p)
 	}
 
 	Run(cfg, store)
 	if visits != 1 {
-		t.Fatalf("24 小时内不该再查，实际共 %d 次", visits)
+		t.Fatalf("should not check again within 24 hours, actually %d checks in total", visits)
 	}
-	// 结论不能被第二轮的登记检查顺手抹掉：状态文件是一次写完的
+	// The conclusion must not be wiped out in passing by the second round's registration check: the state file is written as a whole
 	if p := publicOf(t, dir); p == nil || !*p {
-		t.Fatalf("第二轮之后可见性结论应还在，得到 %v", p)
+		t.Fatalf("visibility conclusion should still be there after the second round, got %v", p)
 	}
 
-	// 把时间戳拨回 25 小时前，过期了就该再查一次
+	// Move the timestamp back 25 hours so it is expired and should be checked again
 	agePriorVisibilityCheck(t, dir, 25*time.Hour)
 	Run(cfg, store)
 	if visits != 2 {
-		t.Fatalf("超过 24 小时应重新查一次，实际共 %d 次", visits)
+		t.Fatalf("should be rechecked after more than 24 hours, actually %d checks in total", visits)
 	}
 }
 
-// 组织目标本轮不处理：要判断的是「Runner 组允不允许公开仓库」，那要 admin:org
-// 还得把 Runner 映射到组，和查一个仓库不是一回事。查错端点会拿 404 当答案。
+// Organization targets are not handled in this round: what needs to be decided is whether the Runner group allows public repos, which requires admin:org
+// It also requires mapping runners to groups, which is not the same as checking a single repo. Querying the wrong endpoint would take a 404 as the answer.
 func TestRun_OrgTargetIsNotCheckedForVisibility(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	seen := fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -400,28 +400,28 @@ func TestRun_OrgTargetIsNotCheckedForVisibility(t *testing.T) {
 	Run(runCfgIn(dir, "alpha", "org", "acme"), store)
 	for _, req := range *seen {
 		if !strings.Contains(req, "actions/runners") {
-			t.Fatalf("组织目标不应查仓库可见性，实际请求: %v", *seen)
+			t.Fatalf("organization targets should not check repo visibility, actual requests: %v", *seen)
 		}
 	}
 	if p := publicOf(t, dir); p != nil {
-		t.Fatalf("组织目标的可见性应留空，得到 %v", *p)
+		t.Fatalf("organization target visibility should be left empty, got %v", *p)
 	}
 }
 
-// 两件事都没做（组织目标 + 没有 PAT）就不写文件：写了的话界面会从「从未检查」
-// 变成「查过但失败」，对一个压根没查过的 Runner 说了一句确定的话。
+// When neither happens (organization target + no PAT), do not write the file: if it were written, the UI would change from 'never checked'
+// to 'checked but failed', making a definite claim about a runner that was never checked.
 func TestRun_OrgTargetWithoutTokenWritesNothing(t *testing.T) {
 	dir, store := withToken(t, "")
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Error("既没有 PAT 又不查可见性时不应发起请求")
+		t.Error("should not send requests when there is no PAT and visibility is not checked")
 	})
 	Run(runCfgIn(dir, "alpha", "org", "acme"), store)
 	if _, err := os.Stat(filepath.Join(dir, runner.GitHubStatusFile)); !os.IsNotExist(err) {
-		t.Fatal("什么都没查时不应写状态文件")
+		t.Fatal("should not write the state file when nothing was checked")
 	}
 }
 
-// publicOf 单独读 public，理由同 busyOf
+// publicOf reads public separately, for the same reason as busyOf
 func publicOf(t *testing.T, dir string) *bool {
 	t.Helper()
 	return runner.ReadGitHubStatus(dir).Public
@@ -429,12 +429,12 @@ func publicOf(t *testing.T, dir string) *bool {
 
 func ptrBool(b bool) *bool { return &b }
 
-// agePriorVisibilityCheck 把状态文件里的可见性查询时间往前拨，用来跨过 24 小时这道闸。
+// agePriorVisibilityCheck moves the visibility query time in the state file backward, to get past the 24-hour gate.
 func agePriorVisibilityCheck(t *testing.T, dir string, d time.Duration) {
 	t.Helper()
 	st := runner.ReadGitHubStatus(dir)
 	if st.VisibilityCheckedAt == "" {
-		t.Fatal("状态文件里没有可见性查询时间，这个用例没有意义")
+		t.Fatal("the state file has no visibility query time, so this case is meaningless")
 	}
 	at, err := time.Parse(time.RFC3339, st.VisibilityCheckedAt)
 	if err != nil {
@@ -446,7 +446,7 @@ func agePriorVisibilityCheck(t *testing.T, dir string, d time.Duration) {
 	}
 }
 
-// target 里的特殊字符要转义，否则会打到别的端点上去
+// Special characters in the target must be escaped, otherwise the request hits another endpoint
 func TestListRunners_EscapesPathSegments(t *testing.T) {
 	seen := fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, runnersJSON(0))
@@ -455,29 +455,29 @@ func TestListRunners_EscapesPathSegments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, uri, _ := strings.Cut((*seen)[0], " ") // 记录的是 "METHOD URI"
-	// 未转义时 `my org?x=1` 会让 ?x=1 变成查询串，路径缩成 /orgs/my org，打到另一个端点
+	_, uri, _ := strings.Cut((*seen)[0], " ") // Records "METHOD URI"
+	// Unescaped, `my org?x=1` turns ?x=1 into a query string and shortens the path to /orgs/my org, hitting another endpoint
 	if strings.Contains(uri, " ") || strings.HasPrefix(uri, "/orgs/my org") {
-		t.Fatalf("target 未转义，请求打到了 %q", uri)
+		t.Fatalf("target not escaped, request hit %q", uri)
 	}
 	got := uri
 	if !strings.Contains(got, "/orgs/my%20org%3Fx=1/actions/runners") {
-		t.Fatalf("请求路径 %q 不是预期的转义形式", got)
+		t.Fatalf("request path %q is not the expected escaped form", got)
 	}
 }
 
 func TestListRunners_RejectsInvalidTarget(t *testing.T) {
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Error("target 无效时不应发起请求")
+		t.Error("no request should be made when target is invalid")
 	})
 	if _, err := listRunners(context.Background(), http.DefaultClient, tokenRef{value: "pat"}, "repo", "没有斜杠"); err == nil {
-		t.Fatal("repo 类型的 target 缺少 owner/repo 结构，应直接报错")
+		t.Fatal("repo-type target lacks the owner/repo structure and should fail directly")
 	}
 }
 
 // ---- Deregister ----
 
-// 从本工具删掉不等于从 GitHub 删掉：必须真的调 DELETE
+// Removing from this tool is not removing from GitHub: the DELETE call must actually be made
 func TestDeregister_DeletesByID(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	seen := fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -489,9 +489,9 @@ func TestDeregister_DeletesByID(t *testing.T) {
 	})
 	res := Deregister(context.Background(), store, dir, "repo", "o/r", "alpha")
 	if !res.Done {
-		t.Fatalf("应注销成功，得到 %+v", res)
+		t.Fatalf("deregistration should succeed, got %+v", res)
 	}
-	// alpha 是列表里的第二个，ID 为 101
+	// alpha is the second in the list, with ID 101
 	wantDelete := "DELETE /repos/o/r/actions/runners/101"
 	found := false
 	for _, s := range *seen {
@@ -500,11 +500,11 @@ func TestDeregister_DeletesByID(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("应发出 %q，实际请求: %v", wantDelete, *seen)
+		t.Fatalf("should send %q, actual requests: %v", wantDelete, *seen)
 	}
 }
 
-// GitHub 上本来就没有：目的已经达到，不该报成失败
+// It is already absent on GitHub: the goal is already met, so it should not be reported as a failure
 func TestDeregister_AbsentRunnerIsDone(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	seen := fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -512,38 +512,38 @@ func TestDeregister_AbsentRunnerIsDone(t *testing.T) {
 	})
 	res := Deregister(context.Background(), store, dir, "repo", "o/r", "alpha")
 	if !res.Done {
-		t.Fatalf("GitHub 上没有同名 Runner 应视为已完成，得到 %+v", res)
+		t.Fatalf("no Runner with the same name on GitHub should count as done, got %+v", res)
 	}
 	for _, s := range *seen {
 		if strings.HasPrefix(s, "DELETE") {
-			t.Fatalf("不存在时不该发 DELETE，实际请求: %v", *seen)
+			t.Fatalf("should not send DELETE when absent, actual requests: %v", *seen)
 		}
 	}
 }
 
-// 没有 PAT 就注销不了。这不是能默默吞掉的情况——
-// 留在 GitHub 上的那个会让之后用同一名称重新添加时因重名而注册失败。
+// Without a PAT, deregistration is impossible. This case must not be silently swallowed:
+// The one left on GitHub would make a later re-add with the same name fail as a duplicate registration.
 func TestDeregister_NoTokenSaysWhereToDeleteManually(t *testing.T) {
 	dir, store := withToken(t, "")
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Error("没有令牌时不应发起请求")
+		t.Error("no request should be made without a token")
 	})
 	res := Deregister(context.Background(), store, dir, "repo", "o/r", "alpha")
 	if res.Done {
-		t.Fatal("没有令牌时不可能注销成功")
+		t.Fatal("deregistration cannot succeed without a token")
 	}
-	// 断言键与参数，不断言措辞：句子现在由调用方按语言渲染，
-	// 本包只回传「是什么事」。参数里必须带上令牌文件名与 Runner 名——
-	// 少了哪一个，那句话都没法告诉人该去哪儿手动删。
+	// Assert the key and parameters, not the wording: the caller now renders the sentence per language,
+	// This package only returns "what happened". The parameters must include the token file name and the Runner name --
+	// Without any one of these, the message can't tell people where to delete it by hand.
 	if res.MessageKey != "github.dereg.no_pat" {
-		t.Fatalf("键应为 github.dereg.no_pat，实际 %q", res.MessageKey)
+		t.Fatalf("key should be github.dereg.no_pat, got %q", res.MessageKey)
 	}
 	wantPath, err := store.Path("alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(res.MessageArgs) != 2 || res.MessageArgs[0] != wantPath || res.MessageArgs[1] != "alpha" {
-		t.Fatalf("参数应为 [%s alpha]，实际 %v", wantPath, res.MessageArgs)
+		t.Fatalf("args should be [%s alpha], got %v", wantPath, res.MessageArgs)
 	}
 }
 
@@ -554,18 +554,18 @@ func TestDeregister_APIFailureIsReported(t *testing.T) {
 	})
 	res := Deregister(context.Background(), store, dir, "repo", "o/r", "alpha")
 	if res.Done {
-		t.Fatal("API 报 401 时不能算注销成功")
+		t.Fatal("a 401 from the API must not count as a successful deregistration")
 	}
 	if res.MessageKey != "github.dereg.lookup_failed" {
-		t.Fatalf("键应为 github.dereg.lookup_failed，实际 %q", res.MessageKey)
+		t.Fatalf("key should be github.dereg.lookup_failed, got %q", res.MessageKey)
 	}
 	if len(res.MessageArgs) != 2 || !strings.Contains(fmt.Sprint(res.MessageArgs[0]), "401") ||
 		res.MessageArgs[1] != "alpha" {
-		t.Fatalf("参数里应带上 401 与 Runner 名，实际 %v", res.MessageArgs)
+		t.Fatalf("args should include the 401 and the runner name, got %v", res.MessageArgs)
 	}
 }
 
-// 删除接口返回 404：说明它已经不在了，同样算达成
+// The delete endpoint returning 404 means it is already gone, which also counts as done
 func TestDeregister_DeleteReturning404IsDone(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -577,11 +577,11 @@ func TestDeregister_DeleteReturning404IsDone(t *testing.T) {
 	})
 	res := Deregister(context.Background(), store, dir, "repo", "o/r", "alpha")
 	if !res.Done {
-		t.Fatalf("DELETE 返回 404 说明已不存在，应视为完成，得到 %+v", res)
+		t.Fatalf("DELETE returned 404, so the runner no longer exists and should be treated as done, got %+v", res)
 	}
 }
 
-// GitHub 的 busy 字段就是「这个 Runner 正在跑 Job」，要能落到状态文件里
+// GitHub's busy field means 'this runner is running a job', so it must be stored in the state file
 func TestRun_BusyRunnerIsRecorded(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -590,7 +590,7 @@ func TestRun_BusyRunnerIsRecorded(t *testing.T) {
 	Run(runCfgIn(dir, "alpha", "repo", "o/r"), store)
 
 	if busy := busyOf(t, dir); busy == nil || !*busy {
-		t.Fatalf("GitHub 说它忙，应记为忙碌，得到 %v", busy)
+		t.Fatalf("GitHub reports the runner as busy, so it should be recorded as busy, got %v", busy)
 	}
 }
 
@@ -602,12 +602,12 @@ func TestRun_IdleRunnerIsRecordedAsNotBusy(t *testing.T) {
 	Run(runCfgIn(dir, "alpha", "repo", "o/r"), store)
 
 	if busy := busyOf(t, dir); busy == nil || *busy {
-		t.Fatalf("GitHub 说它不忙，应记为空闲，得到 %v", busy)
+		t.Fatalf("GitHub reports the runner as not busy, so it should be recorded as idle, got %v", busy)
 	}
 }
 
-// 「没查到这个 Runner」不等于「它不忙」。写成 false 会让界面对一个
-// GitHub 上根本不存在的 Runner 打包票说它空闲——和 registered 那个三态同一个错。
+// 'Runner not found' does not mean 'not busy'. Writing false would make the UI vouch for a
+// runner that does not exist on GitHub at all as idle, the same mistake as the tri-state registered field.
 func TestRun_BusyIsUnknownWhenRunnerAbsent(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -616,11 +616,11 @@ func TestRun_BusyIsUnknownWhenRunnerAbsent(t *testing.T) {
 	Run(runCfgIn(dir, "alpha", "repo", "o/r"), store)
 
 	if busy := busyOf(t, dir); busy != nil {
-		t.Fatalf("GitHub 上没有这个 Runner，忙碌状态应为未知，得到 %v", *busy)
+		t.Fatalf("runner not found on GitHub, so busy status should be unknown, got %v", *busy)
 	}
 }
 
-// 查询本身失败时同理：不知道就是不知道
+// The same applies when the lookup itself fails: unknown means unknown
 func TestRun_BusyIsUnknownWhenCheckFails(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -629,14 +629,14 @@ func TestRun_BusyIsUnknownWhenCheckFails(t *testing.T) {
 	Run(runCfgIn(dir, "alpha", "repo", "o/r"), store)
 
 	if busy := busyOf(t, dir); busy != nil {
-		t.Fatalf("查询失败时忙碌状态应为未知，得到 %v", *busy)
+		t.Fatalf("when the lookup fails, busy status should be unknown, got %v", *busy)
 	}
 }
 
-// ---- 旧位置的 PAT：读取前先搬走 ----
+// ---- Move the old-location PAT before reading it ----
 
-// 用户照旧文档把 PAT 放进 Runner 目录的，检查照样要能用上它——
-// 但用完之后那个文件不能还留在挂载进容器的目录里。
+// Users who put the PAT in the runner directory, as the docs say, still need the check to use it,
+// but the file must not remain in the directory mounted into the container after use.
 func TestRun_MigratesLegacyTokenAndStillAuthenticates(t *testing.T) {
 	dir, store := withLegacyToken(t, "legacy-pat")
 	var auth []string
@@ -651,29 +651,29 @@ func TestRun_MigratesLegacyTokenAndStillAuthenticates(t *testing.T) {
 
 	Run(runCfgIn(dir, "alpha", "repo", "o/r"), store)
 
-	// 1) 旧位置的令牌确实被用上了
+	// 1) The token at the old location was actually used
 	if len(auth) == 0 {
-		t.Fatal("没有发起请求，说明旧位置的 PAT 没被读到")
+		t.Fatal("No request was made, so the old-location PAT was not read")
 	}
 	if auth[0] != "Bearer legacy-pat" {
-		t.Fatalf("请求应带着旧位置的 PAT，实际 Authorization=%q", auth[0])
+		t.Fatalf("The request should carry the old-location PAT, actual Authorization=%q", auth[0])
 	}
-	// 2) 旧文件已经不在了——这才是本 PR 要关掉的那个暴露
+	// 2) The old file is gone. This is the exposure this PR closes
 	legacy := filepath.Join(dir, secrets.LegacyRunnerTokenFile)
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
-		t.Fatalf("旧位置 %s 仍然存在（err=%v），容器里的 Job 还能读到它", legacy, err)
+		t.Fatalf("Old location %s still exists (err=%v), and the Job in the container can still read it", legacy, err)
 	}
-	// 3) 令牌搬到了新位置
+	// 3) The token was moved to the new location
 	if got := store.GitHubToken("alpha"); got != "legacy-pat" {
-		t.Fatalf("新位置应有该令牌，得到 %q", got)
+		t.Fatalf("The new location should have the token, got %q", got)
 	}
-	// 4) 检查结果照旧写出
+	// 4) Check results are still written out
 	if reg, _, _ := statusOf(t, dir); reg == nil || !*reg {
-		t.Fatalf("应记为已登记，得到 %v", reg)
+		t.Fatalf("Should be recorded as registered, got %v", reg)
 	}
 }
 
-// 删除 Runner 时的注销同理：旧位置的 PAT 仍然管用，用完旧文件也不再留着
+// Deregistration when deleting a runner works the same way: the old-location PAT still works, and the old file is no longer kept after use
 func TestDeregister_MigratesLegacyToken(t *testing.T) {
 	dir, store := withLegacyToken(t, "legacy-pat")
 	var auth []string
@@ -692,19 +692,19 @@ func TestDeregister_MigratesLegacyToken(t *testing.T) {
 
 	res := Deregister(context.Background(), store, dir, "repo", "o/r", "alpha")
 	if !res.Done {
-		t.Fatalf("应注销成功，得到 %+v", res)
+		t.Fatalf("Should deregister successfully, got %+v", res)
 	}
 	for _, a := range auth {
 		if a != "Bearer legacy-pat" {
-			t.Fatalf("请求应带着旧位置的 PAT，实际 %q", a)
+			t.Fatalf("The request should carry the old-location PAT, actual %q", a)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, secrets.LegacyRunnerTokenFile)); !os.IsNotExist(err) {
-		t.Fatalf("旧位置仍然存在（err=%v）", err)
+		t.Fatalf("Old location still exists (err=%v)", err)
 	}
 }
 
-// 401 要指向新位置：用户得知道该去改哪个文件
+// A 401 should point to the new location: users need to know which file to change
 func TestRun_UnauthorizedNamesTheNewLocation(t *testing.T) {
 	dir, store := withToken(t, "pat")
 	fakeAPI(t, func(w http.ResponseWriter, _ *http.Request) {
@@ -718,22 +718,22 @@ func TestRun_UnauthorizedNamesTheNewLocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(errMsg, wantPath) {
-		t.Fatalf("401 的说明应指向 %s，得到 %q", wantPath, errMsg)
+		t.Fatalf("The 401 message should point to %s, got %q", wantPath, errMsg)
 	}
 	if strings.Contains(errMsg, secrets.LegacyRunnerTokenFile) {
-		t.Fatalf("不应再把用户指向 Runner 目录下的旧文件，得到 %q", errMsg)
+		t.Fatalf("Should no longer point users to the old file under the runner directory, got %q", errMsg)
 	}
 }
 
-// store 为 nil 时不该 panic，也不该去打 API
+// Should not panic when store is nil, and should not call the API either
 func TestRun_NilStoreDoesNothing(t *testing.T) {
 	dir, _ := withToken(t, "pat")
 	fakeAPI(t, func(http.ResponseWriter, *http.Request) {
-		t.Error("没有 store 就没有凭据，不该发起请求")
+		t.Error("Without a store there are no credentials, so no request should be made")
 	})
 	Run(runCfgIn(dir, "alpha", "repo", "o/r"), nil)
 	if reg, _, _ := statusOf(t, dir); reg != nil {
-		t.Fatalf("不该写出状态，得到 %v", reg)
+		t.Fatalf("Should not write out status, got %v", reg)
 	}
 }
 
@@ -741,43 +741,43 @@ func TestDeregister_NilStoreNamesTheNewLocation(t *testing.T) {
 	dir, _ := withToken(t, "pat")
 	res := Deregister(context.Background(), nil, dir, "repo", "o/r", "alpha")
 	if res.Done {
-		t.Fatal("没有凭据不可能注销成功")
+		t.Fatal("Deregistration cannot succeed without credentials")
 	}
 	if res.MessageKey != "github.dereg.no_pat" {
-		t.Fatalf("应回报 no_pat，得到 %q", res.MessageKey)
+		t.Fatalf("Should report no_pat, got %q", res.MessageKey)
 	}
 	if len(res.MessageArgs) != 2 || res.MessageArgs[0] != secrets.PathDescription {
-		t.Fatalf("参数应指向新位置的通用写法，得到 %v", res.MessageArgs)
+		t.Fatalf("The argument should point to the generic form for the new location, got %v", res.MessageArgs)
 	}
 }
 
-// TokenForRunner 是本包对外的读取入口：新位置直接读，旧位置先搬再读
+// TokenForRunner is this package's external read entry: read directly from the new location, and migrate the old location first, then read
 func TestTokenForRunner(t *testing.T) {
 	t.Run("新位置", func(t *testing.T) {
 		dir, store := withToken(t, "pat")
 		if got := TokenForRunner(store, "alpha", dir); got != "pat" {
-			t.Fatalf("得到 %q", got)
+			t.Fatalf("got %q", got)
 		}
 	})
 	t.Run("旧位置先迁移", func(t *testing.T) {
 		dir, store := withLegacyToken(t, "legacy-pat")
 		if got := TokenForRunner(store, "alpha", dir); got != "legacy-pat" {
-			t.Fatalf("得到 %q", got)
+			t.Fatalf("got %q", got)
 		}
 		if _, err := os.Stat(filepath.Join(dir, secrets.LegacyRunnerTokenFile)); !os.IsNotExist(err) {
-			t.Fatalf("旧文件应已被搬走（err=%v）", err)
+			t.Fatalf("Old file should have been moved away (err=%v)", err)
 		}
 	})
 	t.Run("都没有时为空串", func(t *testing.T) {
 		dir, store := withToken(t, "")
 		if got := TokenForRunner(store, "alpha", dir); got != "" {
-			t.Fatalf("得到 %q", got)
+			t.Fatalf("got %q", got)
 		}
 	})
 	t.Run("store 为 nil 时为空串", func(t *testing.T) {
 		dir, _ := withToken(t, "pat")
 		if got := TokenForRunner(nil, "alpha", dir); got != "" {
-			t.Fatalf("得到 %q", got)
+			t.Fatalf("got %q", got)
 		}
 	})
 }

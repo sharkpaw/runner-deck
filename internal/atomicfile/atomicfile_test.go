@@ -11,10 +11,10 @@ import (
 	"testing"
 )
 
-// swapRename 换掉包级的 rename 并在测试结束时换回。
+// swapRename swaps out the package-level rename and swaps it back when the test ends.
 //
-// 本包的测试一律不 t.Parallel：rename 是包级变量，并行跑就是 -race 下的数据竞争，
-// 而这个包存在的理由正是并发安全，测试自己踩一个竞态没有道理。
+// Tests in this package never call t.Parallel: rename is a package-level variable, so running in parallel is a data race under -race,
+// and this package exists precisely for concurrency safety, so it makes no sense for a test to trigger a race itself.
 func swapRename(t *testing.T, fn func(oldpath, newpath string) error) {
 	t.Helper()
 	orig := rename
@@ -22,7 +22,7 @@ func swapRename(t *testing.T, fn func(oldpath, newpath string) error) {
 	t.Cleanup(func() { rename = orig })
 }
 
-// captureLog 接管 log 的输出并返回取内容的函数。
+// captureLog takes over log's output and returns a function that reads the captured content.
 func captureLog(t *testing.T) func() string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -31,7 +31,7 @@ func captureLog(t *testing.T) func() string {
 	return buf.String
 }
 
-// tempLeftovers 返回目录里残留的临时文件。
+// tempLeftovers returns the temporary files left behind in the directory.
 func tempLeftovers(t *testing.T, dir string) []string {
 	t.Helper()
 	m, err := filepath.Glob(filepath.Join(dir, ".*.tmp-*"))
@@ -50,57 +50,57 @@ func mustRead(t *testing.T, path string) string {
 	return string(b)
 }
 
-// TestWriteFile_NewFileUsesPerm 目标不存在时按 perm 建。
+// TestWriteFile_NewFileUsesPerm creates the target with perm when it does not exist.
 //
-// 断言的是精确相等而不是「不超过 perm」：实现显式 chmod 到 perm，不过 umask，
-// 所以这里是确定的。这一点与 os.WriteFile 不同，是有意的——config.yaml 该是 0644
-// 就该是 0644，不随容器的 umask 变——因此值得被钉住。
+// The assertion checks exact equality, not 'no more than perm': the implementation explicitly chmods to perm, bypassing umask,
+// so the result here is deterministic. This differs from os.WriteFile on purpose: config.yaml should be 0644
+// and stay 0644 regardless of the container's umask. That is why it is worth pinning down.
 func TestWriteFile_NewFileUsesPerm(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := WriteFile(path, []byte("hello"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustRead(t, path); got != "hello" {
-		t.Errorf("内容 %q，期望 %q", got, "hello")
+		t.Errorf("content %q, expected %q", got, "hello")
 	}
 	fi, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fi.Mode().Perm() != 0644 {
-		t.Errorf("权限 %v，期望 %v", fi.Mode().Perm(), os.FileMode(0644))
+		t.Errorf("mode %v, expected %v", fi.Mode().Perm(), os.FileMode(0644))
 	}
 }
 
-// TestWriteFile_PreservesExistingMode 目标已存在时沿用它的权限位，
-// 与 os.WriteFile 一致——不能因为换了写法就把用户 chmod 过的文件改回 0644。
+// TestWriteFile_PreservesExistingMode keeps the target's existing permission bits when it already exists,
+// matching os.WriteFile. Switching the write approach must not reset a user's chmod'ed file back to 0644.
 func TestWriteFile_PreservesExistingMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0600); err != nil { // 绕开 umask，确保起点确实是 0600
+	if err := os.Chmod(path, 0600); err != nil { // Bypass umask to make sure the starting point really is 0600
 		t.Fatal(err)
 	}
 	if err := WriteFile(path, []byte("new"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustRead(t, path); got != "new" {
-		t.Errorf("内容 %q，期望 %q", got, "new")
+		t.Errorf("content %q, expected %q", got, "new")
 	}
 	fi, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fi.Mode().Perm() != 0600 {
-		t.Errorf("权限 %v，期望沿用 %v", fi.Mode().Perm(), os.FileMode(0600))
+		t.Errorf("mode %v, expected to keep %v", fi.Mode().Perm(), os.FileMode(0600))
 	}
 }
 
-// TestWriteFile_NoTempLeftovers 成功与失败两条路径都不留临时文件。
+// TestWriteFile_NoTempLeftovers checks that neither the success nor the failure path leaves temporary files behind.
 //
-// 留下的话，config/ 会随每次保存失败攒出一堆 .config.yaml.tmp-*，
-// 而这个目录是文档里让人备份的那个。
+// If they were left behind, config/ would accumulate a pile of .config.yaml.tmp-* files with every failed save,
+// and this is the directory the docs tell people to back up.
 func TestWriteFile_NoTempLeftovers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -109,35 +109,35 @@ func TestWriteFile_NoTempLeftovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if leftovers := tempLeftovers(t, dir); len(leftovers) != 0 {
-		t.Errorf("成功写入后仍有临时文件：%v", leftovers)
+		t.Errorf("temp files still present after successful write: %v", leftovers)
 	}
 
-	// 非 EBUSY/EXDEV 的 rename 失败不走回退，错误要原样交给调用方。
+	// A rename failure other than EBUSY/EXDEV does not fall back; the error must be returned to the caller as-is.
 	injected := &os.LinkError{Op: "rename", Err: syscall.EIO}
 	swapRename(t, func(string, string) error { return injected })
 	err := WriteFile(path, []byte("boom"), 0644)
 	if err == nil {
-		t.Fatal("rename 失败时应返回错误")
+		t.Fatal("should return an error when rename fails")
 	}
 	if !errors.Is(err, syscall.EIO) {
-		t.Errorf("错误未透出底层原因：%v", err)
+		t.Errorf("error does not expose the underlying cause: %v", err)
 	}
 	if !strings.Contains(err.Error(), path) {
-		t.Errorf("错误未指出是哪个文件：%v", err)
+		t.Errorf("error does not name which file: %v", err)
 	}
 	if leftovers := tempLeftovers(t, dir); len(leftovers) != 0 {
-		t.Errorf("写入失败后仍有临时文件：%v", leftovers)
+		t.Errorf("temp files still present after failed write: %v", leftovers)
 	}
 	if got := mustRead(t, path); got != "ok" {
-		t.Errorf("rename 失败后目标应保持旧内容，got %q", got)
+		t.Errorf("target should keep old content after rename fails, got %q", got)
 	}
 }
 
-// TestWriteFile_TargetUntouchedUntilRename 确定性地证明原子性：
-// 数据全部写完、rename 尚未执行的那一刻，目标读出来仍是旧内容。
+// TestWriteFile_TargetUntouchedUntilRename deterministically proves atomicity:
+// at the moment all data is written but rename has not yet run, reading the target still returns the old content.
 //
-// 变异验证：把 WriteFile 的实现换回 os.WriteFile，这条测试变红——
-// 那条路径根本不会调用注入的 rename，called 保持 false。
+// Mutation check: swap WriteFile's implementation back to os.WriteFile and this test turns red --
+// that path never calls the injected rename, so called stays false.
 func TestWriteFile_TargetUntouchedUntilRename(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("old"), 0644); err != nil {
@@ -148,14 +148,14 @@ func TestWriteFile_TargetUntouchedUntilRename(t *testing.T) {
 	var seen string
 	swapRename(t, func(oldpath, newpath string) error {
 		called = true
-		// 临时文件必须与目标同目录，否则跨文件系统时 rename 根本不是原子的（EXDEV），
-		// 这个包也就白做了——放 /tmp 是最容易犯的那个错。
+		// The temp file must be in the same directory as the target; otherwise rename is not atomic across filesystems (EXDEV),
+		// and the whole package would be pointless. Putting it in /tmp is the easiest mistake to make.
 		if filepath.Dir(oldpath) != filepath.Dir(newpath) {
-			t.Errorf("临时文件在 %s，目标在 %s，不同目录", filepath.Dir(oldpath), filepath.Dir(newpath))
+			t.Errorf("temp file is in %s, target is in %s, different directories", filepath.Dir(oldpath), filepath.Dir(newpath))
 		}
 		b, err := os.ReadFile(newpath)
 		if err != nil {
-			t.Errorf("rename 之前目标应当仍然存在：%v", err)
+			t.Errorf("target should still exist before rename: %v", err)
 		}
 		seen = string(b)
 		return os.Rename(oldpath, newpath)
@@ -165,28 +165,28 @@ func TestWriteFile_TargetUntouchedUntilRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !called {
-		t.Fatal("没有经过 rename，替换不是原子的")
+		t.Fatal("did not go through rename, so the replacement is not atomic")
 	}
 	if seen != "old" {
-		t.Errorf("rename 之前目标已被改动，读到 %q，期望 %q", seen, "old")
+		t.Errorf("target was changed before rename, read %q, expected %q", seen, "old")
 	}
 	if got := mustRead(t, path); got != "new" {
-		t.Errorf("rename 之后内容 %q，期望 %q", got, "new")
+		t.Errorf("content after rename %q, expected %q", got, "new")
 	}
 }
 
-// TestWriteFile_FallsBackOnRenameRefused 单文件 bind mount（EBUSY）与跨文件系统（EXDEV）
-// 下 rename 用不了，此时回退为就地写入，且同一路径只告警一次。
+// TestWriteFile_FallsBackOnRenameRefused covers single-file bind mounts (EBUSY) and cross-filesystem (EXDEV)
+// where rename cannot be used. In that case it falls back to writing in place, and warns only once per path.
 //
-// 告警只打一次这件事本身要被钉住：config.yaml 每次保存都会走到这里，
-// 按次打印会把 Runner 状态轮询的日志淹掉。
+// The fact that the warning is logged only once must itself be pinned down: config.yaml goes through here on every save,
+// Per-attempt printing would flood the runner status polling log.
 func TestWriteFile_FallsBackOnRenameRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		err  error
 	}{
-		{"EBUSY", syscall.EBUSY}, // 单文件 bind mount
-		{"EXDEV", syscall.EXDEV}, // 临时文件与目标不在同一文件系统
+		{"EBUSY", syscall.EBUSY}, // Single-file bind mount
+		{"EXDEV", syscall.EXDEV}, // Temp file is not on the same filesystem as the target
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -199,36 +199,36 @@ func TestWriteFile_FallsBackOnRenameRefused(t *testing.T) {
 			})
 			logged := captureLog(t)
 
-			// 写两次：告警应当只出现一次。
+			// Write twice: the warning should appear only once.
 			for i, want := range []string{"first", "second"} {
 				if err := WriteFile(path, []byte(want), 0644); err != nil {
-					t.Fatalf("第 %d 次写入应回退为就地写入并成功：%v", i+1, err)
+					t.Fatalf("write #%d should fall back to an in-place write and succeed: %v", i+1, err)
 				}
 				if got := mustRead(t, path); got != want {
-					t.Fatalf("第 %d 次写入后内容 %q，期望 %q", i+1, got, want)
+					t.Fatalf("content after write #%d is %q, expected %q", i+1, got, want)
 				}
 			}
 
 			if n := strings.Count(logged(), "writing it in place instead"); n != 1 {
-				t.Errorf("告警打印了 %d 次，期望 1 次：\n%s", n, logged())
+				t.Errorf("warning printed %d times, expected 1:\n%s", n, logged())
 			}
 			if !strings.Contains(logged(), path) {
-				t.Errorf("告警未指出是哪个文件：\n%s", logged())
+				t.Errorf("warning does not name which file:\n%s", logged())
 			}
 			if leftovers := tempLeftovers(t, dir); len(leftovers) != 0 {
-				t.Errorf("回退后仍有临时文件：%v", leftovers)
+				t.Errorf("temp file still present after fallback: %v", leftovers)
 			}
 		})
 	}
 }
 
-// TestWriteFile_FallsBackWhenDirNotWritable 只 chown 了 config.yaml、没 chown config/ 的部署：
-// 同目录建不出临时文件，回退为就地写入，保存仍然成功。
+// TestWriteFile_FallsBackWhenDirNotWritable covers a deployment where only config.yaml was chowned and config/ was not:
+// A temp file cannot be created in the same directory, so it falls back to an in-place write and the save still succeeds.
 //
-// 这条是升级兼容性的护栏——这种部署此前是能正常保存的，不能因为换了写法就开始报错。
+// This is the upgrade-compatibility guard: such deployments saved fine before, so switching the write method must not start producing errors.
 func TestWriteFile_FallsBackWhenDirNotWritable(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("root 不受权限位约束，建不出「目录不可写」的场景")
+		t.Skip("root ignores permission bits, so the 'directory not writable' case cannot be created")
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -238,17 +238,17 @@ func TestWriteFile_FallsBackWhenDirNotWritable(t *testing.T) {
 	if err := os.Chmod(dir, 0500); err != nil {
 		t.Fatal(err)
 	}
-	// t.TempDir 的清理要能删掉目录里的东西，权限得还回去
+	// t.TempDir cleanup must be able to delete the directory's contents, so the permissions have to be restored
 	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
 
 	logged := captureLog(t)
 	if err := WriteFile(path, []byte("new"), 0644); err != nil {
-		t.Fatalf("目录不可写时应回退为就地写入：%v", err)
+		t.Fatalf("directory not writable should fall back to an in-place write: %v", err)
 	}
 	if got := mustRead(t, path); got != "new" {
-		t.Errorf("内容 %q，期望 %q", got, "new")
+		t.Errorf("content %q, expected %q", got, "new")
 	}
 	if n := strings.Count(logged(), "writing it in place instead"); n != 1 {
-		t.Errorf("告警打印了 %d 次，期望 1 次：\n%s", n, logged())
+		t.Errorf("warning printed %d times, expected 1:\n%s", n, logged())
 	}
 }

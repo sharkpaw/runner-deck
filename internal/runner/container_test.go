@@ -33,7 +33,7 @@ func TestGetAgentStatus_ErrorBodyIncluded(t *testing.T) {
 	host := u.Hostname()
 	port := 80
 	if u.Port() != "" {
-		// httptest 必有端口，这里仅做健壮处理
+		// httptest must always have a port; this is just defensive handling
 		if p, convErr := strconv.Atoi(u.Port()); convErr == nil && p > 0 {
 			port = p
 		}
@@ -110,7 +110,7 @@ func TestGetAgentStatus_Success(t *testing.T) {
 	}
 }
 
-// joinArgs 便于断言参数序列中是否出现连续片段
+// joinArgs makes it easy to assert whether a consecutive fragment appears in the argument sequence
 func joinArgs(args []string) string {
 	return strings.Join(args, "\x00")
 }
@@ -120,7 +120,7 @@ func containsSeq(args []string, seq ...string) bool {
 }
 
 func TestRunnerCreateArgs_HostSocketAddsDockerGroup(t *testing.T) {
-	// host-socket 下容器内 app(UID 1001) 需加入 socket 所属组，否则 Job 中 docker 报 permission denied
+	// With host-socket, the app inside the container (UID 1001) must join the socket's owning group, or docker in the Job fails with permission denied
 	args, err := runnerCreateArgs("github-runner-a", "/host/runners/a", "runner-net", "img:tag", "host-socket", "runner-dind", 999, config.ResourceLimits{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -140,7 +140,7 @@ func TestRunnerCreateArgs_HostSocketAddsDockerGroup(t *testing.T) {
 }
 
 func TestRunnerCreateArgs_HostSocketUnknownGIDSkipsGroupAdd(t *testing.T) {
-	// 探测不到 socket GID 时不追加 --group-add，退回镜像内预置的 docker 组
+	// If the socket GID cannot be detected, do not append --group-add; fall back to the docker group preset in the image
 	args, err := runnerCreateArgs("github-runner-a", "/host/runners/a", "runner-net", "img:tag", "host-socket", "runner-dind", unknownDockerGID, config.ResourceLimits{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -182,7 +182,7 @@ func TestRunnerCreateArgs_UnsupportedBackend(t *testing.T) {
 }
 
 func TestSocketGID(t *testing.T) {
-	// 存在的文件返回其所属组；不存在时返回 unknownDockerGID
+	// Returns the owning group of an existing file; returns unknownDockerGID if it does not exist
 	f := filepath.Join(t.TempDir(), "docker.sock")
 	if err := os.WriteFile(f, []byte(""), 0660); err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestRunnerDockerGID_ConfigWinsOverDetection(t *testing.T) {
 	if got := runnerDockerGID(cfg); got != 1234 {
 		t.Errorf("runnerDockerGID = %d, want 1234 from config", got)
 	}
-	// 未配置时退回探测 docker.sock（宿主机上可能不存在，此时为 unknownDockerGID）
+	// If not configured, fall back to probing docker.sock (may not exist on the host, in which case it is unknownDockerGID)
 	cfg.Runners.DockerGID = 0
 	if got, want := runnerDockerGID(cfg), socketGID(HostDockerSocket); got != want {
 		t.Errorf("runnerDockerGID = %d, want detected %d", got, want)
@@ -218,31 +218,31 @@ func TestRunnerCreateArgs_ResourceLimits(t *testing.T) {
 		{"--cpus", "2"}, {"--memory", "4g"}, {"--memory-swap", "4g"}, {"--pids-limit", "512"},
 	} {
 		if !containsSeq(args, want...) {
-			t.Errorf("缺少参数 %v，实际: %v", want, args)
+			t.Errorf("missing argument %v, actual: %v", want, args)
 		}
 	}
 	if args[len(args)-1] != "img:tag" {
-		t.Errorf("镜像必须在参数末尾: %v", args)
+		t.Errorf("image must be at the end of the arguments: %v", args)
 	}
 }
 
 func TestRunnerCreateArgs_NoLimitsKeepsOldBehaviour(t *testing.T) {
-	// 未配置资源上限时不应产生任何限制参数，保持与旧版本一致
+	// When no resource limits are configured, no limit arguments should be produced; keep consistent with the old version
 	args, err := runnerCreateArgs("github-runner-a", "/host/runners/a", "runner-net", "img:tag", "dind", "runner-dind", unknownDockerGID, config.ResourceLimits{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, flag := range []string{"--cpus", "--memory", "--memory-swap", "--pids-limit"} {
 		if strings.Contains(joinArgs(args), flag) {
-			t.Errorf("不应出现 %s: %v", flag, args)
+			t.Errorf("%s should not appear: %v", flag, args)
 		}
 	}
 }
 
 func TestResourceUpdateArgs(t *testing.T) {
-	// 未配置上限时不应执行 docker update，保持旧行为
+	// When no limits are configured, docker update must not run; keep the old behavior
 	if got := resourceUpdateArgs("github-runner-a", config.ResourceLimits{}); got != nil {
-		t.Errorf("未配置上限时应返回 nil，实际: %v", got)
+		t.Errorf("should return nil when no limits are configured, actual: %v", got)
 	}
 	got := resourceUpdateArgs("github-runner-a", config.ResourceLimits{CPUs: "2", Memory: "4g", MemorySwap: "4g", PidsLimit: 512})
 	want := "update --cpus 2 --memory 4g --memory-swap 4g --pids-limit 512 github-runner-a"
@@ -250,7 +250,7 @@ func TestResourceUpdateArgs(t *testing.T) {
 		t.Errorf("resourceUpdateArgs = %q\nwant %q", strings.Join(got, " "), want)
 	}
 	if got[len(got)-1] != "github-runner-a" {
-		t.Errorf("容器名必须在参数末尾: %v", got)
+		t.Errorf("container name must be at the end of the arguments: %v", got)
 	}
 }
 
@@ -258,26 +258,26 @@ func TestEnsureAgentToken_GeneratesAndReuses(t *testing.T) {
 	dir := t.TempDir()
 	first, err := EnsureAgentToken(dir)
 	if err != nil {
-		t.Fatalf("生成令牌失败: %v", err)
+		t.Fatalf("failed to generate token: %v", err)
 	}
 	if len(first) != agentTokenBytes*2 {
-		t.Errorf("令牌长度应为 %d 个 hex 字符，实际 %d: %q", agentTokenBytes*2, len(first), first)
+		t.Errorf("token length should be %d hex characters, actual %d: %q", agentTokenBytes*2, len(first), first)
 	}
-	// 权限必须是 0600：该文件与 Job 共享同一挂载目录
+	// Permissions must be 0600: this file shares a mount directory with the Job
 	info, err := os.Stat(filepath.Join(dir, AgentTokenFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Errorf("令牌文件权限应为 0600，实际 %v", perm)
+		t.Errorf("token file permissions should be 0600, actual %v", perm)
 	}
-	// 再次调用必须复用同一令牌，否则 Manager 重启后会和运行中的 Agent 对不上
+	// Repeated calls must reuse the same token, otherwise after a Manager restart it will no longer match the running Agent
 	second, err := EnsureAgentToken(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if second != first {
-		t.Errorf("重复调用应复用令牌: %q vs %q", first, second)
+		t.Errorf("repeated calls should reuse the token: %q vs %q", first, second)
 	}
 	if got := ReadAgentToken(dir); got != first {
 		t.Errorf("ReadAgentToken = %q, want %q", got, first)
@@ -294,14 +294,14 @@ func TestEnsureAgentToken_DistinctPerRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	if a == b {
-		t.Error("不同 Runner 应有不同令牌，否则一个 Job 泄露的令牌能控制其它 Runner")
+		t.Error("different Runners should have different tokens, otherwise a token leaked from one Job could control other Runners")
 	}
 }
 
 func TestReadAgentToken_MissingIsEmpty(t *testing.T) {
-	// 旧容器没有令牌文件，必须返回空串以降级为不鉴权，而不是报错
+	// Old containers have no token file; must return an empty string to degrade to no authentication, not an error
 	if got := ReadAgentToken(t.TempDir()); got != "" {
-		t.Errorf("无令牌文件时应返回空串，实际 %q", got)
+		t.Errorf("should return an empty string when there is no token file, actual %q", got)
 	}
 }
 
@@ -312,7 +312,7 @@ func TestSetAgentAuth(t *testing.T) {
 	}
 	setAgentAuth(req, "")
 	if _, ok := req.Header["Authorization"]; ok {
-		t.Error("令牌为空时不应设置 Authorization 头")
+		t.Error("Authorization header should not be set when the token is empty")
 	}
 	setAgentAuth(req, "abc123")
 	if got := req.Header.Get("Authorization"); got != "Bearer abc123" {
@@ -341,38 +341,38 @@ func TestAgentCalls_SendBearerToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	if gotAuth != "Bearer tok-status" {
-		t.Errorf("/status 未带令牌: %q", gotAuth)
+		t.Errorf("/status sent without token: %q", gotAuth)
 	}
 	if err := CallAgentStart(context.Background(), host, port, "tok-start"); err != nil {
 		t.Fatal(err)
 	}
 	if gotAuth != "Bearer tok-start" {
-		t.Errorf("/start 未带令牌: %q", gotAuth)
+		t.Errorf("/start sent without token: %q", gotAuth)
 	}
 }
 
 func TestRunnerCreateArgs_InjectsAgentToken(t *testing.T) {
-	// 令牌必须通过环境变量注入：只靠挂载的 0600 文件时，Manager 与 Agent 的 UID
-	// 不一致就会读不到，Agent 静默降级为不鉴权
+	// The token must be injected via an environment variable: relying only on the 0600 file mounted, if the UIDs of the Manager and Agent
+	// differ, the Agent cannot read it and silently degrades to no authentication
 	args, err := runnerCreateArgs("github-runner-a", "/host/runners/a", "runner-net", "img:tag", "none", "runner-dind", unknownDockerGID, config.ResourceLimits{}, "tok-abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !containsSeq(args, "-e", "AGENT_TOKEN=tok-abc") {
-		t.Errorf("未注入 AGENT_TOKEN: %v", args)
+		t.Errorf("AGENT_TOKEN was not injected: %v", args)
 	}
 	if args[len(args)-1] != "img:tag" {
-		t.Errorf("镜像必须在参数末尾: %v", args)
+		t.Errorf("image must be at the end of the arguments: %v", args)
 	}
 }
 
 func TestRunnerCreateArgs_NoTokenNoEnv(t *testing.T) {
-	// 拿不到令牌时不应注入空值，避免 Agent 把空串当成有效令牌
+	// When no token can be obtained, do not inject an empty value, to keep the Agent from treating an empty string as a valid token
 	args, err := runnerCreateArgs("github-runner-a", "/host/runners/a", "runner-net", "img:tag", "none", "runner-dind", unknownDockerGID, config.ResourceLimits{}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if strings.Contains(joinArgs(args), "AGENT_TOKEN") {
-		t.Errorf("令牌为空时不应注入环境变量: %v", args)
+		t.Errorf("environment variable should not be injected when the token is empty: %v", args)
 	}
 }

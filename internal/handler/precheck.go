@@ -1,12 +1,12 @@
-// 添加 Runner 前的冲突预检：在界面还停留在表单上时就把「这个名字会出问题」说清楚，
-// 而不是等到写配置、装 runner、建容器时才以各种形态失败。
+// Conflict pre-check before adding a runner. While the UI is still on the form, make clear that the name will cause problems,
+// rather than letting it fail in various ways later, when writing config, installing the runner, or creating the container.
 //
-// 检查的是几类真实会失败或产生意外结果的冲突：
-//   - 配置里已有同名 Runner（此前会被静默加上随机后缀，用户并不知情）
-//   - 名称规范化后与已有 Runner 撞容器名（github-runner-a.b 与 a-b 会映射到同一个）
-//   - 安装目录与已有 Runner 相同（path 指到别人的目录）
-//   - 磁盘上已有注册过的 runner 目录（带 token 会被 config.sh 拒绝，不带 token 则是接管）
-//   - 宿主机上已有同名容器（上一次删除没删干净，启动时会被直接复用）
+// It checks for several kinds of conflicts that would really fail or produce unexpected results:
+//   - A runner with the same name already exists in the config (it used to be silently given a random suffix, which the user was unaware of)
+//   - After name normalization, it collides with an existing runner's container name (github-runner-a.b and a-b map to the same one)
+//   - The install directory is the same as an existing runner's (path points to someone else's directory)
+//   - A registered runner directory already exists on disk (with a token, config.sh will reject it; without a token, it is takeover)
+//   - A container with the same name already exists on the host (a previous deletion was incomplete, and it will be reused directly at startup)
 package handler
 
 import (
@@ -23,7 +23,7 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runner"
 )
 
-// 冲突类型，前端据此做本地化文案，未知类型回落到 message
+// Conflict type. The frontend uses it to localize text; unknown types fall back to message
 const (
 	ConflictNameTaken       = "name_taken"
 	ConflictContainerName   = "container_name"
@@ -34,37 +34,37 @@ const (
 	ConflictContainerExists = "container_exists"
 )
 
-// 冲突级别：error 表示继续下去会失败或覆盖已有 Runner，warn 表示能继续但需要知情
+// Conflict severity: error means continuing will fail or overwrite an existing runner; warn means it can continue but the user should be aware
 const (
 	ConflictLevelError = "error"
 	ConflictLevelWarn  = "warn"
 )
 
-// RunnerConflict 一条冲突。字段与容器探测的 ProbeInfo 对齐，便于前端统一渲染。
+// RunnerConflict is a single conflict. Its fields align with ProbeInfo from container probing so the frontend can render them uniformly.
 type RunnerConflict struct {
 	Type       string `json:"type"`
 	Level      string `json:"level"`
 	Message    string `json:"message"`
-	Detail     string `json:"detail,omitempty"`      // 与之冲突的对象：已有 Runner 名、目录或容器名
-	Suggestion string `json:"suggestion,omitempty"`  // 人话建议
-	FixCommand string `json:"fix_command,omitempty"` // 可直接执行的命令，与语言无关
+	Detail     string `json:"detail,omitempty"`      // The object it conflicts with: an existing runner name, directory, or container name
+	Suggestion string `json:"suggestion,omitempty"`  // Plain-language suggestion
+	FixCommand string `json:"fix_command,omitempty"` // A directly runnable command, language-independent
 }
 
-// PrecheckResponse GET /api/runner-precheck 的返回
+// PrecheckResponse is the response from GET /api/runner-precheck
 type PrecheckResponse struct {
 	Name          string           `json:"name"`
 	InstallDir    string           `json:"install_dir"`
-	ContainerName string           `json:"container_name,omitempty"` // 仅容器模式
-	Available     bool             `json:"available"`                // 无 error 级冲突
-	SuggestedName string           `json:"suggested_name,omitempty"` // 有冲突时给出的可用名称
+	ContainerName string           `json:"container_name,omitempty"` // Container mode only
+	Available     bool             `json:"available"`                // No error-level conflicts
+	SuggestedName string           `json:"suggested_name,omitempty"` // Available name offered when there is a conflict
 	Conflicts     []RunnerConflict `json:"conflicts"`
 }
 
-// containerLookup 查询容器是否存在，便于测试注入。返回 known=false 表示查不到（如 docker 不可用），此时跳过该项检查
+// containerLookup checks whether a container exists; it exists so tests can inject it. Returning known=false means the lookup failed (e.g. docker is unavailable), and this check is skipped
 type containerLookup func(containerName string) (exists bool, status string, known bool)
 
-// dockerContainerLookup 真实的容器查询，docker 不可用时静默跳过：
-// 预检是锦上添花，不能因为拿不到 docker 就把添加流程挡住
+// dockerContainerLookup is the real container lookup; it silently skips when docker is unavailable:
+// The pre-check is a nice-to-have and must not block the add flow just because docker is unavailable
 func dockerContainerLookup(ctx context.Context) containerLookup {
 	return func(containerName string) (bool, string, bool) {
 		exists, status, err := runner.ContainerState(ctx, containerName)
@@ -75,7 +75,7 @@ func dockerContainerLookup(ctx context.Context) containerLookup {
 	}
 }
 
-// hasErrorConflict 是否存在 error 级冲突
+// hasErrorConflict reports whether any error-level conflict exists
 func hasErrorConflict(conflicts []RunnerConflict) bool {
 	for _, c := range conflicts {
 		if c.Level == ConflictLevelError {
@@ -85,10 +85,10 @@ func hasErrorConflict(conflicts []RunnerConflict) bool {
 	return false
 }
 
-// collectRunnerConflicts 汇总名称/路径在当前配置与宿主机上的冲突。
-// lookup 为 nil 或非容器模式时跳过容器检查。
-// willRegister 表示这次会带注册 token 去跑 config.sh —— 目录里已有注册过的 Runner 时，
-// 带 token 是硬失败（config.sh 拒绝重复配置），不带 token 只是把它接管进配置，属于正常用法。
+// collectRunnerConflicts gathers name and path conflicts against the current config and the host.
+// The container check is skipped when lookup is nil or when not in container mode.
+// willRegister means this run will invoke config.sh with a registration token. When the directory already holds a registered runner,
+// passing a token is a hard failure (config.sh rejects duplicate configuration), while omitting it simply takes it over into the config, which is normal usage.
 func collectRunnerConflicts(cfg *config.Config, name, path string, lookup containerLookup, willRegister bool) []RunnerConflict {
 	conflicts := []RunnerConflict{}
 	if cfg == nil || name == "" {
@@ -130,7 +130,7 @@ func collectRunnerConflicts(cfg *config.Config, name, path string, lookup contai
 			})
 		}
 	}
-	// 同名 Runner 的目录与容器本来就属于它，再报一遍只是噪音
+	// The directory and container of a same-named runner already belong to it; reporting them again is just noise
 	if nameTaken {
 		return conflicts
 	}
@@ -185,7 +185,7 @@ func collectRunnerConflicts(cfg *config.Config, name, path string, lookup contai
 	return conflicts
 }
 
-// inspectInstallDir 判断安装目录的状态：registered（已注册的 runner）、nonempty（非空）、""（不存在或空）
+// inspectInstallDir determines the state of the install directory: registered (a registered runner), nonempty (not empty), "" (does not exist or is empty)
 func inspectInstallDir(installDir string) string {
 	fi, err := os.Stat(installDir)
 	if err != nil || !fi.IsDir() {
@@ -199,7 +199,7 @@ func inspectInstallDir(installDir string) string {
 		return ""
 	}
 	defer func() { _ = dir.Close() }()
-	// 这里只判断非空，无需读取、分配和排序整个目录。
+	// This only checks for non-emptiness; there is no need to read, allocate, or sort the whole directory.
 	entries, err := dir.ReadDir(1)
 	if err != nil || len(entries) == 0 {
 		return ""
@@ -207,8 +207,8 @@ func inspectInstallDir(installDir string) string {
 	return "nonempty"
 }
 
-// suggestRunnerName 返回第一个没有 error 级冲突的候选名：name-2、name-3…，
-// 都不行时回落到随机后缀。返回空字符串表示实在找不到。
+// suggestRunnerName returns the first candidate name with no error-level conflict: name-2, name-3, ...,
+// If none work, it falls back to a random suffix. An empty string means nothing could be found.
 func suggestRunnerName(cfg *config.Config, name, path string, lookup containerLookup, willRegister bool) string {
 	for i := 2; i <= 20; i++ {
 		candidate := fmt.Sprintf("%s-%d", name, i)
@@ -217,8 +217,8 @@ func suggestRunnerName(cfg *config.Config, name, path string, lookup containerLo
 		}
 	}
 	for i := 0; i < 20; i++ {
-		// 取不到随机后缀时跳过这一轮，而不是拼出一个 "name-" 当建议名——
-		// 那个名字既没有区分度，还可能刚好通过冲突检查被推荐出去
+		// If a random suffix cannot be obtained, skip this round instead of building "name-" as the suggested name --
+		// That name is not distinctive, and it might just pass the conflict check and get recommended
 		suffix := shortRandomSuffix()
 		if suffix == "" {
 			continue
@@ -231,8 +231,8 @@ func suggestRunnerName(cfg *config.Config, name, path string, lookup containerLo
 	return ""
 }
 
-// PrecheckRunner 预检名称与路径（GET /api/runner-precheck?name=&path=）。
-// 只读，不改配置、不碰目录；供界面在表单上实时提示。
+// PrecheckRunner pre-checks the name and path (GET /api/runner-precheck?name=&path=).
+// Read-only: it does not change config or touch directories; used by the UI to give live hints on the form.
 func PrecheckRunner(c echo.Context) error {
 	cfg, err := getConfig(c)
 	if err != nil {
@@ -247,7 +247,7 @@ func PrecheckRunner(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, tr(c, "api.name_path_invalid"))
 	}
 
-	// 容器查询要有上限：docker 卡住时表单不该跟着卡住
+	// The container lookup needs a timeout: if docker hangs, the form should not hang with it
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 	var lookup containerLookup
@@ -255,7 +255,7 @@ func PrecheckRunner(c echo.Context) error {
 		lookup = dockerContainerLookup(ctx)
 	}
 
-	// has_token=1：界面上填了注册 Token，这次会真的去 config.sh 注册
+	// has_token=1: a registration token was entered in the UI, so this run will really register via config.sh
 	willRegister := c.QueryParam("has_token") == "1"
 	conflicts := collectRunnerConflicts(cfg, name, path, lookup, willRegister)
 	resp := PrecheckResponse{
@@ -268,7 +268,7 @@ func PrecheckRunner(c echo.Context) error {
 		resp.ContainerName = config.NormalizedContainerName(name)
 	}
 	if !resp.Available {
-		// path 已填时它是固定的，换名也解决不了目录冲突，此时不给建议名
+		// When path is filled in it is fixed, and changing the name cannot resolve the directory conflict, so no suggested name is given in this case
 		if path == "" {
 			resp.SuggestedName = suggestRunnerName(cfg, name, path, lookup, willRegister)
 		}

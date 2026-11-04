@@ -9,8 +9,8 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/config"
 )
 
-// Runner 安装目录里有 config.sh 写下的 .credentials_rsaparams——Runner 向 GitHub
-// 表明身份的 RSA 私钥。actions/runner 不给这些文件设权限，目录的权限位就是最后一道门。
+// Runner install directory holds .credentials_rsaparams, which config.sh writes—the RSA private key the Runner uses to prove its identity to GitHub.
+// actions/runner does not set permissions on these files, so the directory's permission bits are the last line of defense.
 func TestEnsureRunnerDir_CreatesPrivateDirectory(t *testing.T) {
 	base := t.TempDir()
 	cfg := &config.Config{Runners: config.RunnersConfig{BasePath: base}}
@@ -24,14 +24,14 @@ func TestEnsureRunnerDir_CreatesPrivateDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		t.Fatalf("安装目录权限为 %o，其他用户可进入；凭据文件会跟着 umask 落成 0644", perm)
+		t.Fatalf("install directory permission is %o, other users can enter; credential files follow umask and become 0644", perm)
 	}
 	if info.Mode().Perm() != RunnerDirMode {
-		t.Fatalf("安装目录权限应为 %o，得到 %o", RunnerDirMode, info.Mode().Perm())
+		t.Fatalf("install directory permission should be %o, got %o", RunnerDirMode, info.Mode().Perm())
 	}
 }
 
-// base_path 不跟着收紧：它只是容器,里面没有凭据,而且收紧它会牵动宿主机挂载
+// base_path is not tightened: it is only a container with no credentials inside, and tightening it would affect host mounts
 func TestEnsureRunnerDir_LeavesBasePathTraversable(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "runners")
 	cfg := &config.Config{Runners: config.RunnersConfig{BasePath: base}}
@@ -41,15 +41,15 @@ func TestEnsureRunnerDir_LeavesBasePathTraversable(t *testing.T) {
 	}
 	info, err := os.Stat(base)
 	if err != nil {
-		t.Fatalf("base_path 应被创建出来: %v", err)
+		t.Fatalf("base_path should be created: %v", err)
 	}
 	if info.Mode().Perm()&0o055 == 0 {
-		t.Fatalf("base_path 权限为 %o，不应跟着收紧", info.Mode().Perm())
+		t.Fatalf("base_path permission is %o, it should not be tightened", info.Mode().Perm())
 	}
 }
 
-// 已存在的目录不被改动：UID 不匹配的部署下擅自收紧会把本来能跑的弄坏，
-// 该由启动自检点名、人看过再决定
+// Existing directories are not modified: on deployments with mismatched UIDs, tightening them unilaterally would break what currently works,
+// so the startup self-check should name them and leave the decision to a human
 func TestEnsureRunnerDir_DoesNotChangeExistingDirectory(t *testing.T) {
 	base := t.TempDir()
 	existing := filepath.Join(base, "alpha")
@@ -66,11 +66,11 @@ func TestEnsureRunnerDir_DoesNotChangeExistingDirectory(t *testing.T) {
 	}
 	info, _ := os.Stat(existing)
 	if info.Mode().Perm() != 0o755 {
-		t.Fatalf("已存在目录的权限被改成了 %o", info.Mode().Perm())
+		t.Fatalf("existing directory permission was changed to %o", info.Mode().Perm())
 	}
 }
 
-// 自检要点名这些目录，并给出能直接照做的 chmod
+// The self-check should name these directories and give a chmod that can be run as-is
 func TestPreflight_ReportsWorldTraversableRunnerDirs(t *testing.T) {
 	base := t.TempDir()
 	loose := filepath.Join(base, "loose")
@@ -94,16 +94,16 @@ func TestPreflight_ReportsWorldTraversableRunnerDirs(t *testing.T) {
 
 	got := checkRunnerDirPermissions(cfg)
 	if got.Level != CheckWarn {
-		t.Fatalf("有目录可被他人进入时应告警，得到 %+v", got)
+		t.Fatalf("directories others can enter should trigger a warning, got %+v", got)
 	}
 	if !strings.Contains(got.Message, loose) {
-		t.Fatalf("应点名 %s，实际消息 %q", loose, got.Message)
+		t.Fatalf("should name %s, actual message %q", loose, got.Message)
 	}
 	if strings.Contains(got.Message, tight) {
-		t.Fatalf("0700 的目录不该被点名，实际消息 %q", got.Message)
+		t.Fatalf("a 0700 directory should not be named, actual message %q", got.Message)
 	}
 	if got.Hint != "chmod 700 "+loose {
-		t.Fatalf("修复建议应是可直接执行的 chmod，得到 %q", got.Hint)
+		t.Fatalf("the fix suggestion should be a directly runnable chmod, got %q", got.Hint)
 	}
 }
 
@@ -119,15 +119,15 @@ func TestPreflight_QuietWhenAllRunnerDirsArePrivate(t *testing.T) {
 	cfg := &config.Config{Runners: config.RunnersConfig{BasePath: base,
 		Items: []config.RunnerItem{{Name: "a", Path: "a"}}}}
 	if got := checkRunnerDirPermissions(cfg); got.Level != CheckOK {
-		t.Fatalf("全部为 0700 时不应告警，得到 %+v", got)
+		t.Fatalf("no warning should fire when all are 0700, got %+v", got)
 	}
 }
 
-// 还没建出来的目录不归本项管，别把「尚未安装」报成权限问题
+// Directories not yet created are outside this item's scope; do not report "not installed" as a permission problem
 func TestPreflight_IgnoresMissingRunnerDirs(t *testing.T) {
 	cfg := &config.Config{Runners: config.RunnersConfig{BasePath: t.TempDir(),
 		Items: []config.RunnerItem{{Name: "never-created", Path: "never-created"}}}}
 	if got := checkRunnerDirPermissions(cfg); got.Level != CheckOK {
-		t.Fatalf("目录不存在时不应告警，得到 %+v", got)
+		t.Fatalf("no warning should fire when the directory does not exist, got %+v", got)
 	}
 }

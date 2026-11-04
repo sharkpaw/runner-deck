@@ -11,20 +11,20 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runner"
 )
 
-// 文档里的排障第一步：docker compose logs runner-manager | grep '\[preflight'
+// Troubleshooting's first step in the docs: docker compose logs runner-manager | grep '\[preflight'
 var grepLogsRe = regexp.MustCompile(`logs runner-manager \| grep '([^']*)'`)
 
-// TestPreflightMarker_DocsGrepWhatTheCodeActuallyLogs 文档让人 grep 的关键词，
-// 必须真的是代码打出来的行首标记。
+// TestPreflightMarker_DocsGrepWhatTheCodeActuallyLogs: the keyword the docs tell people to grep for
+// must really be the line-start marker the code prints.
 //
-// 六种语言的排障小节开头都是这条命令，它是「哪里不对先看启动自检」的落地形态。
-// 关键词与标记之间没有任何编译期关系：改了 runner.PreflightLogMarker 而没动文档，
-// 六份文档的第一条排障建议会一起变成「grep 一个不存在的词」——命令照样退出 0，
-// 只是一行都不返回，读者得到的结论是「自检没报问题」。
+// The troubleshooting section opens with this command in all six languages. It is the concrete form of "check the startup preflight first when something is wrong."
+// Nothing at compile time links the keyword to the marker: if runner.PreflightLogMarker changes and the docs don't,
+// the first troubleshooting step in all six docs silently becomes "grep for a word that doesn't exist." The command still exits 0,
+// but returns nothing at all, so readers conclude "preflight reported no problems."
 //
-// 这条检查本身也是 1.2 那件事的一半：标记从「[自检 …]」换成 ASCII 的
-// [preflight，是为了让英/法/德/日/韩的读者也能打出这个词。import 而不是读文件，
-// 是为了让常量被删掉时这里直接编译不过。
+// This check is itself half of item 1.2: it swaps the marker from "[self-check …]" to ASCII
+// [preflight so readers of English, French, German, Japanese and Korean can type it too. It is imported rather than read from a file,
+// so that deleting the constant breaks compilation here.
 func TestPreflightMarker_DocsGrepWhatTheCodeActuallyLogs(t *testing.T) {
 	repo := repoRoot(t)
 	marker := runner.PreflightLogMarker
@@ -50,10 +50,10 @@ func TestPreflightMarker_DocsGrepWhatTheCodeActuallyLogs(t *testing.T) {
 		rel, _ := filepath.Rel(repo, path)
 		for _, m := range grepLogsRe.FindAllStringSubmatch(string(b), -1) {
 			checked++
-			// 文档里写的是 grep 的正则，[ 在那里必须转义；比对前还原成字面量。
+			// The docs contain grep regexes, so [ must be escaped there; it is unescaped to a literal before comparison.
 			pattern := strings.ReplaceAll(m[1], `\[`, "[")
 			if !strings.HasPrefix(marker, pattern) {
-				t.Errorf("%s 让人 grep %q，但自检日志的标记是 %q",
+				t.Errorf("%s tells people to grep for %q, but the preflight log marker is %q",
 					filepath.ToSlash(rel), m[1], marker)
 			}
 		}
@@ -63,10 +63,10 @@ func TestPreflightMarker_DocsGrepWhatTheCodeActuallyLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 一条都没匹配上，多半是命令的写法被改了而这条检查没跟上——
-	// 那样它会永远是绿的，也就永远不再检查它被写来检查的东西。
+	// If nothing matches, the command was probably rewritten and this check wasn't updated to follow,
+	// in which case it would always pass and no longer verify what it was written to verify.
 	if checked == 0 {
-		t.Fatalf("没有在任何文档里找到 %q 形态的排障命令；"+
-			"命令改写过的话，grepLogsRe 也要跟着改", grepLogsRe)
+		t.Fatalf("no troubleshooting command of the form %q was found in any doc; "+
+			"if the command is rewritten, grepLogsRe must be updated too", grepLogsRe)
 	}
 }

@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-// 原生 alert/confirm 会阻塞整个页面，且可能被浏览器的「阻止此页面再次弹窗」
-// 一勾永久禁掉——那之后删除、重建这类需要确认的操作会静默地什么都不做。
-// 界面统一走 showToast / confirmDialog，这里守住不被改回去。
+// Native alert/confirm blocks the whole page, and the browser's "prevent this page from showing more dialogs" option can disable them permanently
+// Once that is ticked, confirmed actions like delete and recreate silently do nothing.
+// The UI uses showToast / confirmDialog throughout; this guards against them being reverted.
 func TestTemplate_NoNativeDialogs(t *testing.T) {
-	// 脚本已从 index.html 拆到 static/app.js，两边都要扫：只扫模板的话这条用例
-	// 会变成「永远通过」——模板里本来就没有 JS 了。
+	// The script has moved from index.html to static/app.js, so scan both: if only the template is scanned, this case
+	// would always pass, since the template no longer contains any JS.
 	tpl, err := templateFS.ReadFile("templates/index.html")
 	if err != nil {
 		t.Fatal(err)
@@ -21,7 +21,7 @@ func TestTemplate_NoNativeDialogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// confirmDialog( 不会命中：confirm 后面跟的是 D 而不是左括号
+	// confirmDialog( won't match: after confirm comes D, not an open parenthesis.
 	re := regexp.MustCompile(`\b(alert|confirm|prompt)\s*\(`)
 	var hits []string
 	for _, f := range []struct {
@@ -35,14 +35,14 @@ func TestTemplate_NoNativeDialogs(t *testing.T) {
 		}
 	}
 	if len(hits) > 0 {
-		t.Fatalf("出现原生弹窗，请改用 showToast / confirmDialog:\n%s", strings.Join(hits, "\n"))
+		t.Fatalf("Native dialog found, use showToast / confirmDialog instead:\n%s", strings.Join(hits, "\n"))
 	}
 }
 
-// 请求在途时按钮必须置灰，否则启动一台 Runner 那几十秒里用户会连点，
-// 同一个动作被发两次。这里只能守住代码里确实调了 setRowBusy。
+// Buttons must be disabled while a request is in flight, otherwise users will click repeatedly during the tens of seconds it takes to start a runner,
+// and the same action gets sent twice. This can only verify that setRowBusy is actually called in the code.
 func TestTemplate_ActionsMarkButtonsBusy(t *testing.T) {
-	// 同上，断言跟着载体走
+	// Same as above; the assertion follows the carrier file.
 	b, err := staticFS.ReadFile("static/app.js")
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestTemplate_ActionsMarkButtonsBusy(t *testing.T) {
 		"setRowBusy(btn, false)",
 	} {
 		if !strings.Contains(src, want) {
-			t.Errorf("static/app.js 里找不到 %q，按钮忙碌态可能被改掉了", want)
+			t.Errorf("Cannot find %q in static/app.js; the button busy state may have been changed", want)
 		}
 	}
 }

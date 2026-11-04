@@ -10,11 +10,11 @@ import (
 	"testing"
 )
 
-// docsConf 是 scripts/ci-recipes.conf 里与文档有关的三项。
+// docsConf holds the three docs-related settings in scripts/ci-recipes.conf.
 //
-// 从同一个文件读，而不是在这里再写一遍语言清单：ci-recipes 的标题检查读它，
-// 这里的内容检查也读它，加第七种语言仍然只改那一个文件。两边各钉一份的下场，
-// Makefile 顶上的注释已经写过了——「改一处忘另一处，就是本地与 CI 判得不一样」。
+// It reads from the same file instead of repeating the language list here: the ci-recipes heading check reads it,
+// and the content check here reads it too, so adding a seventh language still means editing only that one file. Pinning a copy on each side is how
+// the Makefile header comment already covers this: changing one copy and forgetting the other means local and CI results disagree.
 type docsConf struct {
 	root  string
 	langs []string
@@ -54,21 +54,21 @@ func loadDocsConf(t *testing.T, repo string) docsConf {
 		t.Fatal(err)
 	}
 	if conf.root == "" || len(conf.langs) == 0 || len(conf.files) == 0 {
-		t.Fatalf("ci-recipes.conf 里没读到 docs_root/docs_languages/docs_files: %+v", conf)
+		t.Fatalf("docs_root/docs_languages/docs_files not found in ci-recipes.conf: %+v", conf)
 	}
 	return conf
 }
 
-// TestTranslations_SectionContentMatchesEnglish 比对英文原文与五份译文在每一节里的内容量。
+// TestTranslations_SectionContentMatchesEnglish compares the amount of content in each section of the English original and the five translations.
 //
-// 现有的 ci-recipes check-docs-structure 比的是标题层级序列，标题之下少了什么它看不见。
-// 这不是假设出来的风险，是已经发生过的事：075b612 给英文 development.md 的 HTTP API 表
-// 加了 DELETE /api/runners/:name 一行，译文一份没动；797959a 作为补译把
-// 「删除 Runner 与 GitHub」那一节补了回去——因为它是标题，结构检查会红——
-// 而表格里的那一行不是标题，于是在五份译文里一起缺了下来，检查照样报「全部一致」。
+// The existing ci-recipes check-docs-structure compares the sequence of heading levels, so it cannot see what is missing under a heading.
+// This is not a hypothetical risk; it already happened. 075b612 added a row for DELETE /api/runners/:name to the HTTP API table in the English
+// development.md and left every translation untouched; 797959a, as a catch-up, put back
+// the 'Removing Runner from GitHub' section, because it is a heading and the structure check would fail;
+// but the table row is not a heading, so it went missing from all five translations together, and the check still reported everything as consistent.
 //
-// 比的是量不是文本：文本本来就该被翻译。四个量分别对应四类实际发生过的漂移——
-// 表格少一行、代码块少一段、代码块里少一条命令、列表少一条。
+// It compares quantities, not text, since text is supposed to be translated. The four quantities each match one of the four kinds of drift that actually happened:
+// a missing table row, a missing code block, a missing command inside a code block, and a missing list item.
 func TestTranslations_SectionContentMatchesEnglish(t *testing.T) {
 	repo := repoRoot(t)
 	conf := loadDocsConf(t, repo)
@@ -82,8 +82,8 @@ func TestTranslations_SectionContentMatchesEnglish(t *testing.T) {
 			tr := parseSections(t, trPath)
 
 			if len(en) != len(tr) {
-				// 标题数对不上是 check-docs-structure 的职责，这里只是说明为什么不往下比。
-				t.Errorf("%s/%s: 节数为 %d，英文为 %d；先让 check-docs-structure 过",
+				// Heading count mismatches are check-docs-structure's job; this note only explains why the comparison stops there.
+				t.Errorf("%s/%s: %d sections, English has %d; get check-docs-structure passing first",
 					lang, file, len(tr), len(en))
 				continue
 			}
@@ -93,24 +93,24 @@ func TestTranslations_SectionContentMatchesEnglish(t *testing.T) {
 					lang, file, i, filepath.Join(conf.root, file), en[i].line)
 
 				if en[i].tableRow != tr[i].tableRow {
-					t.Errorf("%s: 表格 %d 行，英文 %d 行", where, tr[i].tableRow, en[i].tableRow)
+					t.Errorf("%s: table has %d rows, English has %d", where, tr[i].tableRow, en[i].tableRow)
 				}
 				if en[i].bullets != tr[i].bullets {
-					t.Errorf("%s: 列表项 %d 条，英文 %d 条", where, tr[i].bullets, en[i].bullets)
+					t.Errorf("%s: %d list items, English has %d", where, tr[i].bullets, en[i].bullets)
 				}
 				if len(en[i].blocks) != len(tr[i].blocks) {
-					t.Errorf("%s: 代码块 %d 段，英文 %d 段", where, len(tr[i].blocks), len(en[i].blocks))
+					t.Errorf("%s: %d code blocks, English has %d", where, len(tr[i].blocks), len(en[i].blocks))
 					continue
 				}
 				for b := range en[i].blocks {
 					if en[i].blocks[b].lines != tr[i].blocks[b].lines {
-						t.Errorf("%s: 第 %d 段代码块有 %d 行命令，英文 %d 行",
+						t.Errorf("%s: code block %d has %d command lines, English has %d",
 							where, b+1, tr[i].blocks[b].lines, en[i].blocks[b].lines)
 					}
-					// 语言标记不该被翻译，对不上多半是某一份漏译了代码块、
-					// 后面的块整体错位一格，而只比行数时两边恰好都对得上。
+					// Language tags should not be translated. A mismatch usually means one translation dropped a code block,
+					// so every block after it shifts by one, yet a line-count-only comparison can still show both sides matching.
 					if en[i].blocks[b].info != tr[i].blocks[b].info {
-						t.Errorf("%s: 第 %d 段代码块标着 ```%s，英文是 ```%s",
+						t.Errorf("%s: code block %d is tagged ```%s, English is ```%s",
 							where, b+1, tr[i].blocks[b].info, en[i].blocks[b].info)
 					}
 				}
@@ -118,19 +118,19 @@ func TestTranslations_SectionContentMatchesEnglish(t *testing.T) {
 				enLinks := normalizeLinks(repo, conf, en[i].links)
 				trLinks := normalizeLinks(repo, conf, tr[i].links)
 				if strings.Join(enLinks, " ") != strings.Join(trLinks, " ") {
-					t.Errorf("%s: 链接目标为 %v，英文为 %v", where, trLinks, enLinks)
+					t.Errorf("%s: link target is %v, English is %v", where, trLinks, enLinks)
 				}
 			}
 		}
 	}
 }
 
-// normalizeLinks 把链接目标折算成可跨语言比较的形式。
+// normalizeLinks converts link targets into a form that can be compared across languages.
 //
-// 两处必须归一，否则全是假阳性：路径深度（../examples 与 ../../examples 指同一处，
-// filepath.Join 时已经解决），以及各语言指向自己那份文档的链接——
-// docs/zh/development.md 的页脚指 docs/zh/README.md，英文指 docs/README.md，
-// 这是对的，不是漂移。去掉语言目录段后两者相等。
+// Two cases must be normalized, or every result is a false positive: path depth (../examples and ../../examples point to the same place,
+// already resolved by filepath.Join), and links where each language points to its own copy of the document,
+// the footer of docs/zh/development.md points to docs/zh/README.md, while the English one points to docs/README.md,
+// which is correct, not drift. After removing the language directory segment, the two are equal.
 func normalizeLinks(repo string, conf docsConf, links []string) []string {
 	out := make([]string, 0, len(links))
 	for _, l := range links {

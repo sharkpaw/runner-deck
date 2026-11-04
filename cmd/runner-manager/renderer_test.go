@@ -15,12 +15,12 @@ import (
 func TestNewTemplateRenderer_ParsesEmbeddedTemplates(t *testing.T) {
 	r := newTemplateRenderer()
 	if r == nil || r.templates == nil {
-		t.Fatal("渲染器或模板集为空")
+		t.Fatal("renderer or template set is empty")
 	}
-	// 两种命名都要能查到：ParseFS 在不同 Go 版本里给出的名字不一样，
-	// Render 的回退就是为这件事写的
+	// Both names must be findable: ParseFS registers the name differently across Go versions,
+	// Render's fallback exists for exactly this
 	if r.templates.Lookup("index.html") == nil && r.templates.Lookup("templates/index.html") == nil {
-		t.Fatal("index.html 两种命名都查不到")
+		t.Fatal("index.html can't be found under either name")
 	}
 }
 
@@ -31,9 +31,9 @@ func renderTo(t *testing.T, name string, data any) (string, error) {
 	return buf.String(), err
 }
 
-// Render 的契约是：无论 ParseFS 把模板登记成 index.html 还是 templates/index.html，
-// 用 basename 调都能渲染出来（handler 传的就是 basename）。
-// 反过来不成立——当前 Go 版本只登记 basename，用带路径的名字调本就该报错。
+// Render's contract: whether ParseFS registers the template as index.html or templates/index.html,
+// rendering by basename must work (the handler passes the basename).
+// The reverse does not hold: the current Go version registers only the basename, so calling with a path-qualified name should error.
 func TestRender_IndexRendersByBaseName(t *testing.T) {
 	data := map[string]any{
 		"Runners": []runner.RunnerInfo{{Name: "alpha", Status: runner.StatusInstalled}},
@@ -45,32 +45,32 @@ func TestRender_IndexRendersByBaseName(t *testing.T) {
 	}
 	html, err := renderTo(t, "index.html", data)
 	if err != nil {
-		t.Fatalf("渲染失败: %v", err)
+		t.Fatalf("render failed: %v", err)
 	}
 	if !strings.Contains(html, "alpha") {
-		t.Fatal("渲染的页面里没有 runner 名")
+		t.Fatal("rendered page does not contain the runner name")
 	}
 
-	// 回退逻辑本身：把模板换个名字登记，basename 依然要能渲染
+	// The fallback logic itself: register the template under a different name, basename must still render
 	tpl := template.Must(template.New("templates/x.html").Parse(`hello {{.}}`))
 	r := &templateRenderer{templates: tpl}
 	var buf bytes.Buffer
 	if err := r.Render(&buf, "x.html", "world", echo.New().NewContext(nil, nil)); err != nil {
-		t.Fatalf("模板登记为带路径的名字时，用 basename 调应能渲染: %v", err)
+		t.Fatalf("when the template is registered with a path, rendering by basename should succeed: %v", err)
 	}
 	if buf.String() != "hello world" {
-		t.Fatalf("渲染结果为 %q", buf.String())
+		t.Fatalf("render result is %q", buf.String())
 	}
 }
 
-// 未知模板名要报错，而不是悄悄渲染出一个空页面
+// An unknown template name must return an error, not silently render an empty page
 func TestRender_UnknownTemplateReturnsError(t *testing.T) {
 	if _, err := renderTo(t, "does-not-exist.html", nil); err == nil {
-		t.Fatal("未知模板名应返回错误")
+		t.Fatal("unknown template name should return an error")
 	}
 }
 
-// 没有 runner 时页面照样渲染得出来
+// The page still renders when there are no runners
 func TestRender_EmptyRunnerListStillRenders(t *testing.T) {
 	html, err := renderTo(t, "index.html", map[string]any{
 		"Runners": []runner.RunnerInfo{},
@@ -81,9 +81,9 @@ func TestRender_EmptyRunnerListStillRenders(t *testing.T) {
 		"Version": "test",
 	})
 	if err != nil {
-		t.Fatalf("空列表渲染失败: %v", err)
+		t.Fatalf("rendering empty list failed: %v", err)
 	}
 	if !strings.Contains(html, "<html") {
-		t.Fatal("渲染结果不像一个 HTML 页面")
+		t.Fatal("render result does not look like an HTML page")
 	}
 }

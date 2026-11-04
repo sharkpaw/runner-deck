@@ -20,58 +20,58 @@ func rowsData(runners []runner.RunnerInfo, containerMode bool) map[string]any {
 	}
 }
 
-// 自动刷新拿的就是这个片段，它必须能脱离 index.html 单独渲染——
-// 否则界面每 15 秒会把 <tbody> 换成一段错误页或空白。
+// Auto-refresh fetches this fragment, so it must render on its own, without index.html.
+// Otherwise the UI would replace <tbody> with an error page or blank every 15 seconds.
 func TestRender_RunnerRowsRendersStandalone(t *testing.T) {
 	html, err := renderTo(t, "runnerRows", rowsData([]runner.RunnerInfo{
 		{Name: "alpha", Status: runner.StatusInstalled, Target: "acme", TargetType: "org"},
 	}, false))
 	if err != nil {
-		t.Fatalf("片段渲染失败: %v", err)
+		t.Fatalf("fragment render failed: %v", err)
 	}
 	if !strings.Contains(html, "alpha") {
-		t.Fatalf("片段里没有 runner 名: %s", html)
+		t.Fatalf("no runner name in fragment: %s", html)
 	}
-	// 片段只是 <tbody> 的内容，不该把整页也带出来
+	// The fragment is only the <tbody> content and should not pull in the whole page.
 	if strings.Contains(html, "<html") || strings.Contains(html, "<table") {
-		t.Fatalf("片段不该包含页面骨架: %s", html)
+		t.Fatalf("fragment should not contain page skeleton: %s", html)
 	}
 }
 
-// 抽成 {{define}} 之后首屏最容易出的问题是「页面还在，行没了」：
-// 模板名写错、数据没往下传，渲染都不报错，只是少一段。
+// After extracting into {{define}}, the most likely first-load bug is 'page still there, rows gone':
+// A wrong template name or data not passed down renders without error, just with a missing section.
 func TestRender_IndexStillEmbedsRunnerRows(t *testing.T) {
 	data := rowsData([]runner.RunnerInfo{
 		{Name: "beta", Status: runner.StatusInstalled, Target: "acme/app", TargetType: "repo", InstallDir: "/runners/beta"},
 	}, false)
 	page, err := renderTo(t, "index.html", data)
 	if err != nil {
-		t.Fatalf("首页渲染失败: %v", err)
+		t.Fatalf("index page render failed: %v", err)
 	}
 	frag, err := renderTo(t, "runnerRows", data)
 	if err != nil {
-		t.Fatalf("片段渲染失败: %v", err)
+		t.Fatalf("fragment render failed: %v", err)
 	}
 	if strings.TrimSpace(frag) == "" {
-		t.Fatal("片段渲染为空")
+		t.Fatal("fragment rendered empty")
 	}
-	// 首屏与轮询必须是同一份行渲染逻辑，否则刷新一次界面就会变样
+	// First load and polling must share the same row rendering logic, or the UI changes look after one refresh.
 	if !strings.Contains(page, strings.TrimSpace(frag)) {
-		t.Fatal("首页里的行与 runnerRows 片段不一致")
+		t.Fatal("rows on index page differ from runnerRows fragment")
 	}
 	if !strings.Contains(page, `id="runnerRowsBody"`) {
-		t.Fatal("首页缺少 runnerRowsBody 容器，JS 无从替换")
+		t.Fatal("index page is missing the runnerRowsBody container, JS has nothing to replace")
 	}
 }
 
-// 容器模式多一列，空列表那行的 colspan 也跟着变；片段单独渲染时
-// Config 要能一路传到底，传丢了这里会退回 6 列。
+// Container mode has one extra column, so the empty-list row's colspan changes too; when the fragment renders alone
+// Config must be passed all the way down; if it is dropped, this falls back to 6 columns.
 func TestRender_RunnerRowsHonorsContainerMode(t *testing.T) {
 	html, err := renderTo(t, "runnerRows", rowsData(nil, true))
 	if err != nil {
-		t.Fatalf("片段渲染失败: %v", err)
+		t.Fatalf("fragment render failed: %v", err)
 	}
 	if !strings.Contains(html, `colspan="7"`) {
-		t.Fatalf("容器模式下空列表应跨 7 列: %s", html)
+		t.Fatalf("empty list in container mode should span 7 columns: %s", html)
 	}
 }

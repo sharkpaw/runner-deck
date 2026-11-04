@@ -21,12 +21,12 @@ func serveProbe(t *testing.T, path string, h echo.HandlerFunc) (int, map[string]
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 	var m map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
-		t.Fatalf("响应不是 JSON: %v (%s)", err, rec.Body.String())
+		t.Fatalf("response is not JSON: %v (%s)", err, rec.Body.String())
 	}
 	return rec.Code, m
 }
 
-// 写一份能加载的配置，并把 ConfigPath 指过去；base 是可用的 runner 根目录。
+// Write a loadable config and point ConfigPath at it; base is a usable runner root directory.
 func withWorkingConfig(t *testing.T) (base string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -48,11 +48,11 @@ func withWorkingConfig(t *testing.T) (base string) {
 	return base
 }
 
-// /health 是存活探针：依赖坏掉也必须继续 200。
+// /health is the liveness probe: it must keep returning 200 even when dependencies are broken.
 //
-// 这条不是凑数。K8s 的 livenessProbe 失败意味着重启容器，而配置坏了、卷掉了这类
-// 问题重启一次不会变好，只会变成 crashloop。所以依赖检查一律放 /ready，
-// /health 只回答「进程还在不在」。
+// This check is not filler. A failing K8s livenessProbe means restarting the container, but problems like a broken config or a dropped volume
+// won't get better from a restart; they just turn into a crashloop. So all dependency checks go in /ready,
+// and /health only answers "is the process still alive".
 func TestHealth_StaysOKEvenWhenDependenciesAreBroken(t *testing.T) {
 	old := ConfigPath
 	ConfigPath = filepath.Join(t.TempDir(), "不存在的目录", "config.yaml")
@@ -60,10 +60,10 @@ func TestHealth_StaysOKEvenWhenDependenciesAreBroken(t *testing.T) {
 
 	code, m := serveProbe(t, "/health", Health)
 	if code != http.StatusOK {
-		t.Fatalf("/health 状态码 %d，存活探针不该因依赖故障变红", code)
+		t.Fatalf("/health status code %d; the liveness probe should not turn red because of a dependency failure", code)
 	}
 	if m["status"] != "ok" {
-		t.Errorf("status = %v，期望 ok", m["status"])
+		t.Errorf("status = %v, expected ok", m["status"])
 	}
 }
 
@@ -71,16 +71,16 @@ func TestReady_OKWhenConfigAndBasePathUsable(t *testing.T) {
 	withWorkingConfig(t)
 	code, m := serveProbe(t, "/ready", Ready)
 	if code != http.StatusOK {
-		t.Fatalf("/ready 状态码 %d，期望 200；body=%v", code, m)
+		t.Fatalf("/ready status code %d, expected 200; body=%v", code, m)
 	}
 	if m["status"] != "ok" {
-		t.Errorf("status = %v，期望 ok", m["status"])
+		t.Errorf("status = %v, expected ok", m["status"])
 	}
 }
 
-// 这条守住 WithCriticalChecks。health-kit 里非关键项失败只算 degraded，
-// 而 degraded 被映射成 **200**（"Degraded is still functional"）——
-// 忘了标关键项，这两个探针就成了摆设，永远不会把实例摘出负载。
+// This guards WithCriticalChecks. In health-kit, a failing non-critical check only counts as degraded,
+// and degraded is mapped to **200** ("Degraded is still functional") --
+// If you forget to mark the critical checks, these two probes become useless and never take the instance out of rotation.
 func TestReady_503WhenConfigCannotLoad(t *testing.T) {
 	old := ConfigPath
 	ConfigPath = filepath.Join(t.TempDir(), "不存在的目录", "config.yaml")
@@ -88,17 +88,17 @@ func TestReady_503WhenConfigCannotLoad(t *testing.T) {
 
 	code, m := serveProbe(t, "/ready", Ready)
 	if code != http.StatusServiceUnavailable {
-		t.Fatalf("配置加载不了时 /ready 应为 503，实得 %d；body=%v", code, m)
+		t.Fatalf("when the config cannot be loaded, /ready should be 503, got %d; body=%v", code, m)
 	}
 	if m["status"] == "ok" {
-		t.Errorf("status 不该是 ok：%v", m)
+		t.Errorf("status should not be ok: %v", m)
 	}
 }
 
-// 挂载卷掉了是这里最想抓的情况：目录还在（挂载点本身），但写不进去。
+// A dropped mount volume is the case we most want to catch here: the directory still exists (the mount point itself), but writes fail.
 func TestReady_503WhenBasePathNotWritable(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("以 root 运行时 0500 目录依然可写，测不出来")
+		t.Skip("when running as root, a 0500 directory is still writable, so this cannot be detected")
 	}
 	base := withWorkingConfig(t)
 	if err := os.Chmod(base, 0o500); err != nil {
@@ -108,7 +108,7 @@ func TestReady_503WhenBasePathNotWritable(t *testing.T) {
 
 	code, m := serveProbe(t, "/ready", Ready)
 	if code != http.StatusServiceUnavailable {
-		t.Fatalf("根目录不可写时 /ready 应为 503，实得 %d；body=%v", code, m)
+		t.Fatalf("when the root directory is not writable, /ready should be 503, got %d; body=%v", code, m)
 	}
 }
 
@@ -122,12 +122,12 @@ func TestReady_503WhenBasePathIsAFile(t *testing.T) {
 	}
 	code, m := serveProbe(t, "/ready", Ready)
 	if code != http.StatusServiceUnavailable {
-		t.Fatalf("根目录是文件时 /ready 应为 503，实得 %d；body=%v", code, m)
+		t.Fatalf("when the root path is a file, /ready should be 503, got %d; body=%v", code, m)
 	}
 }
 
-// 两个端点都始终免鉴权，所以都不能吐出逐项检查结果或内部路径。
-// 失败时尤其重要：那正是最容易把路径、错误原文漏出去的时候。
+// Both endpoints are always unauthenticated, so neither may expose per-check results or internal paths.
+// This matters most on failure: that is when paths and raw error text are most likely to leak.
 func TestProbes_NeverLeakInternalDetails(t *testing.T) {
 	old := ConfigPath
 	secret := filepath.Join(t.TempDir(), "机密路径", "config.yaml")
@@ -141,29 +141,29 @@ func TestProbes_NeverLeakInternalDetails(t *testing.T) {
 		_, m := serveProbe(t, tc.path, tc.h)
 		for _, k := range []string{"checks", "details", "error"} {
 			if _, ok := m[k]; ok {
-				t.Errorf("%s 泄漏了 %s 字段：%v", tc.path, k, m)
+				t.Errorf("%s leaked the %s field: %v", tc.path, k, m)
 			}
 		}
 		raw, _ := json.Marshal(m)
 		if strings.Contains(string(raw), "机密路径") {
-			t.Errorf("%s 响应里出现了内部路径：%s", tc.path, raw)
+			t.Errorf("%s response contains an internal path: %s", tc.path, raw)
 		}
 	}
 }
 
-// /ready 会被探针每几秒打一次，所以两个检查都只读配置与文件系统元数据，
-// 不起子进程、不发网络请求。这里没法直接断言「没有 exec」，只能退一步：
-// 连打 50 次都得稳定成功——真要是去 docker exec 或拨网络，这条会先慢下来、
-// 再因为超时或资源耗尽而不稳。
+// /ready is hit by the probe every few seconds, so both checks only read config and filesystem metadata,
+// spawning no subprocesses and making no network requests. We cannot directly assert "no exec", so we fall back to this:
+// 50 consecutive calls must all succeed reliably -- if it ran docker exec or dialed the network, this would first slow down
+// and then become flaky from timeouts or resource exhaustion.
 func TestReady_IsCheapEnoughForFrequentProbing(t *testing.T) {
 	withWorkingConfig(t)
-	// 先跑一次，避免把首次的文件系统冷启动算进去
+	// Run once first, so the initial filesystem cold start is not counted
 	if code, _ := serveProbe(t, "/ready", Ready); code != http.StatusOK {
-		t.Fatalf("预热请求就失败了，状态码 %d", code)
+		t.Fatalf("warm-up request failed, status code %d", code)
 	}
 	for i := 0; i < 50; i++ {
 		if code, _ := serveProbe(t, "/ready", Ready); code != http.StatusOK {
-			t.Fatalf("第 %d 次 /ready 失败，状态码 %d", i, code)
+			t.Fatalf("/ready failed on attempt %d, status code %d", i, code)
 		}
 	}
 }

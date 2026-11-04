@@ -20,7 +20,7 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runnerproc"
 )
 
-// withConfig 写一份配置并把 ConfigPath 指过去，返回 base 目录
+// withConfig writes a config and points ConfigPath at it, returning the base directory
 func withConfig(t *testing.T, cfg *config.Config) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -46,16 +46,16 @@ func serve(t *testing.T, method, path string, register func(*echo.Echo)) *httpte
 
 func stopRoute(e *echo.Echo) { e.POST("/api/runners/:name/stop", StopRunner) }
 
-// ---- StopRunner：入参与查找 ----
+// ---- StopRunner: input and lookup ----
 
 func TestStopRunnerRejectsUnsafeName(t *testing.T) {
 	withConfig(t, &config.Config{})
-	// 名字会被拼进安装目录路径，放过 .. 就等于允许停任意目录下的进程
+	// The name is spliced into the install directory path; letting ".." through would allow stopping processes in arbitrary directories
 	for _, name := range []string{"..", "a..b", "a%2Fb"} {
 		t.Run(name, func(t *testing.T) {
 			rec := serve(t, http.MethodPost, "/api/runners/"+name+"/stop", stopRoute)
 			if rec.Code != http.StatusBadRequest && rec.Code != http.StatusNotFound {
-				t.Fatalf("得到 %d，非法名字应被 400 或 404 挡掉", rec.Code)
+				t.Fatalf("got %d; an illegal name should be rejected with 400 or 404", rec.Code)
 			}
 		})
 	}
@@ -67,11 +67,11 @@ func TestStopRunnerUnknownRunnerIs404(t *testing.T) {
 	})
 	rec := serve(t, http.MethodPost, "/api/runners/nope/stop", stopRoute)
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("得到 %d，期望 404", rec.Code)
+		t.Fatalf("got %d, expected 404", rec.Code)
 	}
 }
 
-// 没在跑就不必停，也不该报错——界面上重复点一下是很正常的
+// If it isn't running there's nothing to stop, and it shouldn't error either. Clicking twice in the UI is normal
 func TestStopRunnerIdleRunnerSucceedsWithoutSignalling(t *testing.T) {
 	defer withI18n(map[string]string{"api.not_running": "NOT-RUNNING"})()
 	base := withConfig(t, &config.Config{
@@ -82,18 +82,18 @@ func TestStopRunnerIdleRunnerSucceedsWithoutSignalling(t *testing.T) {
 	}
 	rec := serve(t, http.MethodPost, "/api/runners/r1/stop", stopRoute)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("得到 %d（%s），期望 200", rec.Code, rec.Body.String())
+		t.Fatalf("got %d (%s), expected 200", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "NOT-RUNNING") {
-		t.Fatalf("应说明本来就没在跑，实际: %s", rec.Body.String())
+		t.Fatalf("should say it wasn't running to begin with, actual: %s", rec.Body.String())
 	}
 }
 
-// ---- StopRunner：真把进程停掉 ----
+// ---- StopRunner: actually stop the process ----
 
 func TestStopRunnerSignalsRunningProcess(t *testing.T) {
 	if runtime.GOOS != "linux" {
-		t.Skip("进程探测依赖 /proc，仅在 Linux 上验证")
+		t.Skip("process detection relies on /proc; only verified on Linux")
 	}
 	base := withConfig(t, &config.Config{
 		Runners: config.RunnersConfig{Items: []config.RunnerItem{{Name: "r1", TargetType: "org", Target: "o1"}}},
@@ -105,10 +105,10 @@ func TestStopRunnerSignalsRunningProcess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(installDir, ".runner"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// run.sh 刻意不 exec，让 bash 留在进程表里，argv 形态与 actions/runner 一致
+	// run.sh deliberately does not exec, so bash stays in the process table and the argv shape matches actions/runner
 	fifo := filepath.Join(installDir, ".test-block")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatalf("创建 FIFO 失败: %v", err)
+		t.Fatalf("failed to create FIFO: %v", err)
 	}
 	script := "#!/bin/bash\nread -r -t 120 < \"" + fifo + "\"\n"
 	if err := os.WriteFile(filepath.Join(installDir, "run.sh"), []byte(script), 0o755); err != nil {
@@ -121,18 +121,18 @@ func TestStopRunnerSignalsRunningProcess(t *testing.T) {
 	})
 
 	if err := runner.Start(installDir); err != nil {
-		t.Fatalf("准备阶段启动失败: %v", err)
+		t.Fatalf("failed to start during preparation: %v", err)
 	}
 	if !waitFor(func() bool { return runnerproc.Running(installDir) }) {
-		t.Fatal("准备阶段：进程应已在运行")
+		t.Fatal("preparation phase: the process should already be running")
 	}
 
 	rec := serve(t, http.MethodPost, "/api/runners/r1/stop", stopRoute)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("得到 %d（%s），期望 200", rec.Code, rec.Body.String())
+		t.Fatalf("got %d (%s), expected 200", rec.Code, rec.Body.String())
 	}
 	if !waitFor(func() bool { return !runnerproc.Running(installDir) }) {
-		t.Fatal("收到停止请求后进程应退出")
+		t.Fatal("the process should exit after a stop request is received")
 	}
 }
 
@@ -147,8 +147,8 @@ func waitFor(cond func() bool) bool {
 	return cond()
 }
 
-// 容器模式下探测不到状态时仍要尝试停止，并把 probe 一并带回去：
-// 「探测不出来」往往正是需要停一下的场景，这时候拒绝操作等于把人锁在门外
+// In container mode, still attempt the stop when status can't be probed, and return the probe result along with it:
+// "Probe failed" is often exactly when a stop is needed; refusing the action here would lock the user out
 func TestStopRunnerContainerModeProbeFailureStillAttempts(t *testing.T) {
 	base := withConfig(t, &config.Config{
 		Runners: config.RunnersConfig{
@@ -164,25 +164,25 @@ func TestStopRunnerContainerModeProbeFailureStillAttempts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(installDir, ".runner"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// 让 docker 整个不可用：inspect 与 stop 都失败
+	// Make docker unavailable: both inspect and stop fail
 	t.Setenv("PATH", t.TempDir())
 
 	rec := serve(t, http.MethodPost, "/api/runners/r1/stop", stopRoute)
-	// 停不下来就该报错，但不能是「未在运行」那种假成功
+	// If it can't be stopped, report an error, not a false success like "not running"
 	if rec.Code == http.StatusOK && !strings.Contains(rec.Body.String(), "probe") {
-		t.Fatalf("docker 不可用时不应报告已停止，实际: %s", rec.Body.String())
+		t.Fatalf("should not report stopped when docker is unavailable, actual: %s", rec.Body.String())
 	}
 	if rec.Code != http.StatusOK && rec.Code != http.StatusInternalServerError {
-		t.Fatalf("得到 %d，期望 200（带 probe）或 500", rec.Code)
+		t.Fatalf("got %d, expected 200 (with probe) or 500", rec.Code)
 	}
-	// 断言键而不是译文：这条用例没装 I18nLoader，tr 会回落成键本身，
-	// 而键在整条链路上是稳定的——换一版英文措辞不该让这条守卫悄悄失效。
+	// Assert on the key, not the translation: this case doesn't install I18nLoader, so tr falls back to the key itself,
+	// and the key is stable across the whole chain. Rewording the English later must not silently disable this guard.
 	if strings.Contains(rec.Body.String(), "api.not_running") {
-		t.Fatalf("探测失败不能被当成「没在跑」，实际: %s", rec.Body.String())
+		t.Fatalf("a probe failure must not be treated as 'not running', actual: %s", rec.Body.String())
 	}
 }
 
-// ---- 读接口 ----
+// ---- read endpoints ----
 
 func TestListRunnersReturnsConfiguredRunners(t *testing.T) {
 	base := withConfig(t, &config.Config{
@@ -199,21 +199,21 @@ func TestListRunnersReturnsConfiguredRunners(t *testing.T) {
 		e.GET("/api/runners", ListRunners)
 	})
 	if rec.Code != http.StatusOK {
-		t.Fatalf("得到 %d（%s）", rec.Code, rec.Body.String())
+		t.Fatalf("got %d (%s)", rec.Code, rec.Body.String())
 	}
 	var list []map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
-		// 响应也可能是 {"runners": [...]} 这种包装，两种都接受
+		// The response may also be wrapped as {"runners": [...]}; accept both
 		var wrapped map[string][]map[string]any
 		if err2 := json.Unmarshal(rec.Body.Bytes(), &wrapped); err2 != nil {
-			t.Fatalf("响应不是 JSON 列表: %s", rec.Body.String())
+			t.Fatalf("response is not a JSON list: %s", rec.Body.String())
 		}
 		for _, v := range wrapped {
 			list = v
 		}
 	}
 	if len(list) != 2 {
-		t.Fatalf("应返回 2 个 runner，实际 %d 个: %s", len(list), rec.Body.String())
+		t.Fatalf("should return 2 runners, actual %d: %s", len(list), rec.Body.String())
 	}
 }
 
@@ -230,10 +230,10 @@ func TestGetRunner(t *testing.T) {
 			e.GET("/api/runners/:name", GetRunner)
 		})
 		if rec.Code != http.StatusOK {
-			t.Fatalf("得到 %d（%s）", rec.Code, rec.Body.String())
+			t.Fatalf("got %d (%s)", rec.Code, rec.Body.String())
 		}
 		if !strings.Contains(rec.Body.String(), `"r1"`) {
-			t.Fatalf("响应里应有 runner 名，实际: %s", rec.Body.String())
+			t.Fatalf("the response should contain the runner name, actual: %s", rec.Body.String())
 		}
 	})
 
@@ -242,7 +242,7 @@ func TestGetRunner(t *testing.T) {
 			e.GET("/api/runners/:name", GetRunner)
 		})
 		if rec.Code != http.StatusNotFound {
-			t.Fatalf("得到 %d，期望 404", rec.Code)
+			t.Fatalf("got %d, expected 404", rec.Code)
 		}
 	})
 
@@ -251,19 +251,19 @@ func TestGetRunner(t *testing.T) {
 			e.GET("/api/runners/:name", GetRunner)
 		})
 		if rec.Code == http.StatusOK {
-			t.Fatal("非法名字不该返回 200")
+			t.Fatal("an invalid name should not return 200")
 		}
 	})
 }
 
 // ---- resolveLang ----
 
-// 六种语言的界面全靠这个函数选，选错就是整页英文。
+// The UI in all six languages is selected by this function; a wrong choice means the whole page is in English.
 //
-// 优先级 ?lang= > cookie > Accept-Language > en。query 排在 cookie 前面：
-// cookie 是这台浏览器上的长期偏好（语言下拉框写的就是它，写完 reload，URL 上不带参数），
-// ?lang= 则是本次访问的明确指定。反过来的话，带 ?lang=ja 的链接发给一个早先选过中文的人，
-// 对方看到的仍是中文——这个参数对每一个设过偏好的人都失效，而那正是它唯一有用的场合。
+// Priority: ?lang= > cookie > Accept-Language > en. The query goes ahead of the cookie:
+// The cookie is the long-lived preference on this browser (the language dropdown writes it, then reloads, so no parameter appears in the URL);
+// ?lang= is an explicit choice for this visit. Conversely, a link with ?lang=ja sent to someone who earlier chose Chinese
+// still shows Chinese. This parameter fails for everyone who has set a preference, and that is exactly when it is most useful.
 func TestResolveLang(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -287,7 +287,7 @@ func TestResolveLang(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			target := "/"
 			if tc.query != "" {
-				// 必须转义：值里可能有空格，直接拼进 URL 会连请求行都解析不了
+				// Must escape: the value may contain spaces, and splicing it directly into the URL would break even the request line parsing
 				target += "?lang=" + url.QueryEscape(tc.query)
 			}
 			req := httptest.NewRequest(http.MethodGet, target, nil)
@@ -299,7 +299,7 @@ func TestResolveLang(t *testing.T) {
 			}
 			c := echo.New().NewContext(req, httptest.NewRecorder())
 			if got := resolveLang(c); got != tc.want {
-				t.Fatalf("resolveLang = %q，期望 %q", got, tc.want)
+				t.Fatalf("resolveLang = %q, expected %q", got, tc.want)
 			}
 		})
 	}
@@ -307,27 +307,27 @@ func TestResolveLang(t *testing.T) {
 
 // ---- shortRandomSuffix ----
 
-// 名称冲突时用它生成建议名，撞了就等于没建议
+// Used to generate the suggested name when there is a name conflict; if it collides, the suggestion is useless
 func TestShortRandomSuffix(t *testing.T) {
 	seen := make(map[string]bool)
 	for i := 0; i < 200; i++ {
 		s := shortRandomSuffix()
 		if len(s) == 0 {
-			t.Fatal("后缀不能为空")
+			t.Fatal("suffix must not be empty")
 		}
-		// 会被拼进容器名与目录名，只能是 [a-z0-9]。
-		// 用白名单而不是两段区间比较：区间写法要么是 staticcheck 会挑的
-		// 「!a && !b」（QF1001），要么是反过来的四段不等式，两种都不如
-		// 直接照抄 shortRandomSuffix 里那一串字符看得明白。
+		// It gets concatenated into container and directory names, so it may only be [a-z0-9].
+		// Use an allowlist instead of a two-sided range comparison: the range form either trips staticcheck's
+		// "!a && !b" (QF1001), or becomes a four-part inequality in reverse, and neither is as clear as
+		// copying the character string directly from shortRandomSuffix.
 		const allowed = "abcdefghijklmnopqrstuvwxyz0123456789"
 		for _, r := range s {
 			if !strings.ContainsRune(allowed, r) {
-				t.Fatalf("后缀含非法字符 %q: %s", r, s)
+				t.Fatalf("suffix contains illegal characters %q: %s", r, s)
 			}
 		}
 		seen[s] = true
 	}
 	if len(seen) < 100 {
-		t.Fatalf("200 次只生成了 %d 个不同后缀，随机性不足", len(seen))
+		t.Fatalf("200 attempts produced only %d distinct suffixes, insufficient randomness", len(seen))
 	}
 }
