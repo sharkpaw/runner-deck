@@ -1,6 +1,7 @@
 services:
   runner-manager:
-    image: ${MANAGER_IMAGE:-ghcr.io/sharkpaw/runner-deck:main}
+    build: .
+    image: ${MANAGER_IMAGE:-runner-deck:local}
     user: "0:0"
     expose:
       - "8080"
