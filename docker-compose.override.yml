@@ -1,4 +1,3 @@
-# Loaded only by a plain "docker compose up". Coolify names its file explicitly and skips this one.
 services:
   runner-manager:
     user: "1001:${DOCKER_GID:-999}"
