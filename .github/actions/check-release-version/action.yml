@@ -1,19 +1,19 @@
-# 发布版本一致性：正在打的 tag、代码里的基准版本、CHANGELOG 三者必须对得上。
+# Release version consistency: the tag being cut, the baseline version in code, and CHANGELOG must all match.
 #
-# 为什么不能靠已有的 check-version-consistency：它拿 internal/config/config.go 里的
-# 默认镜像 tag 当基准，比的是「仓库内部自洽」。发布流程在基准之外，所以基准本身
-# 落后一个版本时，全仓库仍然自洽，那个检查照样是绿的——v1.7.1 就是这么发出去的：  version-check-ignore
-# release 已经打出来，仓库里 91 处版本号一处都没指向它，CHANGELOG 里它的内容
-# 还躺在 [Unreleased] 下面。
+# Why not rely on the existing check-version-consistency: it uses the
+# default image tag in internal/config/config.go as the baseline, and only checks that the repo is internally self-consistent. The release process sits outside that baseline, so even when the baseline itself
+# lags one version, the whole repo still looks consistent and that check stays green. v1.7.1 shipped exactly this way:  version-check-ignore
+# The release was already cut, yet none of the 91 version references in the repo point to it, and its entry in CHANGELOG
+# is still sitting under [Unreleased].
 #
-# 做成 composite action 而不是在两个 release workflow 里各抄一段：两处各写一份
-# 却只改了一处，正是这个仓库已经栽过的那类跟头（Makefile 顶上的注释记着同一件事）。
+# Implemented as a composite action rather than copy-pasted into both release workflows: keeping two copies
+# and changing only one is exactly the kind of mistake this repo has already made (the comment at the top of the Makefile records the same lesson).
 name: Check release version consistency
-description: 校验 tag 与 internal/config/config.go 的基准版本、CHANGELOG 小节一致
+description: Verify the tag matches the baseline version in internal/config/config.go and the CHANGELOG section
 
 inputs:
   tag:
-    description: 正在发布的 tag，形如 v1.7.1  # version-check-ignore
+    description: The tag being released, e.g. v1.7.1  # version-check-ignore
     required: true
 
 runs:
@@ -27,40 +27,40 @@ runs:
         cd "$GITHUB_WORKSPACE"
 
         conf=scripts/ci-recipes.conf
-        # 基准文件与正则从 ci-recipes.conf 读，不在这里再写一遍：
-        # 那份文件已经是「本仓库的版本事实」的唯一出处，多一份副本就多一次漂移。
+        # Read the baseline file and regex from ci-recipes.conf instead of repeating them here:
+        # That file is already the single source of truth for this repo's version facts; each extra copy is another chance to drift.
         src=$(sed -n 's/^[[:space:]]*version_source[[:space:]]*=[[:space:]]*//p' "$conf" | head -1)
         re=$(sed -n 's/^[[:space:]]*version_baseline_regex[[:space:]]*=[[:space:]]*//p' "$conf" | head -1)
         if [ -z "$src" ] || [ -z "$re" ]; then
-          echo "::error::$conf 里没读到 version_source / version_baseline_regex"
+          echo "::error::version_source / version_baseline_regex not found in $conf"
           exit 1
         fi
 
         baseline=$(grep -oE "$re" "$src" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
         if [ -z "$baseline" ]; then
-          echo "::error file=$src::没能按 $conf 的 version_baseline_regex 解析出基准版本"
+          echo "::error file=$src::Could not parse the baseline version using version_baseline_regex from $conf"
           exit 1
         fi
 
         fail=0
         if [ "$baseline" != "$TAG" ]; then
-          echo "::error file=$src::基准版本是 $baseline，正在发布的是 $TAG。"
-          echo "::error::先把基准与文档、示例里的版本号一起升到 $TAG 再打 tag"
+          echo "::error file=$src::Baseline version is $baseline, but the tag being released is $TAG."
+          echo "::error::Bump the baseline and the version numbers in docs and examples to $TAG before tagging"
           fail=1
         fi
 
-        # CHANGELOG 用不带 v 的形式：## [1.7.1] - 2026-09-21
+        # CHANGELOG uses the form without v: ## [1.7.1] - 2026-09-21
         ver=${TAG#v}
         if ! grep -qF "## [$ver]" CHANGELOG.md; then
-          echo "::error file=CHANGELOG.md::没有 ## [$ver] 小节。"
-          echo "::error::把 [Unreleased] 下的条目挪进 ## [$ver] 再打 tag——"
-          echo "::error::release notes 是从这里来的，留在 Unreleased 等于这一版没有变更说明"
+          echo "::error file=CHANGELOG.md::No ## [$ver] section found."
+          echo "::error::Move the entries under [Unreleased] into ## [$ver] before tagging —"
+          echo "::error::Release notes are generated from here; leaving the entries under Unreleased means this version ships with no change notes"
           fail=1
         fi
         if ! grep -qE "^\[$ver\]: " CHANGELOG.md; then
-          echo "::error file=CHANGELOG.md::底部缺 [$ver]: 的链接定义，小节标题会渲染成一段纯文本"
+          echo "::error file=CHANGELOG.md::Missing [$ver]: link definition at the bottom; the section heading would render as plain text"
           fail=1
         fi
 
         [ "$fail" -eq 0 ] || exit 1
-        echo "tag $TAG 与基准版本、CHANGELOG 一致"
+        echo "tag $TAG matches the baseline version and CHANGELOG"

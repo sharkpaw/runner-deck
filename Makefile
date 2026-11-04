@@ -1,14 +1,14 @@
-# 构建产物
+# Build artifacts
 BINARY  := runner-manager
 VERSION ?= dev
 
-# 本地构建 Runner 镜像的默认 tag；使用 CI 推送的镜像时为同仓库名、tag 带 -runner，如 ghcr.io/<owner>/<repo>:v2.0.0-runner
+# Default tag for locally built runner image; when using the image pushed by CI, same repo name with tag suffixed -runner, e.g. ghcr.io/<owner>/<repo>:v2.0.0-runner
 RUNNER_IMAGE ?= ghcr.io/sharkpaw/runner-deck:v2.0.0-runner
 
-# 镜像内 app 用户加入的 docker 组 GID，需与宿主机一致才能访问 docker.sock（getent group docker | cut -d: -f3）
+# GID of the docker group the app user joins inside the image; must match the host to access docker.sock (getent group docker | cut -d: -f3)
 DOCKER_GID ?= 999
 
-# 自定义 Runner 镜像示例（examples/runner-images/Dockerfile.$(EXAMPLE)）
+# Custom runner image example (examples/runner-images/Dockerfile.$(EXAMPLE))
 EXAMPLE ?= android
 IMAGE   ?= runner-deck-$(EXAMPLE)-runner:dev
 
@@ -16,9 +16,9 @@ IMAGE   ?= runner-deck-$(EXAMPLE)-runner:dev
 
 help:
 	@echo "targets: build build-agent build-all test test-race test-coverage lint check install-ci-recipes run docker-build docker-build-runner docker-build-runner-example docker-run docker-stop clean"
-	@echo "  check: 提交前跑这一个——CI 会跑的检查都在里面"
-	@echo "  install-ci-recipes: 装 check 需要的 ci-recipes（版本跟 CI 钉的同一个）"
-	@echo "  docker-build-runner-example: 构建自定义 Runner 镜像示例，如"
+	@echo "  check: run this one before committing — it contains every check CI runs"
+	@echo "  install-ci-recipes: install the ci-recipes that check needs (same version CI pins)"
+	@echo "  docker-build-runner-example: build the custom runner image example, e.g."
 	@echo "    make docker-build-runner-example EXAMPLE=android IMAGE=your-registry/android-runner:1"
 
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)
@@ -40,43 +40,43 @@ test:
 test-coverage:
 	bash scripts/test-coverage.sh
 
-# CI 跑的是这个。并发面（注册队列、runnerOps 锁、Agent 令牌的单一胜者创建）
-# 出问题时普通 go test 是静默通过的，提交前至少跑一次。
+# This is what CI runs. Concurrency surface (registration queue, runnerOps lock, single-winner creation of Agent tokens)
+# Plain go test passes silently when these break, so run it at least once before committing.
 test-race:
 	go test -race ./...
 
-# 与 CI 里 Test job 的 Lint 那一步对应。范围取 ./...，是两个 workflow
-# （./cmd/runner-manager/... ./internal/... 与 ./cmd/runner-agent/... ./internal/...）
-# 的并集再大一点，本地过了 CI 必过。
+# Corresponds to the Lint step of the Test job in CI. Scope is ./..., a bit larger than the union
+# of the two workflows (./cmd/runner-manager/... ./internal/... and ./cmd/runner-agent/... ./internal/...),
+# so anything that passes locally will pass CI.
 #
-# 不钉版本：CI 用的是 version: latest，这边钉死反而会两头判得不一样。
+# Version not pinned: CI uses version: latest, so pinning here would make the two sides judge differently.
 GOLANGCI_LINT ?= golangci-lint
 
 lint:
 	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { \
-		echo "未找到 $(GOLANGCI_LINT)。安装："; \
+		echo "$(GOLANGCI_LINT) not found. Install:"; \
 		echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
-		echo '装好后确认 $$(go env GOPATH)/bin 在 PATH 上。'; \
+		echo 'After installing, make sure $$(go env GOPATH)/bin is on PATH.'; \
 		exit 1; \
 	}
 	$(GOLANGCI_LINT) run --max-same-issues=100000 ./...
 
-# 版本号一致性与译文章节结构这两个检查，由 soulteary/ci-recipes 的 runner-fleet recipe
-# 提供，本仓库只出 scripts/ci-recipes.conf。
+# The version-consistency and translation section-structure checks are provided by the runner-fleet recipe
+# in soulteary/ci-recipes; this repo only supplies scripts/ci-recipes.conf.
 #
-# 版本不在这里重写一遍，而是从 workflow 里读：两处各钉一个版本、改一处忘另一处，就是
-# 本地与 CI 判得不一样，而那正是 lint 当初留下的口子。读不出来时 check 直接失败，
-# 不拿空版本往下走。
+# Versions are not rewritten here; they are read from the workflow. If two places each pin a version and one is changed without the other, local and CI will judge differently,
+# which is exactly the gap lint originally left open. If the version can't be read, check fails immediately
+# rather than proceeding with an empty version.
 CI_RECIPES          ?= ci-recipes
 CI_RECIPES_WORKFLOW := .github/workflows/ci-consistency.yml
 CI_RECIPES_VERSION  ?= $(shell sed -n 's/^[[:space:]]*CI_RECIPES_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' $(CI_RECIPES_WORKFLOW))
 
-# 提交前跑这一个。CI 会跑的检查都收在这里，不必每次凭记忆拼清单——
-# 漏掉的那一项永远是本地绿、CI 红的那一项（上一次漏的正是 lint）。
+# Run this one before pushing. It covers every check CI runs, so you don't have to rebuild the list from memory.
+# The item you forget is always the one that passes locally and fails in CI (last time it was lint).
 check:
 	@out=$$(gofmt -l ./cmd ./internal); \
 	if [ -n "$$out" ]; then \
-		echo "以下文件未格式化，请运行 gofmt -w ./cmd ./internal:"; \
+		echo "The following files are not formatted. Run gofmt -w ./cmd ./internal:"; \
 		echo "$$out"; \
 		exit 1; \
 	fi
@@ -84,13 +84,13 @@ check:
 	$(MAKE) lint
 	$(MAKE) test-coverage
 	@command -v $(CI_RECIPES) >/dev/null 2>&1 || { \
-		echo "未找到 $(CI_RECIPES)。安装：make install-ci-recipes"; \
-		echo '装好后确认 $$(go env GOPATH)/bin 在 PATH 上。'; \
+		echo "$(CI_RECIPES) not found. Install with: make install-ci-recipes"; \
+		echo 'After installing, confirm $$(go env GOPATH)/bin is on PATH.'; \
 		exit 1; \
 	}
 	$(CI_RECIPES) runner-fleet check-version-consistency
 	$(CI_RECIPES) runner-fleet check-docs-structure
-	@echo "全部检查通过"
+	@echo "All checks passed"
 
 run: build
 	./$(BINARY)
@@ -101,11 +101,11 @@ docker-build:
 docker-build-runner:
 	docker build -f Dockerfile.runner --build-arg DOCKER_GID=$(DOCKER_GID) -t $(RUNNER_IMAGE) .
 
-# 在本仓库 Runner 镜像之上叠加工具链，详见 examples/runner-images/README.md
+# Adds the toolchain on top of this repo's runner image. See examples/runner-images/README.md
 docker-build-runner-example:
 	docker build -f examples/runner-images/Dockerfile.$(EXAMPLE) -t $(IMAGE) .
 
-# 需 Basic Auth 时请使用 docker compose（会读取 .env），或在本 target 的 docker run 中增加 -e BASIC_AUTH_PASSWORD=... -e BASIC_AUTH_USER=admin
+# If Basic Auth is needed, use docker compose (it reads .env), or add -e BASIC_AUTH_PASSWORD=... -e BASIC_AUTH_USER=admin to this target's docker run
 docker-run: docker-stop
 	docker run -d --name runner-manager -p 8080:8080 \
 		-v $(PWD)/config:/app/config \
@@ -115,16 +115,16 @@ docker-run: docker-stop
 docker-stop:
 	-docker stop runner-manager 2>/dev/null; docker rm runner-manager 2>/dev/null; true
 
-# 装 check 需要的 ci-recipes。版本从 workflow 读，所以这里、文档里、CI 里都不必各写一遍
-# 版本号——写了就会各自过期，而且版本号一致性检查本身也会把那个 vX.Y.Z 当成本仓库的
-# 版本号引用报出来（它只认字面量，分不清那是别人的模块版本）。
+# Installs the ci-recipes that the checks need. The version is read from the workflow, so it doesn't have to be repeated here, in the docs, or in CI
+# version number. Hardcoding it would go stale, and the version-consistency check would flag that vX.Y.Z as a reference to this repo
+# version reference (it only matches literals and can't tell it's another module's version).
 install-ci-recipes:
 	@[ -n "$(CI_RECIPES_VERSION)" ] || { \
-		echo "无法从 $(CI_RECIPES_WORKFLOW) 读出 CI_RECIPES_VERSION，不能用空版本安装。"; \
+		echo "Could not read CI_RECIPES_VERSION from $(CI_RECIPES_WORKFLOW). Refusing to install with an empty version."; \
 		exit 1; \
 	}
 	go install "github.com/soulteary/ci-recipes/cmd/ci-recipes@$(CI_RECIPES_VERSION)"
-	@echo "装好了。确认 $$(go env GOPATH)/bin 在 PATH 上。"
+	@echo "Installed. Confirm $$(go env GOPATH)/bin is on PATH."
 
 clean:
 	rm -f $(BINARY) runner-agent

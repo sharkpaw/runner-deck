@@ -1,25 +1,25 @@
-// Runner Deck 管理界面。
+// Runner Deck management UI.
 //
-// 这份文件从 templates/index.html 的 <script> 块里拆出来：原先 CSS、HTML、JS
-// 挤在一个上千行的 Go 模板里，编辑器没有语法高亮，浏览器也没法缓存。
-// 拆出来之后它不再过 Go 模板，{{name}} 这类占位符可以直接写成字面量，
-// 不必再写成 {{"{{"}}name{{"}}"}} 去躲模板的分隔符。
+// This file was split out of the <script> block in templates/index.html. Previously CSS, HTML, and JS
+// were crammed into one thousand-plus-line Go template, so editors had no syntax highlighting and browsers couldn't cache it.
+// Now it no longer goes through the Go template engine, so placeholders like {{name}} can be written as literals,
+// instead of being escaped as {{"{{"}}name{{"}}"}} to dodge the template delimiters.
 //
-// i18n 字典由页面内联的一小段脚本先行注入到 window.__I18N。
+// The i18n dictionary is injected into window.__I18N beforehand by a small inline script in the page.
 function t(key) { return (window.__I18N && window.__I18N[key]) || key; }
 
 // ===== Toast =====
-// 取代原生 alert：它阻塞整个页面，样式也和这套暗色界面格格不入。
+// Replaces the native alert: it blocks the whole page, and its styling clashes with this dark UI.
 const toastWrap = document.getElementById('toastWrap');
 function dismissToast(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
-// actions: [{ label, onClick }]。带 actions 的 toast 不自动消失——
-// 它要等用户去点，自动消失等于把出口收走。
+// actions: [{ label, onClick }]. Toasts with actions do not auto-dismiss —
+// they wait for the user to click, since auto-dismissing would remove the way out.
 function showToast(message, type, actions) {
   const el = document.createElement('div');
   el.className = 'toast ' + (type || '');
   const msg = document.createElement('div');
   msg.className = 'toast-msg';
-  // 接口返回的文案里嵌着用户填的 Runner 名，只能走 textContent
+  // API-returned text embeds the runner names users entered, so it must go through textContent
   msg.textContent = message;
   el.appendChild(msg);
   const bar = document.createElement('div');
@@ -27,7 +27,7 @@ function showToast(message, type, actions) {
   (actions || []).forEach(function(a) {
     const b = document.createElement('button');
     b.type = 'button';
-    // 这里不能套 .btn-view/.btn-del：那两个类名同时是行操作的行为选择器
+    // Don't apply .btn-view/.btn-del here: those class names are also the row-action behavior selectors
     b.className = 'btn-neutral';
     b.textContent = a.label;
     b.addEventListener('click', function() { dismissToast(el); a.onClick(); });
@@ -47,9 +47,9 @@ function showToast(message, type, actions) {
   return el;
 }
 
-// ===== 确认弹窗 =====
-// 取代原生 confirm。后者除了阻塞页面，还可能被浏览器的「阻止此页面再次弹窗」
-// 一勾永久禁掉——那之后删除、重建这类需要确认的操作会静默地什么都不做。
+// ===== Confirmation dialog =====
+// Replaces the native confirm. Besides blocking the page, it can be permanently disabled by the browser's "prevent this page from creating additional dialogs" option
+// — after which confirmed actions like delete and rebuild silently do nothing.
 const confirmModal = document.getElementById('confirmModal');
 const confirmTextEl = document.getElementById('confirmText');
 const confirmOkBtn = document.getElementById('confirmOkBtn');
@@ -60,14 +60,14 @@ function settleConfirm(v) {
   const fn = confirmSettle;
   confirmSettle = null;
   confirmModal.classList.remove('show');
-  // 焦点还给唤起它的地方；元素可能已随自动刷新被换掉，所以先确认还在文档里
+  // Return focus to the element that opened it; it may have been replaced by an auto-refresh, so first check that it is still in the document
   if (confirmLastFocused && document.contains(confirmLastFocused)) confirmLastFocused.focus();
   confirmLastFocused = null;
   fn(v);
 }
 let confirmLastFocused = null;
 function confirmDialog(message) {
-  // 上一个确认还没落定就又弹一个：先把旧的按「取消」结掉，免得 Promise 永远挂着
+  // If a new confirm opens before the previous one settles, cancel the old one first so its Promise doesn't hang forever
   settleConfirm(false);
   confirmLastFocused = document.activeElement;
   confirmTextEl.textContent = message;
@@ -75,22 +75,22 @@ function confirmDialog(message) {
   confirmOkBtn.focus();
   return new Promise(function(resolve) { confirmSettle = resolve; });
 }
-// 确认框也是弹窗，同样要困住焦点——它叠在查看弹窗之上，不拦的话 Tab 会跑到
-// 底下那一层去。trapTab 来自弹窗那套焦点管理，这里直接复用。
+// The confirm dialog is also a modal and must trap focus too — it stacks on top of the view dialog, and without trapping, Tab would move into
+// the layer underneath. trapTab comes from the modal focus management, so reuse it here.
 confirmModal.addEventListener('keydown', function(e) { trapTab(e, confirmModal); });
 confirmOkBtn.addEventListener('click', function() { settleConfirm(true); });
 confirmCancelBtn.addEventListener('click', function() { settleConfirm(false); });
 confirmModal.addEventListener('click', function(e) { if (e.target === confirmModal) settleConfirm(false); });
 
-// ===== 按钮忙碌态 =====
-// 启动一台 Runner 可能要几秒到几十秒，此前点下去界面毫无变化，用户必然连点，
-// 于是同一个动作被发两次。请求在途时把同一行（或弹窗页脚）的按钮一并置灰。
+// ===== Button busy state =====
+// Starting a runner can take seconds to tens of seconds; previously clicking caused no visible change, so users inevitably click repeatedly,
+// So the same action gets sent twice. While a request is in flight, also disable the buttons in the same row (or the modal footer).
 function setRowBusy(btn, busy) {
   if (!btn) return;
   const scope = btn.closest('tr') || btn.closest('.modal-footer');
   const group = scope ? Array.prototype.slice.call(scope.querySelectorAll('button')) : [btn];
   group.forEach(function(b) {
-    // 关闭键始终可用，否则请求慢的时候用户被困在弹窗里
+    // Keep the close button always enabled, or users get stuck in the modal when requests are slow
     if (b !== btn && b.classList.contains('modal-close')) return;
     b.disabled = busy;
   });
@@ -167,7 +167,7 @@ document.getElementById('parseCommandBtn').addEventListener('click', function() 
   if (result.suggested_name && !document.getElementById('addFormName').value) {
     document.getElementById('addFormName').value = result.suggested_name;
     document.getElementById('addFormPath').value = '';
-    // 用仓库名自动填出来的名字最容易撞上已有 Runner，填完立刻查一次
+    // Names auto-filled from the repo name are the most likely to collide with an existing runner, so check once right after filling
     schedulePrecheck();
   }
   msgEl.className = 'parse-msg ok';
@@ -175,10 +175,10 @@ document.getElementById('parseCommandBtn').addEventListener('click', function() 
   msgEl.textContent = filled;
 });
 
-// ===== 添加前的冲突预检 =====
-// 名字撞车的形态不止一种：配置里已有同名、规范化后撞容器名、安装目录被占、
-// 磁盘上留着上次注册过的目录、宿主机上还挂着同名容器。等到提交才发现太晚了，
-// 这里在输入时就问一次服务端（/api/runner-precheck），并在提交前再确认一次。
+// ===== Pre-add conflict check =====
+// Name collisions take several forms: a same-named entry already in config, a clash with the container name after normalization, an occupied install directory,
+// a leftover directory from a previous registration on disk, or a same-named container still attached to the host. Discovering this only at submit time is too late,
+// so we ask the server once while typing (/api/runner-precheck) and confirm again before submitting.
 var PH_OPEN = '{{', PH_CLOSE = '}}';
 function fillVars(str, vars) {
   Object.keys(vars).forEach(function(k) {
@@ -255,15 +255,15 @@ function renderPrecheck(resp) {
     nameCheckEl.appendChild(btn);
   }
 }
-// 返回 null 表示这次没查成（接口不可用等），此时不挡提交，交给服务端兜底。
-// guardStale：边输入边查时，后发的请求先回来就该丢掉旧结果；
-// 而点建议名、点提交这类明确动作必须拿到结论，不能被后续输入顺手丢掉。
+// A null return means the check didn't complete (e.g. the endpoint is unavailable); don't block submission in that case and let the server catch it.
+// guardStale: while checking as the user types, a stale result should be discarded when a later request returns first;
+// but explicit actions like clicking a suggested name or submitting must get a result and must not be dropped by subsequent input.
 async function runPrecheck(name, path, guardStale) {
   if (!name) return null;
   var seq = ++precheckSeq;
   try {
-    // has_token 只传「填没填」，不传 token 本身：目录里已注册过的 Runner，
-    // 带 token 再注册会被 config.sh 拒绝（error），不带 token 只是接管（提示即可）
+    // has_token only passes whether a token was filled in, not the token itself: a runner already registered in the directory,
+    // re-registering with a token gets rejected by config.sh (error); without a token it's just a takeover (a hint is enough)
     var url = '/api/runner-precheck?name=' + encodeURIComponent(name) +
       (path ? '&path=' + encodeURIComponent(path) : '') +
       (tokenInput && tokenInput.value.trim() ? '&has_token=1' : '');
@@ -310,7 +310,7 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
   msgEl.className = 'msg';
   msgWrap.style.display = 'block';
   if (submitBtn) submitBtn.disabled = true;
-  // 输入框上的提示可能已经过期（别处刚加了同名 Runner），提交前再确认一次
+  // The hint on the input may be stale (a same-named runner was just added elsewhere), so confirm again before submitting
   const pre = await runPrecheck(body.name, body.path || '', false);
   if (pre && !pre.available) {
     renderPrecheck(pre);
@@ -332,7 +332,7 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
     clearTimeout(timeoutId);
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
-      // 409：服务端检出冲突，把冲突和建议名渲染到名称输入框下面，顺手给出「使用建议名」
+      // 409: the server detected a conflict; render the conflict and suggested names below the name input, and also offer a "Use suggested name" action
       if (r.status === 409 && data.conflicts) {
         renderPrecheck(data);
         msgEl.className = 'msg err';
@@ -346,8 +346,8 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
       return;
     }
     msgEl.className = 'msg ok';
-    // message 与 install_dir 里都嵌着用户填的 Runner 名，必须转义：
-    // 名称校验只拦 .. / \，`<img src=x onerror=...>` 这样的名字是收得进来的
+    // Both message and install_dir embed the user-entered runner name, so they must be escaped:
+    // Name validation only blocks .. / \, so names like `<img src=x onerror=...>` get through
     msgEl.innerHTML = escapeHtml(data.message || '') +
       (data.install_dir ? '<br><span class="path">' + escapeHtml(data.install_dir) + '</span>' : '');
     if (data.output) msgEl.innerHTML += '<pre style="margin-top:8px;font-size:12px">' + escapeHtml(data.output) + '</pre>';
@@ -370,10 +370,10 @@ document.getElementById('addMsgClose').addEventListener('click', function() {
   document.getElementById('addMsgWrap').style.display = 'none';
   location.reload();
 });
-// 「上次检查于 2026-09-21T09:00:00Z」这种原样输出的 RFC3339，得在脑子里换算
-// 成「多久以前」才有用——而这一栏真正要回答的就是「检查是不是卡住了」。
-// 相对时间交给 Intl.RelativeTimeFormat：复数和各语言说法它自己处理，
-// 不必为此再铺一套六种语言的文案。
+// Printing RFC3339 as-is, like "last checked at 2026-09-21T09:00:00Z", forces the reader to mentally convert it
+// into "how long ago" to be useful, yet this column's real question is whether the check is stuck.
+// Leave relative time to Intl.RelativeTimeFormat, which handles plurals and per-language phrasing,
+// so there's no need to maintain six sets of copy for this.
 function relativeTime(d, lang) {
   if (typeof Intl === 'undefined' || !Intl.RelativeTimeFormat) return '';
   try {
@@ -388,8 +388,8 @@ function relativeTime(d, lang) {
     return '';
   }
 }
-// 相对时间放主行，准确时刻放下面一行小字：前者回答「是不是卡住了」，
-// 后者用来和日志对时间。解析不了就原样显示，别把信息弄丢。
+// Relative time goes on the main line, exact timestamp in small text below: the former answers "is it stuck?",
+// the latter is for matching times against logs. If it can't be parsed, show it as-is; don't lose the information.
 function renderTimestamp(el, iso) {
   el.textContent = '';
   if (!iso) { el.textContent = '—'; return; }
@@ -400,12 +400,12 @@ function renderTimestamp(el, iso) {
   el.appendChild(document.createTextNode(rel));
   const abs = document.createElement('span');
   abs.className = 'ts-abs';
-  // 跟着页面语言而不是浏览器 locale：界面已经切到中文了，
-  // 下面这行还按系统 locale 显示会很割裂
+  // Follow the page language, not the browser locale: the UI has already switched to Chinese,
+  // showing this line in the system locale would look jarring
   abs.textContent = d.toLocaleString(lang);
   el.appendChild(abs);
 }
-// 健康的 Runner 上这 5 行全是「—」，占掉三栏网格的一大半
+// On a healthy Runner these 5 lines are all "—", taking up over half of the three-column grid
 const PROBE_ROW_IDS = ['vProbeErrorTypeRow', 'vProbeSuggestionRow', 'vProbeCheckCmdRow', 'vProbeFixCmdRow', 'vProbeErrorRow'];
 function setProbeRowsVisible(on) {
   PROBE_ROW_IDS.forEach(function(id) {
@@ -413,7 +413,7 @@ function setProbeRowsVisible(on) {
     if (row) row.style.display = on ? '' : 'none';
   });
 }
-// 超过这个长度的值挤在三分之一栏里会折成一条细柱，不如铺满一行
+// Values longer than this wrap into a thin column when squeezed into a third of a column; spanning the full row is better
 const WIDE_ROW_CHARS = 40;
 function setRowWide(rowId, text) {
   const row = document.getElementById(rowId);
@@ -445,15 +445,15 @@ function resolveProbeType(data) {
   if (data && data.probe && data.probe.type) return data.probe.type;
   return 'unknown';
 }
-// ===== 弹窗的键盘可达性 =====
-// 此前弹窗没有 role/aria-modal，焦点也不受约束：Tab 会一路跑到弹窗背后的表格和
-// 表单上，读屏器把背景内容和弹窗混着念；关掉之后焦点落回 <body>，键盘用户得从
-// 页面开头一路 Tab 回原来的位置。
+// ===== Keyboard accessibility of the dialog =====
+// Previously the dialog had no role/aria-modal, and focus was unconstrained: Tab would run through to the table and
+// form behind the dialog, and screen readers would read background content mixed with the dialog; after closing, focus fell back to <body>, so keyboard users had to Tab from
+// the top of the page back to where they were.
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 let lastFocused = null;
 function focusablesIn(root) {
-  // offsetParent 为 null 即当前不可见（弹窗里大量按钮是按状态 display:none 的），
-  // 把它们算进去会让 Tab 停在看不见的地方
+  // offsetParent being null means currently not visible (many buttons in the dialog are display:none based on state),
+  // counting them would make Tab stop on invisible elements
   return Array.prototype.filter.call(root.querySelectorAll(FOCUSABLE), function(el) {
     return el.offsetParent !== null;
   });
@@ -492,7 +492,7 @@ async function copyCommandText(text) {
   } catch (_) {
     // ignore and fallback below
   }
-  // 回退：在不支持/拒绝 clipboard API 的环境里尝试 execCommand
+  // Fallback: try execCommand in environments that don't support or deny the clipboard API
   try {
     const ta = document.createElement('textarea');
     ta.value = text;
@@ -511,13 +511,13 @@ async function copyCommandText(text) {
 }
 
 function openModal(mode, name) {
-  // 记在展示之前：一旦弹窗抢走焦点就问不出用户原来站在哪了
+  // Record this before showing: once the dialog takes focus, there's no way to know where the user was
   if (!modal.classList.contains('show')) lastFocused = document.activeElement;
   modalMsg.style.display = 'none';
   if (mode === 'view') {
     modalTitle.textContent = t('modal.view_title');
-    // 不写 'block'：行内样式会盖过样式表里的 display:grid，三栏布局就没了。
-    // 置空即回落到样式表，栏数以后只在 CSS 里改一处。
+    // Don't write 'block': an inline style would override display:grid in the stylesheet, and the three-column layout would be lost.
+    // Setting it empty falls back to the stylesheet, so the column count can later be changed in one place in CSS.
     modalView.style.display = '';
     modalEditForm.style.display = 'none';
     modalEditBtn.style.display = 'inline-block';
@@ -570,9 +570,9 @@ function openModal(mode, name) {
         var gh = data.registered_on_github;
         var ghEl = document.getElementById('vRegisteredOnGitHub');
         var ghLink = document.getElementById('vGitHubLink');
-        // 地址走 .href 属性而不是拼进 innerHTML：escapeHtml 管的是 HTML 上下文，
-        // 挡不住 href 里的 javascript: 协议。地址本身也由 Go 侧按写死的
-        // https://github.com 前缀拼出，两头都不给 target 改写协议的机会。
+        // The address goes through the .href property instead of being concatenated into innerHTML: escapeHtml handles the HTML context,
+        // it can't block a javascript: protocol in href. The address itself is also built on the Go side from the hardcoded
+        // https://github.com prefix, leaving neither end any chance to rewrite the protocol.
         ghLink.style.display = 'none';
         ghLink.removeAttribute('href');
         if (gh === true && data.github_url) {
@@ -583,16 +583,16 @@ function openModal(mode, name) {
         }
         else if (gh === true) ghEl.innerHTML = '<span class="github-yes">' + t('modal.gh_yes') + '</span>';
         else if (gh === false) ghEl.innerHTML = '<span class="github-no">' + t('modal.gh_no') + '</span>';
-        // gh 为 null：查过但没查出答案，和「从未查过」要分开说，否则过期的令牌看着像没配过
+        // gh being null: it was checked but no answer was found, which must be distinguished from "never checked", otherwise an expired token looks like it was never configured
         else if (data.github_check_error) ghEl.textContent = t('modal.gh_failed') + ': ' + data.github_check_error;
         else ghEl.textContent = t('modal.gh_unchecked');
-        // 忙碌同样是三态：接口里没有这个字段就是「不知道」，不能说成「空闲」
+        // Busy is also tri-state: if the API has no such field, it means "unknown", not "idle"
         var busyEl = document.getElementById('vGitHubBusy');
         if (data.github_busy === true) busyEl.textContent = t('modal.gh_busy');
         else if (data.github_busy === false) busyEl.textContent = t('modal.gh_idle');
         else busyEl.textContent = t('modal.gh_busy_unknown');
-        // 可见性同样三态。不知道就说不知道：把「没查出来」说成「私有」，
-        // 正好在最该提醒的那一种情况下（目标名写错、令牌看不到）给出安心的假答案。
+        // Visibility is tri-state too. Say "unknown" when it is unknown: don't report "couldn't check" as "private",
+        // precisely in the case where the user most needs a warning (wrong target name, token can't see it), giving a false reassurance.
         var visEl = document.getElementById('vRepoVisibility');
         if (data.github_public === true) visEl.textContent = t('modal.vis_public');
         else if (data.github_public === false) visEl.textContent = t('modal.vis_private');
@@ -608,7 +608,7 @@ function openModal(mode, name) {
           startBtn.style.display = data.running ? 'none' : 'inline-block';
           stopBtn.style.display = data.running ? 'inline-block' : 'none';
         } else if (data.status === 'unknown') {
-          // 状态探测失败时允许用户手动尝试启停进行自愈
+          // When status probing fails, let the user manually try to start/stop to self-heal
           startStopSpan.style.display = 'inline-block';
           startBtn.style.display = 'inline-block';
           stopBtn.style.display = 'inline-block';
@@ -622,7 +622,7 @@ function openModal(mode, name) {
     document.getElementById('modalStartStopSpan').style.display = 'none';
     modalTitle.textContent = t('modal.edit_title');
     modalView.style.display = 'none';
-    modalEditForm.style.display = '';   // 同上，两栏由样式表决定
+    modalEditForm.style.display = '';   // Same as above; the two columns are controlled by the stylesheet
     modalEditBtn.style.display = 'none';
     modalSaveBtn.style.display = 'inline-block';
     fetch('/api/runners/' + encodeURIComponent(name))
@@ -638,14 +638,14 @@ function openModal(mode, name) {
       .catch(() => { modalMsg.textContent = t('msg.load_failed'); modalMsg.style.display = 'block'; modalMsg.className = 'msg err'; });
   }
   modal.classList.add('show');
-  // 焦点送进弹窗，否则 Tab 仍从页面开头走，读屏器也还停在背景内容上
+  // Move focus into the dialog; otherwise Tab still starts from the top of the page, and screen readers stay on the background content
   const firstInModal = focusablesIn(modal)[0];
   if (firstInModal) firstInModal.focus();
 }
 
 function closeModal() {
   modal.classList.remove('show');
-  // 焦点还给打开它的那个按钮；元素可能已随自动刷新被换掉，所以先确认还在文档里
+  // Return focus to the button that opened it; the element may have been replaced by auto-refresh, so first check it is still in the document
   if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
   lastFocused = null;
 }
@@ -656,7 +656,7 @@ modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); }
 modal.addEventListener('keydown', (e) => trapTab(e, modal));
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  // 确认框是盖在查看弹窗之上的，Esc 先取消它，否则会把底下的弹窗一起关掉
+  // The confirm dialog sits on top of the view dialog, so Esc cancels it first; otherwise it would close the dialog underneath too
   if (confirmModal.classList.contains('show')) { settleConfirm(false); return; }
   if (modal.classList.contains('show')) closeModal();
 });
@@ -714,21 +714,21 @@ async function removeRunner(name, btn) {
   } catch (e) { showToast(e.message, 'err'); }
   setRowBusy(btn, false);
 }
-// 行内按钮走事件委托而不是逐个 addEventListener：自动刷新会整体替换 <tbody>，
-// 直接绑在按钮上的监听在第一次刷新之后就全部失效了。
+// Inline buttons use event delegation instead of per-button addEventListener: auto-refresh replaces the whole <tbody>,
+// so listeners bound directly to the buttons would all stop working after the first refresh.
 const runnerRowsBody = document.getElementById('runnerRowsBody');
 runnerRowsBody.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-name]');
   if (!btn || !runnerRowsBody.contains(btn)) return;
   const name = btn.getAttribute('data-name');
   if (!name) return;
-  // 按钮一路传下去，忙碌态才知道该给哪一行置灰
+  // Pass the button down the chain so the busy state knows which row to grey out
   if (btn.classList.contains('btn-view')) openModal('view', name);
   else if (btn.classList.contains('btn-edit')) openModal('edit', name);
   else if (btn.classList.contains('btn-del')) removeRunner(name, btn);
   else if (btn.classList.contains('btn-start')) runnerAction(name, 'start', btn);
   else if (btn.classList.contains('btn-stop')) runnerAction(name, 'stop', btn);
-  // 重建会删掉容器再按当前配置建一个新的，正在跑的 Job 会被中断，所以先确认
+  // Rebuilding deletes the container and recreates it from the current config; a running Job would be interrupted, so confirm first
   else if (btn.classList.contains('btn-recreate')) {
     confirmDialog(fillVars(t('confirm_recreate'), { name: name })).then(function(ok) {
       if (ok) runnerAction(name, 'recreate', btn);
@@ -746,10 +746,10 @@ async function runnerAction(name, action, btn) {
     } else {
       const probeError = resolveProbeError(data);
       if (!probeError) { location.reload(); return; }
-      // 探测失败不再连开三个原生弹窗（alert → confirm → alert）：一条 toast 给结论，
-      // 「查看详情」直接打开已有的查看弹窗——检查命令、修复命令连同那套
-      // 「先展示、确认后再复制」的保护都已经在那里，不必重来一遍。
-      // 这里不整页 reload，否则 toast 当场就没了；列表由自动刷新兜住。
+      // A probe failure no longer opens three native dialogs in a row (alert → confirm → alert): one toast gives the conclusion,
+      // "View details" opens the existing view dialog directly, along with its check command, fix command,
+      // and the "show first, copy after confirmation" protections, which are already there, so there's no need to redo them.
+      // Don't reload the whole page here, or the toast would vanish immediately; the list is covered by auto-refresh.
       showToast(
         (data.message || t('msg.action_done')) +
         '\n' + t('probe.alert_type') + resolveProbeType(data) +
@@ -785,12 +785,12 @@ copyFixBtn.addEventListener('click', async () => {
   const ok = await copyCommandText(currentProbeFixCommand);
   showToast(ok ? t('msg.fix_cmd_copied') : t('msg.copy_failed'), ok ? 'ok' : 'err');
 });
-// ===== 列表自动刷新 =====
-// 「忙碌中」和「GitHub ✓」本来就是后台约 5 分钟一次的检查结果，页面不刷新
-// 就永远看不到它们变化，这两列在日常使用中等于是死的。
-// 拉的是 /api/runner-rows 渲染好的 <tbody> 片段（和首屏同一个模板），
-// 而不是 /api/runners 的 JSON 自己拼行——行里 GitHubYes/GitHubNo 这类三态
-// 判断在 JS 里重写一遍，正是最容易把「空闲」显示成「忙碌中」的地方。
+// ===== List auto-refresh =====
+// "Busy" and "GitHub ✓" are already results of a background check roughly every 5 minutes; if the page doesn't refresh,
+// you'll never see them change, so these two columns are effectively dead in everyday use.
+// It fetches the <tbody> fragment rendered by /api/runner-rows (same template as the first paint),
+// rather than building the lines by hand from /api/runners JSON — the GitHubYes/GitHubNo tri-state
+// logic rewritten in JS is exactly where an idle runner is most likely to show as busy.
 const REFRESH_MS = 15000;
 const autoRefreshToggle = document.getElementById('autoRefreshToggle');
 const refreshStatusEl = document.getElementById('refreshStatus');
@@ -798,9 +798,9 @@ let refreshTimer = null;
 let refreshing = false;
 
 function refreshPaused() {
-  // 弹窗开着时刷新没意义（用户看的是弹窗里的数据）；标签页不可见时也不必打扰
-  // 服务端——容器模式下每刷新一次都要对每台 runner 做一次 docker inspect。
-  // 确认框也要算进去：正等用户确认删除时把 <tbody> 换掉，那一行会在脚下消失
+  // no point refreshing while the modal is open (the user is reading its data); don't bother when the tab is hidden
+  // server — in container mode every refresh runs docker inspect on each runner.
+  // include the confirm dialog too: replacing <tbody> while the user is confirming a delete would pull the row out from under them
   return !autoRefreshToggle.checked || document.hidden ||
     modal.classList.contains('show') || confirmModal.classList.contains('show');
 }
@@ -812,11 +812,11 @@ async function refreshRows() {
     const r = await fetch('/api/runner-rows', { headers: { 'Accept': 'text/html' } });
     if (!r.ok) throw new Error(r.statusText);
     const html = await r.text();
-    // 再判一次：请求在途的这段时间里用户可能已经打开弹窗或关掉了自动刷新
+    // re-check: the user may have opened the modal or turned auto-refresh off while the request was in flight
     if (!refreshPaused()) {
       runnerRowsBody.innerHTML = html;
-      // 换回来的是一整批新行，筛选状态不会跟着过来——不重筛的话，
-      // 每 15 秒筛掉的行就会自己冒回来
+      // the swapped-in rows are a fresh batch and the filter state doesn't carry over — without re-filtering,
+      // rows filtered out every 15 seconds would reappear on their own
       applyFilter();
       refreshStatusEl.className = 'refresh-status';
       refreshStatusEl.textContent = fillVars(t('autorefresh.updated'), { time: new Date().toLocaleTimeString() });
@@ -838,18 +838,18 @@ try {
   if (localStorage.getItem('runnerDeckAutoRefresh') === '0') autoRefreshToggle.checked = false;
 } catch (_) {}
 if (!autoRefreshToggle.checked) refreshStatusEl.textContent = t('autorefresh.paused');
-// 标签页切回来时立刻补一次，不用干等下一个周期
+// refresh immediately when the tab becomes visible again instead of waiting for the next cycle
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshRows(); });
 refreshTimer = setInterval(refreshRows, REFRESH_MS);
-// ===== 概览统计与筛选 =====
-// 这是个 fleet 管理器，但列表此前是平铺的：20 台以上只能靠 Ctrl+F 找，
-// 也看不出「几台在跑、几台挂了」。筹码既是统计，也是筛选入口。
+// ===== overview stats and filters =====
+// This is a fleet manager, but the list used to be flat: with 20+ runners you could only find one with Ctrl+F,
+// and there was no way to see how many were running or how many were down. The chips are both the stats and the filter entry points.
 const PREDICATES = {
   all: function() { return true; },
   running: function(r) { return r.running; },
   stopped: function(r) { return r.status === 'installed' && !r.running; },
   new: function(r) { return r.status === 'new'; },
-  // 异常：目录没了、状态查不出来、或探测失败——这三种都得有人去看一眼
+  // abnormal: directory missing, status unreadable, or probe failed — each of these needs someone to look at it
   problem: function(r) { return r.status === 'missing' || r.status === 'unknown' || r.probe; },
   drift: function(r) { return r.drift; }
 };
@@ -883,21 +883,21 @@ function applyFilter() {
     r.tr.style.display = hit ? '' : 'none';
     if (hit) shown++;
   });
-  // 计数始终按全部算，不跟着当前筛选走：否则点进「需处理」之后其余筹码
-  // 全变成 0，就再也看不出全局了
+  // counts always cover everything and don't follow the current filter: otherwise, after clicking into "needs attention", the other chips
+  // would all drop to 0 and you'd lose the global picture
   statsEl.querySelectorAll('.stat-chip').forEach(function(chip) {
     const n = rows.filter(PREDICATES[chip.dataset.filter] || PREDICATES.all).length;
     chip.querySelector('.n').textContent = n;
     chip.classList.toggle('has', n > 0);
-    // 数量为 0 的筹码收起来，免得小规模部署下摆一排空筹码；
-    // 当前选中的那个即便归零也要留着，否则筛完就找不到退出的入口
+    // hide chips whose count is 0 so a small deployment doesn't show a row of empty chips;
+    // the currently selected chip stays even at 0, otherwise there'd be no way to exit the filter once applied
     chip.style.display = (n > 0 || chip.dataset.filter === 'all' || chip.dataset.filter === activeFilter) ? '' : 'none';
   });
   const filtering = activeFilter !== 'all' || q !== '';
   filterCountEl.textContent = filtering ? fillVars(t('filter.showing'), { shown: shown, total: rows.length }) : '';
   filterClearBtn.style.display = filtering ? 'inline-block' : 'none';
-  // 每次重新取：这一行住在 runnerRows 片段里，自动刷新会把它整个换掉，
-  // 加载时存下来的那个引用刷新之后就指向一个已经离开文档的节点了
+  // fetch it fresh each time: this row lives in the runnerRows fragment, and auto-refresh replaces the whole thing,
+  // so a reference saved at load time would point to a node that has already left the document
   const noMatchRow = document.getElementById('noMatchRow');
   if (noMatchRow) noMatchRow.style.display = (rows.length > 0 && shown === 0) ? '' : 'none';
 }

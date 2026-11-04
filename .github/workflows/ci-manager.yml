@@ -1,4 +1,4 @@
-# CI：Runner Manager 的测试与构建
+# CI: Runner Manager tests and builds
 name: CI (Manager)
 
 on:
@@ -22,11 +22,11 @@ jobs:
         run: |
           for f in Dockerfile Dockerfile.runner; do
             grep -q 'scripts/apt-packages.txt' "$f" || {
-              echo "::error file=$f::镜像依赖须从 scripts/apt-packages.txt 安装，勿在 Dockerfile 内另写包列表（历史上两边漂移过，见 #4 之后的 job 失败）"
+              echo "::error file=$f::Image dependencies must be installed from scripts/apt-packages.txt; do not write a separate package list inside the Dockerfile (the two drifted in the past, see job failures after #4)"
               exit 1
             }
           done
-          echo "Manager 与 Runner 镜像均使用共享依赖清单"
+          echo "Manager and Runner images both use the shared dependency list"
 
       - name: Detect Go module root
         id: modroot
@@ -54,9 +54,9 @@ jobs:
           args: --max-same-issues=100000 ./cmd/runner-manager/... ./internal/...
           working-directory: ${{ steps.modroot.outputs.root }}
 
-      # -race：这个项目的并发面不小——单 worker 的注册队列、runnerOps 锁、
-      # EnsureAgentToken 的「单一胜者」创建，都是靠约定而非类型系统保证的。
-      # 竞态退化在普通 go test 下是静默的，只会表现为线上偶发的怪状态。
+      # -race: this project has a sizeable concurrency surface. The single-worker registration queue, the runnerOps lock,
+      # and the "single winner" creation in EnsureAgentToken are all guaranteed by convention, not by the type system.
+      # Race degradation is silent under plain go test. It only shows up in production as occasional odd state.
       - name: Run tests
         if: (steps.modroot.outputs.found == 'true') && (github.event_name != 'pull_request')
         run: go test -race -v ./cmd/runner-manager/...
@@ -131,9 +131,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      # 与 CI (Agent) 中的同名 job 成对：镜像的 builder 阶段只 COPY 了工作区的一部分，
-      # 完整工作区里的 go build 验不出构建上下文缺路径。Manager 侧目前 COPY 了 cmd 与
-      # internal 全量、没出过问题，这一步是防止它哪天被收窄成 Dockerfile.runner 那样。
+      # Paired with the same-named job in CI (Agent). The image's builder stage only COPYs part of the workspace,
+      # so go build in the full workspace can't catch a missing path in the build context. The Manager side currently COPYs all of cmd and
+      # internal and has never had a problem. This step guards against it someday being narrowed like Dockerfile.runner.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

@@ -1,23 +1,23 @@
 #!/bin/sh
-# 不用 compose，直接起一个 Manager 容器（默认模式：Runner 进程跑在容器内）。
+# Runs the Manager in one container, no compose (default mode: Runner processes run inside the container).
 #
-# 用法：
-#   sh run.sh                       # 起在 127.0.0.1:8080，不鉴权
+# Usage:
+#   sh run.sh                       # listens on 127.0.0.1:8080, no auth
 #   PORT=0.0.0.0:8080 BASIC_AUTH_PASSWORD=xxx sh run.sh
-#   WITH_DOCKER=0 sh run.sh         # Job 里不需要 docker，不挂宿主机 socket
+#   WITH_DOCKER=0 sh run.sh         # Jobs don't need docker; host socket not mounted
 #
-# 变量：
-#   IMAGE                 Manager 镜像，默认 ghcr.io/sharkpaw/runner-deck:v2.0.0
-#   PORT                  宿主机监听地址:端口，默认 127.0.0.1:8080
-#   DATA_DIR              config/ 与 runners/ 的父目录，默认当前目录
-#   BASIC_AUTH_USER       默认 admin
-#   BASIC_AUTH_PASSWORD   留空则不鉴权（GET /health 始终免鉴权）
-#   WITH_DOCKER           1（默认）挂载宿主机 docker.sock 供 Job 使用，0 则不挂。
-#                         挂载它等同于把宿主机 root 交给 Job：这套模式下 Job 与 Manager
-#                         同容器同用户，任何 Job 都能用它操作宿主机 Docker。不需要就设 0。
+# Variables:
+#   IMAGE                 Manager image, default ghcr.io/sharkpaw/runner-deck:v2.0.0
+#   PORT                  Host listen address:port, default 127.0.0.1:8080
+#   DATA_DIR              Parent directory of config/ and runners/, default current directory
+#   BASIC_AUTH_USER       default admin
+#   BASIC_AUTH_PASSWORD   Leave empty to disable auth (GET /health is always unauthenticated)
+#   WITH_DOCKER           1 (default) mounts the host docker.sock for Jobs; 0 does not mount it.
+#                         Mounting it is equivalent to handing host root to Jobs: in this mode Jobs and the Manager
+#                         share one container and user, so any Job can use it to control host Docker. Set 0 if not needed.
 #
-# 下面的 --stop-timeout 30 不是可选项：默认模式下 Runner 进程就在 Manager 容器里，
-# Manager 收到 SIGTERM 会先停它们再退出，而 docker stop 默认只给 10 秒。
+# The --stop-timeout 30 below is not optional: in default mode the Runner processes live in the Manager container,
+# and on SIGTERM the Manager stops them before exiting, while docker stop only waits 10 seconds by default.
 
 set -e
 
@@ -29,8 +29,8 @@ BASIC_AUTH_PASSWORD="${BASIC_AUTH_PASSWORD:-}"
 WITH_DOCKER="${WITH_DOCKER:-1}"
 NAME="${NAME:-runner-manager}"
 
-# Manager 以 UID 1001 运行，挂载目录必须对它可写。
-# 先建目录再 chown：反过来的话，之后放进去的文件仍是 root 属主，
+# The Manager runs as UID 1001, so the mounted directories must be writable by it.
+# Create the directories first, then chown: in the reverse order, files placed in them later stay owned by root,
 # 写配置时会报「保存配置失败: open /app/config/config.yaml: permission denied」。
 mkdir -p "$DATA_DIR/config" "$DATA_DIR/runners"
 if [ "$(id -u)" = "0" ]; then
@@ -50,8 +50,8 @@ set -- run -d --name "$NAME" \
     --stop-timeout 30
 
 if [ "$WITH_DOCKER" = "1" ]; then
-    # 容器内是 UID 1001，必须在 socket 所属组里，否则 Job 中 docker 报 permission denied。
-    # 进到这个组就等于拿到宿主机 root——Job 与 Manager 同用户，挡不住。
+    # Inside the container the user is UID 1001, which must be in the socket's group, otherwise docker in Jobs fails with permission denied.
+    // Anyone who gets into this group effectively gets host root — the Job and Manager run as the same user, so nothing stops it.
     DOCKER_GID="${DOCKER_GID:-$(getent group docker 2>/dev/null | cut -d: -f3 || true)}"
     [ -n "$DOCKER_GID" ] || DOCKER_GID=999
     set -- "$@" -v /var/run/docker.sock:/var/run/docker.sock --group-add "$DOCKER_GID"
@@ -60,5 +60,5 @@ fi
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker "$@" "$IMAGE"
 
-echo "已启动 $NAME：http://$PORT"
+echo "Started $NAME: http://$PORT"
 echo "自检日志：docker logs $NAME | grep 自检"

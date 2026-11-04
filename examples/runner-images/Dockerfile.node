@@ -1,13 +1,13 @@
-# Node.js 的 Runner 镜像示例。
+# Example Runner image for Node.js.
 #
-# 构建：
+# Build:
 #   make docker-build-runner-example EXAMPLE=node IMAGE=your-registry/node-runner:1
 #
-# 版本用 --build-arg NODE_MAJOR=22 覆盖。说明见同目录 README.md。
+# Override the version with --build-arg NODE_MAJOR=22. See README.md in the same directory.
 #
-# 若 workflow 里已经用 actions/setup-node 指定版本，通常无需本镜像——
-# setup-node 会自行下载并缓存到 _work/_tool。预装的价值在于省掉每次下载，
-# 以及让不带 setup-node 的 workflow 也能直接跑。
+# If the workflow already pins a version with actions/setup-node, this image is usually unnecessary —
+# setup-node downloads and caches to _work/_tool on its own. Preinstalling saves a download on every run,
+# and lets workflows without setup-node run directly.
 
 ARG RUNNER_IMAGE=ghcr.io/sharkpaw/runner-deck:v2.0.0-runner
 FROM ${RUNNER_IMAGE}
@@ -25,14 +25,14 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# npm 缓存显式挪出 $HOME，并且要归 app，否则首次 npm install 会因无权限失败。
+# Move the npm cache explicitly out of $HOME and make it owned by app, otherwise the first npm install fails for lack of permission.
 #
-# 这里是 /home/app/.npm 而不是默认的 $HOME/.npm，因为容器模式下 app 的 HOME 是 /runner
-# —— Manager 建容器时把宿主机目录挂在这里，缓存放进去就成了每个 Runner 各一份、
-# 还占着宿主机的 Runner 目录。/home/app 在挂载点之外，落在镜像层里，同一个 daemon 上
-# 所有 Runner 容器共用这一份（overlayfs），Job 的写入走 copy-on-write 互不污染——
-# 与 examples/deploy/fleet/Dockerfile.runner-cached 里共享工具链缓存是同一个思路。
-# 别「顺手」改回 $HOME/.npm。
+# This is /home/app/.npm rather than the default $HOME/.npm, because in container mode app's HOME is /runner
+# — the Manager mounts a host directory here when creating the container; putting the cache there would make one copy per Runner,
+# and consume space in the host's Runner directory. /home/app is outside the mount point and lives in the image layers, so on the same daemon
+# all Runner containers share that one copy (overlayfs), and Job writes use copy-on-write so they don't contaminate each other —
+# the same approach as sharing the toolchain cache in examples/deploy/fleet/Dockerfile.runner-cached.
+# Don't 'tidy up' by changing it back to $HOME/.npm.
 ENV NPM_CONFIG_CACHE=/home/app/.npm
 RUN install -d -o 1001 -g 1001 /home/app/.npm
 

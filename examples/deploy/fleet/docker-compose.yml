@@ -8,7 +8,7 @@ services:
       BASIC_AUTH_PASSWORD: ${BASIC_AUTH_PASSWORD:-}
       CONTAINER_MODE: ${CONTAINER_MODE:-true}
       RUNNERS_BASE_PATH: ${RUNNERS_BASE_PATH:-/app/runners}
-      VOLUME_HOST_PATH: ${VOLUME_HOST_PATH:?请在 .env 里把 VOLUME_HOST_PATH 设为宿主机 runners 目录绝对路径（realpath runners）}
+      VOLUME_HOST_PATH: ${VOLUME_HOST_PATH:?Set VOLUME_HOST_PATH in .env to the absolute host path of the runners directory (realpath runners)}
       CONTAINER_NETWORK: ${CONTAINER_NETWORK:-runner-net}
       JOB_DOCKER_BACKEND: ${JOB_DOCKER_BACKEND:-host-socket}
       RUNNER_IMAGE: ${RUNNER_IMAGE:-}

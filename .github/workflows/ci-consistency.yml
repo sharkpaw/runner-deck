@@ -1,7 +1,7 @@
-# 仓库一致性校验：跨文件、跨语言的整体性检查，独立于 Go 的 CI。
+# Repository consistency check: cross-file, cross-language holistic checks, independent of the Go CI.
 #
-# 前两个 job 与语言/构建无关，只读文件。第三个 quickstart 例外，它要构建镜像并把容器
-# 拉起来——因为它验的恰恰是「照文档做能不能成」，而这件事没有不执行就能验的办法。
+# The first two jobs are unrelated to language/build and only read files. The third, quickstart, is the exception: it builds the image and brings up the container
+# — because it verifies exactly "does following the docs actually work", and there is no way to verify that without executing it.
 name: CI (Consistency)
 
 on:
@@ -11,23 +11,23 @@ on:
     branches: [main, master, develop]
 
 env:
-  # 两个检查由 soulteary/ci-recipes 的 runner-fleet recipe 提供，本仓库只出
-  # scripts/ci-recipes.conf（基准路径与正则、ignore 标记、扫描 pathspec、文档语言与
-  # 文件列表）。这里是版本的唯一来源：Makefile 的 check target 用 sed 从本文件读它，
-  # 不再各钉一个——两处各钉一个却忘了同步，就是本地绿、CI 红的那个老口子。
+  # Both checks are provided by the runner-fleet recipe from soulteary/ci-recipes; this repo only supplies
+  # scripts/ci-recipes.conf (base paths and regexes, ignore markers, scan pathspec, doc languages and
+  # file list). This is the single source of truth for the version: the Makefile's check target reads it from this file via sed,
+  # instead of each pinning its own copy — pinning in two places and forgetting to sync is exactly how checks go green locally and red in CI.
   #
-  # 钉的是 module 伪版本而不是短 SHA：伪版本是精确的模块版本，proxy 按版本号不可变地
-  # 从缓存里服务它；短 SHA 要回仓库里解析，commit 一旦不可达（比如被 squash 合并孤立）
-  # 就取不到了。这个伪版本对应 ci-recipes main 上合入 runner-fleet recipe 的那个合并提交。
-  # ci-recipes 发出 tag 之后换成 tag。
+  # The pin is a module pseudo-version rather than a short SHA: a pseudo-version is an exact module version that the proxy serves immutably
+  # from cache; a short SHA must be resolved against the repo, and once the commit is unreachable (e.g. orphaned by a squash merge)
+  # it can no longer be fetched. This pseudo-version corresponds to the merge commit on ci-recipes main that landed the runner-fleet recipe.
+  # Switch to the tag once ci-recipes publishes one.
   #
-  # 行尾的 version-check-ignore 是必需的：这是 ci-recipes 的模块版本，不是本仓库的版本号，
-  # 而版本号一致性检查只认「一个 vX.Y.Z 字面量」。换成 tag 之后同样需要，这一点跟 tag 无关。
+  # The trailing version-check-ignore is required: this is ci-recipes' module version, not this repo's version number,
+  # and the version consistency check only recognizes "a single vX.Y.Z literal". It is equally required after switching to a tag; that has nothing to do with the tag.
   CI_RECIPES_VERSION: "v0.0.0-20260921094536-68dc8a7f1123"  # version-check-ignore
 
-# 两个 job 各自装一遍 ci-recipes。合成一个 job 能省掉一次安装，但也会把 PR 上两个检查
-# 的名字合成一个——分支保护里按名字要求的必需检查会当场对不上。两个 job 本来并行，
-# 墙钟时间不变，多花的只是 runner 分钟数。
+# Each of the two jobs installs ci-recipes separately. Merging them into one job would save one install, but would also merge the two check names on the PR
+# into one — required checks in branch protection that are matched by name would immediately fail to match. The two jobs run in parallel,
+# so wall-clock time is unchanged; the only extra cost is runner minutes.
 jobs:
   version:
     name: Version consistency
@@ -47,12 +47,12 @@ jobs:
         run: |
           set -eu
           go install "github.com/soulteary/ci-recipes/cmd/ci-recipes@${CI_RECIPES_VERSION}"
-          # setup-go 只保证 GOROOT/bin 在 PATH 上，go install 的产物落在 GOPATH/bin。
+          # setup-go only guarantees GOROOT/bin is on PATH; go install artifacts land in GOPATH/bin.
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      # 文档与示例里的版本号必须跟代码里的默认镜像 tag 一致。
-      # v1.0.1 / v1.1.0 / v1.1.1 三次发布都漏了同步，照 README 部署会拉到  version-check-ignore
-      # 落后三个版本的镜像；这一步让下次漏改直接在 PR 上失败。
+      # Version numbers in docs and examples must match the default image tag in the code.
+      # Releases v1.0.1 / v1.1.0 / v1.1.1 all missed this sync; following the README deployed an image version version-check-ignore
+      # three releases behind. This step makes the next missed update fail directly on the PR.
       - name: Check version references are in sync
         run: ci-recipes runner-fleet check-version-consistency
 
@@ -76,9 +76,9 @@ jobs:
           go install "github.com/soulteary/ci-recipes/cmd/ci-recipes@${CI_RECIPES_VERSION}"
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      # 五种译文的 development.md 曾整整落后一个版本（v1.5.1/v1.6.0 新增的四节一节没跟上），  version-check-ignore
-      # 而没有任何东西会因此报错——译文语法完好，站点照常渲染。界面的 i18n 早有测试盯着
-      # 六种语言的键集，文档这一半一直没有；这一步补上。
+      # The development.md in the five translations once lagged a full version behind (the four-plus-one sections added in v1.5.1/v1.6.0 were never carried over),  version-check-ignore
+      # and nothing reports it: the translations are syntactically valid and the site renders as usual. The UI's i18n already has tests watching
+      # the key sets for the six languages, but the docs half never had one; this step fills that gap.
       - name: Check translated docs match the English section structure
         run: ci-recipes runner-fleet check-docs-structure
 
@@ -90,12 +90,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      # 照着文档抄的人不会先读一遍再判断哪条该跳过，他们整段贴进终端。所以这里也整段执行。
+      # People who copy from the docs don't read through first to decide which lines to skip; they paste the whole block into the terminal. So this runs the whole block too.
       #
-      # 这一步守的是一类具体的事故：快速开始里的 chown 排在 mkdir -p runners 之前，
-      # 第一条命令必定 `cannot access 'runners'`，而且那段还把 runners chown 了两遍——
-      # 典型的两次修改叠出来、整段没人跑过。六份译文行号完全一致地错着，
-      # 标题结构检查与版本号检查都看不见这种事，因为两者都不执行任何东西。
+      # This step guards against a specific class of incident: in the quick start, the chown comes before mkdir -p runners,
+      # so the first command always fails with `cannot access 'runners'`, and the block also chowns runners twice --
+      # a typical result of two edits stacking up, with the whole block never run end to end. All six translations have the same wrong line numbers,
+      # The heading-structure check and the version check both miss this, because neither executes anything.
       - name: Extract the quick start block from the guide
         run: |
           set -euo pipefail
@@ -106,15 +106,15 @@ jobs:
             inblk                   { print }
           ' docs/guide.md > quickstart.sh
           if [ ! -s quickstart.sh ]; then
-            echo "::error file=docs/guide.md::没能抽出 docker-compose 快速开始的 bash 块。"
-            echo "::error::改过那一节的标题或围栏语言标记的话，这里的 awk 也要跟着改"
+            echo "::error file=docs/guide.md::Failed to extract the bash block from the docker-compose quick start."
+            echo "::error::If that section's heading or fence language tag is changed, the awk here must be updated too"
             exit 1
           fi
-          echo "抽到的命令块："
+          echo "Extracted command block:"
           cat quickstart.sh
 
-      # 不拉已发布镜像，就地构建：升版本的那个 PR 里，新 tag 的镜像还不存在
-      # （镜像由 tag 触发的 release workflow 推），拉取必然失败，而那正是最需要这一步的 PR。
+      # Do not pull the published image; build in place: in the version-bump PR, the image for the new tag does not exist yet
+      # (the image is pushed by the release workflow triggered by the tag), so the pull is bound to fail, and that is exactly the PR that needs this step.
       - name: Build the Manager image locally
         run: docker build -t runner-deck:quickstart-ci .
 
@@ -123,9 +123,9 @@ jobs:
           MANAGER_IMAGE: runner-deck:quickstart-ci
         run: bash -euxo pipefail quickstart.sh
 
-      # 查 /ready 而不是 /health：/health 只要进程活着就恒为 200，挂载目录不可写它照样绿，
-      # 等于只证明了「容器起来了」。/ready 在配置读不了、runner 根目录缺失或不可写时返回 503,
-      # 正好是这段命令真正要产生的结果。
+      # Check /ready rather than /health: /health always returns 200 as long as the process is alive, so it stays green even if the mounted directory is not writable,
+      # which only proves the container started. /ready returns 503 when the config cannot be read or the runner root directory is missing or not writable,
+      # which is exactly the outcome this command block is meant to produce.
       - name: The deployment is actually ready
         run: |
           set -euo pipefail

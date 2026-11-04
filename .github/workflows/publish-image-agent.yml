@@ -1,4 +1,4 @@
-# push main/master 或 tag 时：构建并推送 Runner 容器镜像到 GHCR（tag 带 -runner 后缀）
+# push main/master or tag: build and push the Runner container image to GHCR (tag gets a -runner suffix)
 name: Publish image (Runner)
 
 on:
@@ -33,16 +33,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 缺任何一项就直接失败，不再只报一条 warning 然后跳过后续 step。
-      # 原先的写法是：清单缺一项 → 置一个 false 输出 → 下面每个 step 的 if 都不成立
-      # → job 全绿收场，只留一条 warning。也就是说 push 一个 v* tag 上来，release 建好了、
-      # tag 也在了，GHCR 上却没有新镜像，而没有任何东西是红的——README 正让用户照那个
-      # tag 起服务。这个 fail-open 是给「仓库里还没有完整源码」的骨架期准备的（原来的提示
-      # 语就是「请先提交完整源码再构建」），那个前提早就不成立：清单里每一项都是核心路径。
+      # Fail right away if any item is missing, instead of emitting only a warning and skipping the remaining steps.
+      # The old logic was: missing list item → set a false output → every step's if fails below
+      # → job ends green with only a warning. So pushing a v* tag creates the release and the
+      # tag, but no new image appears on GHCR, and nothing turns red. The README tells users to start
+      # the service from that tag. This fail-open was meant for the skeleton stage when the repo lacked full source
+      # (the old hint said "commit the full source before building"), but that premise no longer holds: every item in the list is on the core path.
       #
-      # 清单本身是构建上下文的契约。把其中任何一项改名或移走时（例如把
-      # scripts/install-runner.sh 的逻辑挪进 internal/runner），必须同时改这里。
-      - name: Verify build context (Dockerfile.runner 所需源码齐全)
+      # The list is the build context contract. If you rename or move any item (for example, moving
+      # the scripts/install-runner.sh logic into internal/runner), you must update this list too.
+      - name: Verify build context (all source required by Dockerfile.runner present)
         run: |
           set -eu
           MISSING=""
@@ -50,10 +50,10 @@ jobs:
             [ -f "$f" ] || MISSING="${MISSING} ${f}"
           done
           if [ -n "$MISSING" ]; then
-            echo "::error::Runner 构建所需文件缺失（${MISSING# }），构建上下文不完整。"
+            echo "::error::Files required for the Runner build are missing (${MISSING# }); the build context is incomplete."
             exit 1
           fi
-          echo "构建上下文完整。"
+          echo "Build context is complete."
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -101,7 +101,7 @@ jobs:
         id: runner-tags
         run: |
           echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          # metadata-action 可能输出逗号/换行分隔；每行 image:tag 转为 image:tag-runner
+          # metadata-action may output comma- or newline-separated values; convert each image:tag line to image:tag-runner
           echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | while IFS= read -r line; do
             [ -z "$line" ] && continue
             if [[ "$line" == *:* ]]; then
@@ -121,10 +121,10 @@ jobs:
           tags: ${{ steps.runner-tags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
-          # scope 按 workflow 分开：tag push 会同时触发四个构建 workflow，
-          # 而 type=gha 不指定 scope 时都落在 BuildKit 默认的 scope=buildkit 上，
-          # 互相覆盖，一方正在写的层被另一方的索引替换后就是 layer blob not_found。
+          # Scope is separate per workflow: a tag push triggers four build workflows at once,
+          # and type=gha without a scope all lands on BuildKit's default scope=buildkit,
+          # where they overwrite each other; once a layer one side is writing is replaced by the other's index, it becomes layer blob not_found.
           cache-from: type=gha,scope=publish-runner
-          # ignore-error：缓存导出只是加速手段。镜像此时已经推送完成，
-          # 不能因为写缓存失败就把一次已经成功的发布标成红的。
+          # ignore-error: cache export is only an optimization. The image has already been pushed by this point,
+          # so a cache write failure must not mark a publish that already succeeded as red.
           cache-to: type=gha,mode=max,scope=publish-runner,ignore-error=true

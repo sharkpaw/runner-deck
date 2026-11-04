@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{index .T "page.title"}}</title>
-  {{/* 内联 SVG 图标：不必为一个 16px 的图新增静态路由和二进制资源，
-       也省掉每次加载都要吃的一个 /favicon.ico 404 */}}
+  {{/* Inline SVG icon: no need to add a static route and binary asset for a 16px image,
+       and it also avoids the /favicon.ico 404 that every page load would otherwise hit */}}
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' role='img' aria-label='Runner Deck'%3E%3Cdefs%3E%3ClinearGradient id='rf-bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234f9bf0'/%3E%3Cstop offset='1' stop-color='%231c5cab'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='256' height='256' rx='56' fill='url%28%23rf-bg%29'/%3E%3Cg fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M58 70h76' stroke-width='20'/%3E%3Cpath d='M58 128h104' stroke-width='20'/%3E%3Cpath d='M58 186h60' stroke-width='20'/%3E%3Cpath d='M154 54l18 16-18 16' stroke-width='14'/%3E%3Cpath d='M182 112l18 16-18 16' stroke-width='14'/%3E%3Cpath d='M138 170l18 16-18 16' stroke-width='14'/%3E%3C/g%3E%3Ccircle cx='196' cy='186' r='19' fill='%232fb67c' stroke='%23fff' stroke-width='8'/%3E%3C/svg%3E">
   {{/* Applied before first paint so a light-theme user never sees a dark flash. */}}
   <script>
@@ -194,7 +194,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-header">
         <h3 id="modalTitle">{{index .T "modal.title"}}</h3>
-        {{/* &times; 对读屏器读作「times」，必须另给可访问名 */}}
+        {{/* &times; is read as "times" by screen readers, so it needs a separate accessible name */}}
         <button type="button" class="modal-close" id="modalClose" aria-label="{{index .T "modal.btn_close"}}">&times;</button>
       </div>
       <div class="modal-body">
@@ -258,31 +258,31 @@
   </div>
 
   <script>
-    // 字典必须内联：它是随页面语言一起渲染出来的，外链脚本拿不到。
+    // The dictionary must be inline: it is rendered together with the page language, so an external script can't access it.
     window.__I18N = {{.TJSON}};
   </script>
   <script src="/static/app.js?v={{.AssetVersion}}" defer></script>
 </body>
 </html>
 
-{{/* runnerRows：列表的 <tbody> 内容。首屏由页面直接展开，自动刷新时由
-     /api/runner-rows 单独渲染同一个片段——两条路径共用一份行渲染逻辑，
-     GitHubYes/GitHubNo 这类三态判断不必在 JS 里再写一遍。 */}}
+{{/* runnerRows: the <tbody> content of the list. The first render is expanded directly by the page; on auto-refresh,
+     /api/runner-rows renders the same fragment separately. Both paths share one row-rendering logic,
+     so three-state checks like GitHubYes/GitHubNo don't need to be rewritten in JS. */}}
 {{define "runnerRows"}}
         {{range .Runners}}
-        {{/* 筛选与计数读这些属性，而不是去解析单元格里的可见文本——那些文本是
-             按语言翻译过的，换一种语言筛选就会失灵。属性写在片段里，自动刷新
-             换回来的行才同样带着它们。 */}}
+        {{/* Filtering and counting read these attributes instead of parsing the visible text in the cells. That text is
+             translated per language, so filtering would break after switching languages. The attributes live in the fragment, so auto-refresh
+             returned rows carry them too. */}}
         <tr data-name="{{.Name}}" data-target="{{.TargetType}}: {{.Target}}" data-status="{{.Status}}" data-running="{{if .Running}}1{{else}}0{{end}}" data-drift="{{if .ContainerDrift}}1{{else}}0{{end}}" data-probe="{{if .Probe}}1{{else}}0{{end}}">
           <td>{{.Name}}</td>
           <td>{{.TargetType}}: {{.Target}}</td>
           <td class="col-status">
             <span class="badge {{.Status}}">{{with index $.T (printf "status.%s" .Status)}}{{.}}{{else}}{{.Status}}{{end}}</span>
             {{if .Running}}<span class="badge running">{{index $.T "badge.running"}}</span>{{end}}
-            {{/* 用 GitHubBusyYes 而不是 {{if .GitHubBusy}}：它同样是 *bool，
-                 指向 false 的指针在模板里也为真，「空闲」会显示成「忙碌中」 */}}
+            {{/* Use GitHubBusyYes instead of {{if .GitHubBusy}}: it is also a *bool,
+                 and a pointer to false is also truthy in templates, so "idle" would render as "busy" */}}
             {{if .GitHubBusyYes}}<span class="badge busy has-tip" tabindex="0" role="note">{{index $.T "badge.busy"}}<span class="tip">{{index $.T "badge.busy_title"}}</span></span>{{end}}
-            {{/* 同理用 GitHubPublicYes：{{if .GitHubPublic}} 会给每个私有仓库都挂上这个徽标 */}}
+            {{/* Likewise use GitHubPublicYes: {{if .GitHubPublic}} would attach this badge to every private repo */}}
             {{if .GitHubPublicYes}}<span class="badge public-repo has-tip" tabindex="0" role="note">{{index $.T "badge.public_repo"}}<span class="tip">{{index $.T "badge.public_repo_title"}}</span></span>{{end}}
             {{if .ContainerDrift}}<span class="badge drift has-tip" tabindex="0" role="note">{{index $.T "badge.drift"}}<span class="tip">{{.ContainerDrift}}</span></span>{{end}}
             {{if .Probe}}<br><span class="probe-err has-tip" tabindex="0" role="note">{{index $.T "probe.failed"}}{{if .Probe.Type}} ({{.Probe.Type}}){{end}}<span class="tip">{{.Probe.Error}}</span></span>{{end}}
@@ -291,8 +291,8 @@
           <td>
             {{if .RegistrationMessage}}
               {{if and (eq .Status "installed") .GitHubURL}}
-                {{/* 提示里仍是注册结果原文：那是这一格真正的诊断信息，变成链接不该把它挤掉。
-                     「点了会去 GitHub」由虚下划线与下一行的 GitHub ✓ 交代 */}}
+                {{/* The tooltip still shows the raw registration result. That is the real diagnostic for this cell, and turning it into a link should not crowd it out.
+                     "Clicking goes to GitHub" is conveyed by the dotted underline and the GitHub ✓ on the next line */}}
                 <a class="reg-ok github-link has-tip" href="{{.GitHubURL}}" target="_blank" rel="noopener noreferrer">{{index $.T "reg.registered"}}<span class="tip">{{.RegistrationMessage}}</span></a>
               {{else}}
                 <span class="{{if eq .Status "installed"}}reg-ok{{else}}reg-err{{end}} has-tip" tabindex="0" role="note">{{if eq .Status "installed"}}{{index $.T "reg.registered"}}{{else}}{{index $.T "reg.failed"}}{{end}}<span class="tip">{{.RegistrationMessage}}</span></span>
@@ -300,8 +300,8 @@
             {{else}}
               <span class="github-unknown">—</span>
             {{end}}
-            {{/* 三态要用 GitHubYes/GitHubNo：{{if .RegisteredOnGitHub}} 对指针只看是否为 nil，
-                 指向 false 的指针同样为真，「GitHub 上没有它」会被渲染成「GitHub ✓」 */}}
+            {{/* Three-state values must use GitHubYes/GitHubNo: {{if .RegisteredOnGitHub}} only checks whether a pointer is nil,
+                 so a pointer to false is also truthy, and "not on GitHub" would render as "GitHub ✓" */}}
             {{if .GitHubYes}}
               <br>{{if .GitHubURL}}<a class="github-yes github-link" href="{{.GitHubURL}}" target="_blank" rel="noopener noreferrer" title="{{index $.T "github.open_title"}}">{{index $.T "github.yes"}}</a>{{else}}<span class="github-yes">{{index $.T "github.yes"}}</span>{{end}}
             {{else if .GitHubNo}}

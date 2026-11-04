@@ -1,20 +1,20 @@
-# 检测 Go 模块根目录（含 go.mod 与 cmd/runner-manager 的目录），便于单仓或 monorepo 复用。
-# 使用方通过 env.WORKING_DIR 传入期望根目录（默认 .），若该目录下无 cmd/runner-manager 则自动查找。
+# Detect the Go module root (the directory containing go.mod and cmd/runner-manager), so single-repo and monorepo setups can both reuse it.
+# Callers pass the desired root via env.WORKING_DIR (default .); if that directory has no cmd/runner-manager, the search falls back automatically.
 name: Detect Go module root
-description: 输出模块根路径 root 与是否找到 found (true/false)
+description: Output the module root path `root` and whether it was `found` (true/false)
 
 inputs:
   working_dir:
-    description: 期望的模块根目录，如 . 或子目录
+    description: Desired module root directory, such as `.` or a subdirectory
     required: false
     default: .
 
 outputs:
   root:
-    description: 模块根目录路径
+    description: Module root directory path
     value: ${{ steps.detect.outputs.root }}
   found:
-    description: 是否找到 (true/false)
+    description: Whether found (true/false)
     value: ${{ steps.detect.outputs.found }}
 
 runs:

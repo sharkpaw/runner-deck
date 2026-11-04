@@ -1,7 +1,7 @@
-# 开关大多由 .env 注入（配置加载后会被环境变量覆盖，见 internal/config/config.go 的 applyEnvOverrides），
-# 这里只放没有环境变量对应项的内容：resources 与 items。
-# 用法：mkdir -p config && cp config.yaml.example config/config.yaml
-# 界面里增删 Runner 时 Manager 会重写该文件，下面两项会被保留。
+# Most switches are injected from .env (config loading overrides them with environment variables, see applyEnvOverrides in internal/config/config.go),
+# Only put items here that have no corresponding environment variable: resources and items.
+# Usage: mkdir -p config && cp config.yaml.example config/config.yaml
+# The Manager rewrites this file when Runners are added or removed in the UI; the two items below are preserved.
 server:
     port: 8080
     addr: 0.0.0.0
@@ -9,16 +9,16 @@ runners:
     base_path: /app/runners
     items: []
 
-    # 强烈建议设置：不限制时，单个失控 Job（Gradle daemon、-j$(nproc) 编译）能吃光整机内存，
-    # 连带把 Manager 一起拖垮。按「并发 Runner 数 × 单个上限 ≈ 整机资源的 80%」分配。
-    # 修改后对已存在的容器同样生效（启停时通过 docker update 施加）。
+    # Strongly recommended: if unlimited, a single runaway Job (Gradle daemon, -j$(nproc) compile) can consume all machine memory,
+    # and drag the Manager down with it. Allocate as "concurrent Runners × per-Runner limit ≈ 80% of machine resources".
+    # Also applies to existing containers (enforced via docker update on start/stop).
     resources:
         cpus: "4"
         memory: 8g
-        memory_swap: 8g      # 等于 memory 表示禁用 swap
+        memory_swap: 8g      # Equal to memory disables swap
         pids_limit: 4096
 
-    # 某个项目需要自己的工具链镜像时，在这里按 Runner 覆盖：
+    # For a project that needs its own toolchain image, override it per Runner here:
     # items:
     #   - name: android
     #     target_type: repo
