@@ -5,7 +5,7 @@ services:
     expose:
       - "8080"
     environment:
-      SERVICE_URL_RUNNERMANAGER_8080:
+      SERVICE_URL_RUNNER_MANAGER_8080:
       BASIC_AUTH_USER: ${BASIC_AUTH_USER:-admin}
       BASIC_AUTH_PASSWORD: ${SERVICE_PASSWORD_RUNNERDECK:?}
       DOCKER_HOST: unix:///var/run/docker.sock
