@@ -126,6 +126,11 @@ func main() {
 
 	setupLogging()
 
+	// Before anything opens files: the config load may create files, and they must belong to the app user.
+	if err := dropPrivileges(systemPrivilegeOps, dockerSock, managerDirs(*configPath)...); err != nil {
+		log.Fatalf("cannot drop root privileges: %v", err)
+	}
+
 	handler.ConfigPath = *configPath
 	store := secrets.NewStore(*configPath)
 	handler.Secrets = store
