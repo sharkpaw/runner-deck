@@ -153,14 +153,14 @@ func TestCollectSystem_JoinsDockerNumbers(t *testing.T) {
 	cfg.Runners.BasePath = t.TempDir()
 	list := []runner.RunnerInfo{{Name: "a", Target: "o/r", InstallDir: cfg.Runners.BasePath}}
 
-	got := collectSystem(context.Background(), cfg, list)
+	got := collectSystem(cfg, list)
 	if got.StatsError != "" || len(got.Runners) != 1 || !got.Runners[0].Running || got.Runners[0].CPUPct != 5 {
 		t.Fatalf("got %+v", got)
 	}
 	if len(got.Docker) != 1 || got.Disk == nil || got.HostCPUs < 1 {
 		t.Fatalf("got %+v", got)
 	}
-	collectSystem(context.Background(), cfg, list)
+	collectSystem(cfg, list)
 	if calls != 2 {
 		t.Errorf("docker ran %d times, a second poll within the TTL must use the cache", calls)
 	}
@@ -170,7 +170,7 @@ func TestCollectSystem_DockerFailureKeepsThePage(t *testing.T) {
 	stubDocker(t, func(...string) ([]byte, error) { return nil, errors.New("no daemon") })
 	cfg := &config.Config{}
 	cfg.Runners.BasePath = t.TempDir()
-	got := collectSystem(context.Background(), cfg, []runner.RunnerInfo{{Name: "a", InstallDir: cfg.Runners.BasePath}})
+	got := collectSystem(cfg, []runner.RunnerInfo{{Name: "a", InstallDir: cfg.Runners.BasePath}})
 	if got.StatsError == "" || len(got.Runners) != 1 || got.Runners[0].HasStats || got.Disk == nil {
 		t.Fatalf("got %+v", got)
 	}
@@ -245,5 +245,56 @@ func TestPageData_HasTranslationsAndLanguage(t *testing.T) {
 	data := PageData(c)
 	if data["Lang"] != "tr" || data["T"].(map[string]string)["k"] != "v" {
 		t.Fatalf("data = %+v", data)
+	}
+}
+
+func TestCollectSystem_RequestCancelDoesNotReachDocker(t *testing.T) {
+	var sawCanceled bool
+	orig := dockerRun
+	dockerRun = func(ctx context.Context, _ ...string) ([]byte, error) {
+		sawCanceled = ctx.Err() != nil
+		return nil, nil
+	}
+	statsCache = ttlCache[[]containerStat]{}
+	dockerCache = ttlCache[[]SystemDockerUsage]{}
+	t.Cleanup(func() {
+		dockerRun = orig
+		statsCache = ttlCache[[]containerStat]{}
+		dockerCache = ttlCache[[]SystemDockerUsage]{}
+	})
+	cfg := &config.Config{}
+	cfg.Runners.BasePath = t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/system", nil).WithContext(ctx)
+	path := filepath.Join(cfg.Runners.BasePath, "config.yaml")
+	if err := os.WriteFile(path, []byte("runners:\n  base_path: "+cfg.Runners.BasePath+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	origPath := ConfigPath
+	ConfigPath = path
+	t.Cleanup(func() { ConfigPath = origPath })
+	if err := SystemInfo(echo.New().NewContext(req, httptest.NewRecorder())); err != nil {
+		t.Fatal(err)
+	}
+	if sawCanceled {
+		t.Fatal("a closed page must not cancel the shared docker call")
+	}
+}
+
+func TestTTLCache_KeepsLastGoodValueOnFailure(t *testing.T) {
+	var c ttlCache[int]
+	if _, err := c.get(time.Hour, func() (int, error) { return 0, errors.New("first") }); err == nil {
+		t.Fatal("with nothing cached the error must surface")
+	}
+	if v, err := c.get(0, func() (int, error) { return 7, nil }); err != nil || v != 7 {
+		t.Fatalf("v=%d err=%v", v, err)
+	}
+	if v, err := c.get(0, func() (int, error) { return 0, errors.New("later") }); err != nil || v != 7 {
+		t.Fatalf("a later failure must keep the good value: v=%d err=%v", v, err)
+	}
+	calls := 0
+	if v, _ := c.get(time.Hour, func() (int, error) { calls++; return 9, nil }); v != 7 || calls != 0 {
+		t.Fatalf("within the TTL: v=%d calls=%d", v, calls)
 	}
 }

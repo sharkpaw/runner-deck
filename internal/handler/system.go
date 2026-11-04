@@ -31,7 +31,7 @@ const (
 	systemStatsTTL   = 4 * time.Second
 	systemDockerTTL  = time.Minute
 	systemDirSizeTTL = 5 * time.Minute
-	systemCmdTimeout = 15 * time.Second
+	systemCmdTimeout = 30 * time.Second
 )
 
 // SystemDisk is the filesystem that holds the runner directories.
@@ -109,21 +109,29 @@ var (
 // ttlCache keeps one value for a fixed time. The lock is held while loading, so
 // concurrent pollers share a single docker process instead of starting one each.
 type ttlCache[T any] struct {
-	mu  sync.Mutex
-	at  time.Time
-	val T
-	err error
+	mu   sync.Mutex
+	at   time.Time
+	val  T
+	good bool
 }
 
+// get keeps the last good value when a load fails, so one slow or failed docker call on a busy
+// host does not blank the page. The error only surfaces while there is nothing to show.
 func (c *ttlCache[T]) get(ttl time.Duration, load func() (T, error)) (T, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.at.IsZero() && time.Since(c.at) < ttl {
-		return c.val, c.err
+	if c.good && time.Since(c.at) < ttl {
+		return c.val, nil
 	}
-	c.val, c.err = load()
-	c.at = time.Now()
-	return c.val, c.err
+	val, err := load()
+	if err != nil {
+		if c.good {
+			return c.val, nil
+		}
+		return val, err
+	}
+	c.val, c.good, c.at = val, true, time.Now()
+	return val, nil
 }
 
 // parseSize reads the human sizes docker prints: "12.5MiB", "1.2GB", "512kB", "0B".
@@ -298,7 +306,7 @@ func buildSystemRunners(list []runner.RunnerInfo, stats []containerStat, sizes m
 	return runners, others
 }
 
-func collectSystem(ctx context.Context, cfg *config.Config, list []runner.RunnerInfo) SystemResponse {
+func collectSystem(cfg *config.Config, list []runner.RunnerInfo) SystemResponse {
 	resp := SystemResponse{ContainerMode: cfg.Runners.ContainerMode, HostCPUs: runtime.NumCPU(), Disk: diskUsage(cfg.Runners.BasePath)}
 
 	dirs := make(map[string]string, len(list))
@@ -313,8 +321,9 @@ func collectSystem(ctx context.Context, cfg *config.Config, list []runner.Runner
 	}
 	dirSizesMu.Unlock()
 
+	// Not tied to the request: the result is shared, so a reloaded page must not kill the docker call.
 	stats, err := statsCache.get(systemStatsTTL, func() ([]containerStat, error) {
-		cctx, cancel := context.WithTimeout(ctx, systemCmdTimeout)
+		cctx, cancel := context.WithTimeout(context.Background(), systemCmdTimeout)
 		defer cancel()
 		out, err := dockerRun(cctx, "stats", "--no-stream", "--format", "{{json .}}")
 		if err != nil {
@@ -329,7 +338,7 @@ func collectSystem(ctx context.Context, cfg *config.Config, list []runner.Runner
 
 	// `docker system df` failing only hides its table, so the error is not surfaced.
 	resp.Docker, _ = dockerCache.get(systemDockerTTL, func() ([]SystemDockerUsage, error) {
-		cctx, cancel := context.WithTimeout(ctx, systemCmdTimeout)
+		cctx, cancel := context.WithTimeout(context.Background(), systemCmdTimeout)
 		defer cancel()
 		out, err := dockerRun(cctx, "system", "df", "--format", "{{json .}}")
 		if err != nil {
@@ -349,5 +358,5 @@ func SystemInfo(c echo.Context) error {
 	// No agent probe here: `docker stats` only lists running containers, so it already
 	// answers "is it running", and probing every runner each poll would slow the page.
 	list := runner.List(cfg)
-	return c.JSON(http.StatusOK, collectSystem(c.Request().Context(), cfg, list))
+	return c.JSON(http.StatusOK, collectSystem(cfg, list))
 }
