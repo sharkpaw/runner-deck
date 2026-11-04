@@ -160,6 +160,38 @@ function parseGitHubConfigCommand(text) {
   };
 }
 
+// Runners of one repository differ only by number, so the name is proposed as <repo>-<next free number>.
+// A name the user typed is never replaced.
+var autoNamed = false;
+var addedNames = {};
+function nextRunnerName(base) {
+  var taken = Object.assign({}, addedNames);
+  document.querySelectorAll('#runnerRowsBody tr[data-name]').forEach(function(row) {
+    taken[row.dataset.name] = true;
+  });
+  var n = 1;
+  while (taken[base + '-' + n]) n++;
+  return base + '-' + n;
+}
+function canAutoName() {
+  return autoNamed || !document.getElementById('addFormName').value;
+}
+function setAutoName(base) {
+  document.getElementById('addFormName').value = nextRunnerName(base);
+  autoNamed = true;
+}
+document.getElementById('addFormTarget').addEventListener('input', function() {
+  var target = this.value.trim();
+  document.getElementById('addFormTargetType').value = target.indexOf('/') > 0 ? 'repo' : 'org';
+  var base = sanitizeRunnerName(target.split('/').filter(Boolean).pop() || '');
+  if (!target || !canAutoName()) return;
+  setAutoName(base);
+  schedulePrecheck();
+});
+document.getElementById('addFormName').addEventListener('input', function() {
+  autoNamed = false;
+});
+
 document.getElementById('parseCommandBtn').addEventListener('click', function() {
   const input = document.getElementById('githubCommandInput');
   const msgEl = document.getElementById('parseMsg');
@@ -174,8 +206,8 @@ document.getElementById('parseCommandBtn').addEventListener('click', function() 
   document.getElementById('addFormTargetType').value = result.target_type;
   document.getElementById('addFormTarget').value = result.target;
   document.getElementById('addFormToken').value = result.registration_token || '';
-  if (result.suggested_name && !document.getElementById('addFormName').value) {
-    document.getElementById('addFormName').value = result.suggested_name;
+  if (result.suggested_name && canAutoName()) {
+    setAutoName(result.suggested_name);
     document.getElementById('addFormPath').value = '';
     // Names auto-filled from the repo name are the most likely to collide with an existing runner, so check once right after filling
     schedulePrecheck();
@@ -365,6 +397,8 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
       msgEl.innerHTML += '<br><span style="font-size:12px;color:var(--muted)">' + t('msg.reload_in_5s') + '</span>';
       setTimeout(function() { location.reload(); }, 5000);
     }
+    addedNames[String(new FormData(e.target).get('name'))] = true;
+    autoNamed = false;
     e.target.reset();
     clearNameCheck();
     if (submitBtn) submitBtn.disabled = false;
