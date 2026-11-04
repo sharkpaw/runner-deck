@@ -364,3 +364,25 @@ func TestUpdateResourceLimits(t *testing.T) {
 		t.Fatalf("%+v", cfg.Runners.Resources)
 	}
 }
+
+func TestUpdateResourceLimits_ReportsContainersItCouldNotUpdate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := "runners:\n  base_path: " + dir + "\n  container_mode: true\n  volume_host_path: " + dir + "\n  job_docker_backend: none\n  items:\n    - {name: a, target_type: repo, target: o/r}\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := ConfigPath
+	ConfigPath = path
+	t.Cleanup(func() { ConfigPath = orig })
+	t.Setenv("PATH", t.TempDir())
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/resources", strings.NewReader(`{"cpus":"2","memory":"4g"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := UpdateResourceLimits(echo.New().NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "a: ") {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}

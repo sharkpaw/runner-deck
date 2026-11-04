@@ -142,3 +142,25 @@ func TestContainerStatusDistinguishesAgentDiskStatesAndTransportFailures(t *test
 		t.Fatalf("Docker failure misclassified: %v", err)
 	}
 }
+
+func TestUpdateContainerLimits(t *testing.T) {
+	cfg, dir := driftTestConfig(t, "host-socket")
+	cfg.Runners.Resources = config.ResourceLimits{CPUs: "2", Memory: "4g"}
+	facts := stoppedHostSocketInspect(dir)
+	run := func(update string) ([]byte, error) {
+		body := "case \"$1\" in\ninspect) cat <<'JSON'\n" + facts + "\nJSON\n;;\nupdate) " + update + ";;\nesac\n"
+		calls := fakeDockerProgram(t, body)
+		err := UpdateContainerLimits(context.Background(), cfg, "a")
+		out, _ := os.ReadFile(calls)
+		return out, err
+	}
+	if out, err := run("exit 0"); err != nil || !strings.Contains(string(out), "--memory-swap 4g") {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+	if _, err := run("echo refused; exit 1"); err == nil || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("docker's message must reach the caller: %v", err)
+	}
+	if _, err := run("exit 1"); err == nil {
+		t.Fatal("a silent docker failure must still be an error")
+	}
+}
