@@ -370,7 +370,7 @@
             <button type="button" class="btn-start" data-name="{{.Name}}" title="{{index $.T "btn.start_unknown_title"}}">{{index $.T "btn.start"}}</button>
             <button type="button" class="btn-stop" data-name="{{.Name}}" title="{{index $.T "btn.stop_unknown_title"}}">{{index $.T "btn.stop"}}</button>
             {{end}}
-            {{if .ContainerDrift}}<button type="button" class="btn-recreate" data-name="{{.Name}}">{{index $.T "btn.recreate"}}</button>{{end}}
+            {{if and $.Config.Runners.ContainerMode (eq .Status "installed")}}<button type="button" class="btn-recreate" data-name="{{.Name}}">{{index $.T "btn.recreate"}}</button>{{end}}
             <button type="button" class="btn-view" data-name="{{.Name}}" title="{{index $.T "btn.view_title"}}">{{index $.T "btn.view"}}</button>
             <button type="button" class="btn-edit" data-name="{{.Name}}" title="{{index $.T "btn.edit_title"}}">{{index $.T "btn.edit"}}</button>
             <button type="button" class="btn-del" data-name="{{.Name}}" title="{{index $.T "btn.del_title"}}">{{index $.T "btn.delete"}}</button>
