@@ -492,6 +492,7 @@ func registerRoutes(e *echo.Echo) {
 	e.GET("/static/*", staticH)
 	e.HEAD("/static/*", staticH)
 	e.GET("/api/system", handler.SystemInfo)
+	e.PUT("/api/settings/resources", handler.UpdateResourceLimits)
 	e.GET("/api/runners", handler.ListRunners)
 	e.GET("/api/runner-rows", handler.RunnerRows)
 	e.GET("/api/runners/:name", handler.GetRunner)

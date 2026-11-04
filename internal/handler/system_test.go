@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,12 +68,15 @@ func TestBuildSystemRunners_SplitsRunnersFromOthers(t *testing.T) {
 		{Name: "redis", CPUPct: 2, MemBytes: 7},
 	}
 	sizes := map[string]uint64{"a": 42}
-	rows, others := buildSystemRunners(list, stats, sizes, func(n string) string { return "c-" + n })
+	rows, others := buildSystemRunners(&config.Config{}, list, stats, sizes, map[string]cgroupStats{"c-a": {OOMKills: 2, ThrottledPct: 10}}, func(n string) string { return "c-" + n })
 	if len(rows) != 2 {
 		t.Fatalf("rows = %+v", rows)
 	}
 	if !rows[0].HasStats || rows[0].CPUPct != 10 || rows[0].MemLimit != 1000 || rows[0].DiskBytes == nil || *rows[0].DiskBytes != 42 {
 		t.Errorf("row a = %+v", rows[0])
+	}
+	if rows[0].OOMKills != 2 || rows[0].ThrottledPct != 10 {
+		t.Errorf("limit warnings missing: %+v", rows[0])
 	}
 	if !rows[0].Running {
 		t.Error("a container that docker stats lists is running")
@@ -133,10 +137,13 @@ func stubDocker(t *testing.T, fn func(args ...string) ([]byte, error)) {
 	dockerRun = func(_ context.Context, args ...string) ([]byte, error) { return fn(args...) }
 	statsCache = ttlCache[[]containerStat]{}
 	dockerCache = ttlCache[[]SystemDockerUsage]{}
+	cgroupCache = ttlCache[map[string]cgroupStats]{}
 	t.Cleanup(func() {
 		dockerRun = orig
 		statsCache = ttlCache[[]containerStat]{}
 		dockerCache = ttlCache[[]SystemDockerUsage]{}
+		cgroupCache = ttlCache[map[string]cgroupStats]{}
+		cgroupCache = ttlCache[map[string]cgroupStats]{}
 	})
 }
 
@@ -161,7 +168,7 @@ func TestCollectSystem_JoinsDockerNumbers(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	collectSystem(cfg, list)
-	if calls != 2 {
+	if calls != 3 {
 		t.Errorf("docker ran %d times, a second poll within the TTL must use the cache", calls)
 	}
 }
@@ -257,10 +264,13 @@ func TestCollectSystem_RequestCancelDoesNotReachDocker(t *testing.T) {
 	}
 	statsCache = ttlCache[[]containerStat]{}
 	dockerCache = ttlCache[[]SystemDockerUsage]{}
+	cgroupCache = ttlCache[map[string]cgroupStats]{}
 	t.Cleanup(func() {
 		dockerRun = orig
 		statsCache = ttlCache[[]containerStat]{}
 		dockerCache = ttlCache[[]SystemDockerUsage]{}
+		cgroupCache = ttlCache[map[string]cgroupStats]{}
+		cgroupCache = ttlCache[map[string]cgroupStats]{}
 	})
 	cfg := &config.Config{}
 	cfg.Runners.BasePath = t.TempDir()
@@ -296,5 +306,61 @@ func TestTTLCache_KeepsLastGoodValueOnFailure(t *testing.T) {
 	calls := 0
 	if v, _ := c.get(time.Hour, func() (int, error) { calls++; return 9, nil }); v != 7 || calls != 0 {
 		t.Fatalf("within the TTL: v=%d calls=%d", v, calls)
+	}
+}
+
+func TestParseCgroup(t *testing.T) {
+	st := parseCgroup([]byte("low 0\nhigh 0\nmax 3\noom 3\noom_kill 2\nusage_usec 100\nnr_periods 200\nnr_throttled 50\nthrottled_usec 9\nbad\nnan x\n"))
+	if st.OOMKills != 2 || st.ThrottledPct != 25 {
+		t.Fatalf("%+v", st)
+	}
+	if parseCgroup(nil).ThrottledPct != 0 {
+		t.Error("no periods must mean no throttling")
+	}
+}
+
+func TestLoadCgroups_SkipsContainersThatFail(t *testing.T) {
+	stubDocker(t, func(args ...string) ([]byte, error) {
+		if args[1] == "bad" {
+			return nil, errors.New("no such file")
+		}
+		return []byte("oom_kill 1\n"), nil
+	})
+	got := loadCgroups([]string{"good", "bad"})
+	if got["good"].OOMKills != 1 || len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestUpdateResourceLimits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("runners:\n  base_path: "+dir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := ConfigPath
+	ConfigPath = path
+	t.Cleanup(func() { ConfigPath = orig })
+	put := func(body string) (int, error) {
+		req := httptest.NewRequest(http.MethodPut, "/api/settings/resources", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		err := UpdateResourceLimits(echo.New().NewContext(req, rec))
+		return rec.Code, err
+	}
+	for _, bad := range []string{`{"cpus":"","memory":"8g"}`, `{"cpus":"abc","memory":"8g"}`, `{"cpus":"2","memory":"lots"}`, `not json`} {
+		if _, err := put(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	if code, err := put(`{"cpus":"2","memory":"4g"}`); err != nil || code != http.StatusOK {
+		t.Fatalf("code=%d err=%v", code, err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runners.Resources.CPUs != "2" || cfg.Runners.Resources.Memory != "4g" {
+		t.Fatalf("%+v", cfg.Runners.Resources)
 	}
 }

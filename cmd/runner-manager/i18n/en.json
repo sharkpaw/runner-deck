@@ -269,5 +269,18 @@
   "login.submit": "Sign in",
   "login.invalid": "Wrong username or password.",
   "login.too_many": "Too many failed attempts. Try again in 15 minutes.",
-  "nav.logout": "Sign out"
+  "nav.logout": "Sign out",
+  "api.limits_required": "CPU and memory are required",
+  "api.limits_saved": "Limits saved and applied to running runners",
+  "api.limits_partly_applied": "Limits saved, but could not be applied to: %s. They apply on the next start.",
+  "system.limits": "Resource limits",
+  "system.limits_hint": "Applies to every runner without its own limit. Running runners are updated without a restart. GitHub's standard runner for private repositories has 2 CPUs and 8 GB.",
+  "system.limit_cpus": "CPU (cores)",
+  "system.limit_memory": "Memory (e.g. 8g, 512m)",
+  "system.limit_save": "Save",
+  "system.warn_oom": "Memory limit hit: {{n}} process(es) killed. Raise the memory limit if jobs fail with exit code 137.",
+  "system.warn_cpu": "CPU limit slowing it down {{n}}% of the time",
+  "system.custom_limit": "own limit",
+  "modal.label_cpus": "CPU limit (empty: default)",
+  "modal.label_memory": "Memory limit (empty: default)"
 }

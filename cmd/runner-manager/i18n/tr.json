@@ -269,5 +269,18 @@
   "login.submit": "Giriş yap",
   "login.invalid": "Kullanıcı adı veya parola yanlış.",
   "login.too_many": "Çok fazla hatalı deneme. 15 dakika sonra tekrar dene.",
-  "nav.logout": "Çıkış yap"
+  "nav.logout": "Çıkış yap",
+  "api.limits_required": "CPU ve bellek zorunlu",
+  "api.limits_saved": "Sınırlar kaydedildi ve çalışan runner'lara uygulandı",
+  "api.limits_partly_applied": "Sınırlar kaydedildi ama şunlara uygulanamadı: %s. Sonraki başlatmada geçerli olur.",
+  "system.limits": "Kaynak sınırları",
+  "system.limits_hint": "Kendi sınırı olmayan tüm runner'lara uygulanır. Çalışan runner'lar yeniden başlatılmadan güncellenir. GitHub'ın private repolar için standart runner'ı 2 CPU ve 8 GB'dır.",
+  "system.limit_cpus": "CPU (çekirdek)",
+  "system.limit_memory": "Bellek (örn. 8g, 512m)",
+  "system.limit_save": "Kaydet",
+  "system.warn_oom": "Bellek sınırına takıldı: {{n}} süreç sonlandırıldı. İşler 137 koduyla düşüyorsa bellek sınırını artır.",
+  "system.warn_cpu": "CPU sınırı zamanın %{{n}} kadarında yavaşlatıyor",
+  "system.custom_limit": "özel sınır",
+  "modal.label_cpus": "CPU sınırı (boş: varsayılan)",
+  "modal.label_memory": "Bellek sınırı (boş: varsayılan)"
 }

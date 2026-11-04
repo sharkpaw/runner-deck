@@ -41,6 +41,8 @@ type RunnerInfo struct {
 	TargetType            string     `json:"target_type"`
 	Target                string     `json:"target"`
 	Labels                []string   `json:"labels"`
+	CPUs                  string     `json:"cpus,omitempty"`
+	Memory                string     `json:"memory,omitempty"`
 	Status                Status     `json:"status"`
 	InstallDir            string     `json:"install_dir"`
 	Running               bool       `json:"running"`                      // Whether the process is running
@@ -101,6 +103,8 @@ func GetByName(cfg *config.Config, name string) *RunnerInfo {
 		info := &RunnerInfo{
 			Name:       item.Name,
 			Path:       item.Path,
+			CPUs:       item.CPUs,
+			Memory:     item.Memory,
 			TargetType: item.TargetType,
 			Target:     item.Target,
 			Labels:     append([]string(nil), item.Labels...),
@@ -137,6 +141,8 @@ func List(cfg *config.Config) []RunnerInfo {
 		info := RunnerInfo{
 			Name:       item.Name,
 			Path:       item.Path,
+			CPUs:       item.CPUs,
+			Memory:     item.Memory,
 			TargetType: item.TargetType,
 			Target:     item.Target,
 			Labels:     append([]string(nil), item.Labels...),

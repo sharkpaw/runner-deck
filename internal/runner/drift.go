@@ -67,7 +67,7 @@ func desiredContainerSpec(cfg *config.Config, runnerName, installDir, agentToken
 		DindHost:      dindHost,
 		DockerGID:     runnerDockerGID(cfg),
 		AgentToken:    agentToken,
-		Limits:        cfg.Runners.Resources,
+		Limits:        cfg.ResourcesFor(runnerName),
 	}
 }
 

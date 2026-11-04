@@ -190,6 +190,7 @@ func TestRegisterRoutes_AllEndpointsPresent(t *testing.T) {
 		"GET /api/runner-precheck",
 		"GET /api/runner-rows",
 		"GET /api/system",
+		"PUT /api/settings/resources",
 		"PUT /api/runners/:name",
 		"DELETE /api/runners/:name",
 		"POST /api/runners/:name/start",

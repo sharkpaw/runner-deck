@@ -677,6 +677,8 @@ function openModal(mode, name) {
         document.getElementById('ePath').value = data.path || '';
         document.getElementById('eTargetType').value = data.target_type || 'org';
         document.getElementById('eTarget').value = data.target || '';
+        document.getElementById('eCpus').value = data.cpus || '';
+        document.getElementById('eMemory').value = data.memory || '';
         document.getElementById('eLabelsStr').value = Array.isArray(data.labels) ? data.labels.join(', ') : (data.labels || '');
       })
       .catch(() => { modalMsg.textContent = t('msg.load_failed'); modalMsg.style.display = 'block'; modalMsg.className = 'msg err'; });
@@ -720,7 +722,9 @@ document.getElementById('modalSaveBtn').addEventListener('click', async () => {
     path: document.getElementById('ePath').value.trim() || undefined,
     target_type: document.getElementById('eTargetType').value,
     target: document.getElementById('eTarget').value.trim(),
-    labels: labels
+    labels: labels,
+    cpus: document.getElementById('eCpus').value.trim(),
+    memory: document.getElementById('eMemory').value.trim()
   };
   modalMsg.style.display = 'none';
   try {
@@ -1061,7 +1065,7 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
       tr.appendChild(textCell(r.name));
       tr.appendChild(textCell(r.target, 'row-sub'));
       if (r.has_stats) {
-        var cores = data.host_cpus || 1;
+        var cores = parseFloat(r.cpu_limit) || data.host_cpus || 1;
         tr.appendChild(meterCell(fmtPct(r.cpu_pct), tfill('system.cores', { n: cores }), r.cpu_pct / (cores * 100)));
         tr.appendChild(meterCell(fmtBytes(r.mem_bytes), fmtBytes(r.mem_limit_bytes), r.mem_limit_bytes ? r.mem_bytes / r.mem_limit_bytes : 0));
       } else {
@@ -1074,6 +1078,24 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
       badge.className = 'badge ' + (r.running ? 'ok' : 'off');
       badge.textContent = t(r.running ? 'system.status_online' : 'system.status_offline');
       status.appendChild(badge);
+      if (r.cpu_override || r.memory_override) {
+        var own = document.createElement('span');
+        own.className = 'badge off';
+        own.textContent = t('system.custom_limit');
+        status.appendChild(own);
+      }
+      if (r.oom_kills > 0) {
+        var oom = document.createElement('div');
+        oom.className = 'limit-warn bad';
+        oom.textContent = tfill('system.warn_oom', { n: r.oom_kills });
+        status.appendChild(oom);
+      }
+      if (r.cpu_throttled_pct >= 10) {
+        var cpuWarn = document.createElement('div');
+        cpuWarn.className = 'limit-warn';
+        cpuWarn.textContent = tfill('system.warn_cpu', { n: Math.round(r.cpu_throttled_pct) });
+        status.appendChild(cpuWarn);
+      }
       tr.appendChild(status);
       body.appendChild(tr);
     });
@@ -1191,12 +1213,37 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
     el('sysCpuSub').textContent = tfill('system.others_sub', { value: fmtPct(data.others.cpu_pct) });
     el('sysMem').textContent = fmtBytes(mem);
     el('sysMemSub').textContent = tfill('system.others_sub', { value: fmtBytes(data.others.mem_bytes) });
+    var cpusInput = el('limitCpus');
+    var memoryInput = el('limitMemory');
+    if (data.limits && document.activeElement !== cpusInput && document.activeElement !== memoryInput && !limitsDirty) {
+      cpusInput.value = data.limits.cpus || '';
+      memoryInput.value = data.limits.memory || '';
+    }
     renderRunners(data);
     renderDocker(data);
     renderChart('sysChartCpu', 'cpu', function (v) { return fmtPct(v); });
     renderChart('sysChartMem', 'mem', fmtBytes);
   }
 
+  var limitsDirty = false;
+  el('limitsForm').addEventListener('input', function () { limitsDirty = true; });
+  el('limitsForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var btn = this.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    fetch('/api/settings/resources', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cpus: el('limitCpus').value.trim(), memory: el('limitMemory').value.trim() })
+    })
+      .then(function (res) { return res.json().catch(function () { return {}; }).then(function (body) { return { ok: res.ok, body: body }; }); })
+      .then(function (r) {
+        showToast(r.body.message || t('msg.request_failed'), r.ok ? 'ok' : 'err');
+        if (r.ok) { limitsDirty = false; pollSystem(); }
+      })
+      .catch(function () { showToast(t('msg.request_failed'), 'err'); })
+      .finally(function () { btn.disabled = false; });
+  });
   var polling = false;
   function pollSystem() {
     // docker stats can outlast the interval on a busy host: skip instead of stacking requests.

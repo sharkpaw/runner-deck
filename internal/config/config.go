@@ -158,7 +158,14 @@ type RunnersConfig struct {
 	DockerGID int `yaml:"docker_gid"`
 }
 
-// ResourceLimits are the Runner container resource limits; leaving a field empty means no limit.
+// Limits a runner gets unless the config says otherwise: one runaway job must not take the whole
+// machine, which usually also runs the Manager and other services.
+const (
+	DefaultRunnerCPUs   = "4"
+	DefaultRunnerMemory = "8g"
+)
+
+// ResourceLimits are the Runner container resource limits.
 // Values are passed straight through to docker create, with the same semantics as Docker's.
 type ResourceLimits struct {
 	CPUs       string `yaml:"cpus,omitempty"`        // --cpus, e.g. "2" or "1.5"
@@ -256,7 +263,10 @@ type RunnerItem struct {
 	Path       string   `yaml:"path"`        // Directory relative to base_path; if empty, name is used
 	TargetType string   `yaml:"target_type"` // org | repo
 	Target     string   `yaml:"target"`      // org name or owner/repo
-	Labels     []string `yaml:"labels"`      // Custom labels
+	Labels     []string `yaml:"labels"`
+	// Overrides runners.resources for this runner; empty fields use the global value.
+	CPUs   string `yaml:"cpus,omitempty"`
+	Memory string `yaml:"memory,omitempty"` // Custom labels
 
 	// The following apply only in container mode; if left empty, fall back to the global config of the same name under runners.
 	// Different projects on one machine often need different toolchains (e.g. Flutter+Android vs Node),
@@ -273,6 +283,33 @@ func (c *Config) FindItem(name string) (RunnerItem, bool) {
 		}
 	}
 	return RunnerItem{}, false
+}
+
+// ResourcesFor returns the limits this Runner actually uses: its own CPUs and Memory when set,
+// otherwise runners.resources.
+func (c *Config) ResourcesFor(runnerName string) ResourceLimits {
+	limits := c.Runners.Resources
+	if item, ok := c.FindItem(runnerName); ok {
+		if v := strings.TrimSpace(item.CPUs); v != "" {
+			limits.CPUs = v
+		}
+		if v := strings.TrimSpace(item.Memory); v != "" {
+			limits.Memory = v
+			// A global swap total smaller than this runner's memory would make docker refuse it.
+			limits.MemorySwap = ""
+		}
+	}
+	return limits
+}
+
+// applyDefaultResources fills in the default limits for fields nobody has set.
+func applyDefaultResources(r *ResourceLimits) {
+	if strings.TrimSpace(r.CPUs) == "" {
+		r.CPUs = DefaultRunnerCPUs
+	}
+	if strings.TrimSpace(r.Memory) == "" {
+		r.Memory = DefaultRunnerMemory
+	}
 }
 
 // ContainerImageFor returns the container image this Runner actually uses, in priority order:
@@ -335,6 +372,7 @@ func defaultConfig() *Config {
 			DindHost:         "runner-dind",
 			VolumeHostPath:   "",
 			DockerGID:        0, // 0 = auto-detect the group that owns docker.sock
+			Resources:        ResourceLimits{CPUs: DefaultRunnerCPUs, Memory: DefaultRunnerMemory},
 		},
 	}
 }
@@ -364,6 +402,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	// Defaults
+	applyDefaultResources(&c.Runners.Resources)
 	c.Server.Addr = strings.TrimSpace(c.Server.Addr)
 	c.Runners.BasePath = strings.TrimSpace(c.Runners.BasePath)
 	if c.Server.Port == 0 {
@@ -446,6 +485,9 @@ func Validate(c *Config) error {
 		}
 	}
 	for i, item := range c.Runners.Items {
+		if err := (ResourceLimits{CPUs: item.CPUs, Memory: item.Memory}).Validate(); err != nil {
+			return fmt.Errorf("runners.items[%d]: %w", i, err)
+		}
 		name := strings.TrimSpace(item.Name)
 		path := strings.TrimSpace(item.Path)
 		targetType := strings.ToLower(strings.TrimSpace(item.TargetType))

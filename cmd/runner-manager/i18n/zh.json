@@ -269,5 +269,18 @@
   "login.submit": "登录",
   "login.invalid": "用户名或密码错误。",
   "login.too_many": "失败次数过多，请 15 分钟后再试。",
-  "nav.logout": "退出登录"
+  "nav.logout": "退出登录",
+  "api.limits_required": "CPU 和内存为必填项",
+  "api.limits_saved": "限制已保存并应用到运行中的 Runner",
+  "api.limits_partly_applied": "限制已保存，但未能应用到：%s。下次启动时生效。",
+  "system.limits": "资源限制",
+  "system.limits_hint": "适用于所有未单独设置限制的 Runner。运行中的 Runner 无需重启即可更新。GitHub 私有仓库的标准 Runner 为 2 CPU 和 8 GB。",
+  "system.limit_cpus": "CPU（核）",
+  "system.limit_memory": "内存（如 8g、512m）",
+  "system.limit_save": "保存",
+  "system.warn_oom": "已达内存限制：{{n}} 个进程被终止。如果作业以退出码 137 失败，请提高内存限制。",
+  "system.warn_cpu": "CPU 限制在 {{n}}% 的时间内造成降速",
+  "system.custom_limit": "单独限制",
+  "modal.label_cpus": "CPU 限制（留空：默认）",
+  "modal.label_memory": "内存限制（留空：默认）"
 }

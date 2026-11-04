@@ -269,5 +269,18 @@
   "login.submit": "ログイン",
   "login.invalid": "ユーザー名またはパスワードが違います。",
   "login.too_many": "失敗が多すぎます。15 分後にもう一度お試しください。",
-  "nav.logout": "ログアウト"
+  "nav.logout": "ログアウト",
+  "api.limits_required": "CPU とメモリは必須です",
+  "api.limits_saved": "制限を保存し、稼働中のランナーに適用しました",
+  "api.limits_partly_applied": "制限を保存しましたが、次に適用できませんでした: %s。次回の起動時に適用されます。",
+  "system.limits": "リソース制限",
+  "system.limits_hint": "個別の制限がないすべてのランナーに適用されます。稼働中のランナーは再起動なしで更新されます。GitHub のプライベートリポジトリ向け標準ランナーは 2 CPU、8 GB です。",
+  "system.limit_cpus": "CPU（コア）",
+  "system.limit_memory": "メモリ（例: 8g, 512m）",
+  "system.limit_save": "保存",
+  "system.warn_oom": "メモリ制限に到達: {{n}} 個のプロセスが終了しました。ジョブがコード 137 で失敗する場合は制限を上げてください。",
+  "system.warn_cpu": "CPU 制限により {{n}}% の時間で低速化",
+  "system.custom_limit": "個別の制限",
+  "modal.label_cpus": "CPU 制限（空: 既定）",
+  "modal.label_memory": "メモリ制限（空: 既定）"
 }

@@ -458,3 +458,14 @@ form button:hover, .btn-parse:hover { background: var(--accent-strong); opacity:
   .login-draw, .login-fade { animation: none; stroke-dashoffset: 0; opacity: 1; }
   .login-features ul { transition: none; }
 }
+
+/* ===== Resource limits ===== */
+.limits-form { padding: 12px 16px 16px; }
+.limits-form .card-hint { margin: 0 0 4px; }
+.limits-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.limits-row > div { flex: 0 1 200px; }
+.limits-row label { margin-top: 8px; }
+.limits-row button { margin-top: 0; }
+.limit-warn { max-width: 300px; margin-top: 6px; font-size: 12px; line-height: 1.4; white-space: normal; color: var(--warn); }
+.limit-warn.bad { color: var(--danger); }
+.badge + .badge { margin-left: 4px; }

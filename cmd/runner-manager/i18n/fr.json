@@ -269,5 +269,18 @@
   "login.submit": "Se connecter",
   "login.invalid": "Nom d'utilisateur ou mot de passe incorrect.",
   "login.too_many": "Trop de tentatives échouées. Réessayez dans 15 minutes.",
-  "nav.logout": "Se déconnecter"
+  "nav.logout": "Se déconnecter",
+  "api.limits_required": "Le CPU et la mémoire sont requis",
+  "api.limits_saved": "Limites enregistrées et appliquées aux runners actifs",
+  "api.limits_partly_applied": "Limites enregistrées, mais non appliquées à : %s. Elles s'appliqueront au prochain démarrage.",
+  "system.limits": "Limites de ressources",
+  "system.limits_hint": "S'applique à tout runner sans limite propre. Les runners actifs sont mis à jour sans redémarrage. Le runner standard de GitHub pour les dépôts privés a 2 CPU et 8 Go.",
+  "system.limit_cpus": "CPU (cœurs)",
+  "system.limit_memory": "Mémoire (ex. 8g, 512m)",
+  "system.limit_save": "Enregistrer",
+  "system.warn_oom": "Limite de mémoire atteinte : {{n}} processus tués. Augmentez-la si des jobs échouent avec le code 137.",
+  "system.warn_cpu": "La limite CPU le ralentit {{n}} % du temps",
+  "system.custom_limit": "limite propre",
+  "modal.label_cpus": "Limite CPU (vide : défaut)",
+  "modal.label_memory": "Limite mémoire (vide : défaut)"
 }

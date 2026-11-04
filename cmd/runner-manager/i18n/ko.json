@@ -269,5 +269,18 @@
   "login.submit": "로그인",
   "login.invalid": "사용자 이름 또는 비밀번호가 올바르지 않습니다.",
   "login.too_many": "실패 횟수가 너무 많습니다. 15분 후 다시 시도하세요.",
-  "nav.logout": "로그아웃"
+  "nav.logout": "로그아웃",
+  "api.limits_required": "CPU와 메모리는 필수입니다",
+  "api.limits_saved": "제한을 저장하고 실행 중인 러너에 적용했습니다",
+  "api.limits_partly_applied": "제한을 저장했지만 다음에 적용하지 못했습니다: %s. 다음 시작 시 적용됩니다.",
+  "system.limits": "리소스 제한",
+  "system.limits_hint": "자체 제한이 없는 모든 러너에 적용됩니다. 실행 중인 러너는 재시작 없이 업데이트됩니다. GitHub의 비공개 저장소용 표준 러너는 CPU 2개, 8GB입니다.",
+  "system.limit_cpus": "CPU (코어)",
+  "system.limit_memory": "메모리 (예: 8g, 512m)",
+  "system.limit_save": "저장",
+  "system.warn_oom": "메모리 제한 도달: 프로세스 {{n}}개 종료. 작업이 코드 137로 실패하면 제한을 늘리세요.",
+  "system.warn_cpu": "CPU 제한으로 {{n}}% 시간 동안 느려짐",
+  "system.custom_limit": "개별 제한",
+  "modal.label_cpus": "CPU 제한 (비움: 기본값)",
+  "modal.label_memory": "메모리 제한 (비움: 기본값)"
 }

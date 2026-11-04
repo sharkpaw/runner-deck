@@ -237,11 +237,33 @@ func applyResourceLimitsToExisting(ctx context.Context, containerName string, li
 	}
 }
 
+// UpdateContainerLimits applies limits to a runner's existing container, without restarting it.
+// A container that does not exist yet gets them when it is created.
+func UpdateContainerLimits(ctx context.Context, cfg *config.Config, runnerName string) error {
+	exists, _, err := ContainerState(ctx, ContainerName(runnerName))
+	if err != nil || !exists {
+		return err
+	}
+	out, err := dockerCmd(ctx, resourceUpdateArgs(ContainerName(runnerName), cfg.ResourcesFor(runnerName))...)
+	if err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return fmt.Errorf("%s", msg)
+		}
+		return err
+	}
+	return nil
+}
+
 // resourceUpdateArgs builds the docker update arguments; returns nil when no limits are configured, meaning nothing needs to run
 func resourceUpdateArgs(containerName string, limits config.ResourceLimits) []string {
 	args := limits.Args()
 	if len(args) == 0 {
 		return nil
+	}
+	// docker refuses a new memory limit on a container with a different swap total, including an
+	// unlimited container, unless both change together.
+	if strings.TrimSpace(limits.Memory) != "" && strings.TrimSpace(limits.MemorySwap) == "" {
+		args = append(args, "--memory-swap", strings.TrimSpace(limits.Memory))
 	}
 	return append(append([]string{"update"}, args...), containerName)
 }
@@ -293,7 +315,7 @@ func startRunnerContainer(ctx context.Context, cfg *config.Config, runnerName, i
 					"\"Recreate container\" in the UI to rebuild it against the current config", cn, drift)
 			}
 			// Existing containers may have been created before resource limits were configured, so apply them once here
-			applyResourceLimitsToExisting(ctx, cn, cfg.Runners.Resources)
+			applyResourceLimitsToExisting(ctx, cn, cfg.ResourcesFor(runnerName))
 			// Container is already running; optionally call Agent /start to make sure the listener is up (the agent may not have launched run.sh yet if the container just started)
 			_ = CallAgentStart(ctx, cn, cfg.Runners.AgentPort, token)
 			return nil
@@ -306,7 +328,7 @@ func startRunnerContainer(ctx context.Context, cfg *config.Config, runnerName, i
 		default:
 			startOut, startErr := dockerCmd(ctx, "start", cn)
 			if startErr == nil {
-				applyResourceLimitsToExisting(ctx, cn, cfg.Runners.Resources)
+				applyResourceLimitsToExisting(ctx, cn, cfg.ResourcesFor(runnerName))
 				time.Sleep(agentReadyDelayAfterStart)
 				return CallAgentStart(ctx, cn, cfg.Runners.AgentPort, token)
 			}

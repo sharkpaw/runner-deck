@@ -148,7 +148,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | `runners.items[].labels` | Custom labels; a workflow's `runs-on` selects on them | empty |
 | `runners.items[].container_image` | Per-runner image override (container mode); falls back to the global value | empty |
 | `runners.items[].job_docker_backend` | Per-runner Docker backend override (container mode); falls back to the global value | empty |
-| `runners.resources` | Resource limits for runner containers (`cpus` / `memory` / `memory_swap` / `pids_limit`), passed to `docker create` and applied to existing containers via `docker update` on start | empty (unlimited) |
+| `runners.resources` | Resource limits for runner containers (`cpus` / `memory` / `memory_swap` / `pids_limit`), passed to `docker create` and applied to existing containers via `docker update` on start. Editable under System resources; a runner can override `cpus` and `memory` | `cpus: "4"`, `memory: 8g` |
 
 Every field above that a container deployment needs to change can also come from the environment, so a full-container setup is `.env` only — see [Environment variables](#environment-variables) below.
 

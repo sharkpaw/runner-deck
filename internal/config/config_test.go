@@ -1360,3 +1360,40 @@ func TestSaveAndLoad_ConcurrentReadersNeverSeePartialConfig(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestResources_DefaultsAndPerRunnerOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := "runners:\n  base_path: " + dir + "\n  items:\n" +
+		"    - {name: plain, target_type: repo, target: o/r}\n" +
+		"    - {name: big, target_type: repo, target: o/r, cpus: \"8\", memory: 16g}\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.ResourcesFor("plain"); got.CPUs != DefaultRunnerCPUs || got.Memory != DefaultRunnerMemory {
+		t.Errorf("plain = %+v", got)
+	}
+	if got := cfg.ResourcesFor("big"); got.CPUs != "8" || got.Memory != "16g" {
+		t.Errorf("big = %+v", got)
+	}
+	if got := cfg.ResourcesFor("missing"); got.CPUs != DefaultRunnerCPUs {
+		t.Errorf("missing = %+v", got)
+	}
+	cfg.Runners.Items[0].Memory = "lots"
+	if err := Validate(cfg); err == nil {
+		t.Error("a bad per-runner memory must fail validation")
+	}
+}
+
+func TestResourcesFor_DropsGlobalSwapWhenMemoryIsOverridden(t *testing.T) {
+	cfg := &Config{}
+	cfg.Runners.Resources = ResourceLimits{Memory: "4g", MemorySwap: "4g"}
+	cfg.Runners.Items = []RunnerItem{{Name: "big", Memory: "16g"}}
+	if got := cfg.ResourcesFor("big"); got.MemorySwap != "" {
+		t.Errorf("swap = %q would be smaller than memory", got.MemorySwap)
+	}
+}

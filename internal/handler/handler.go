@@ -712,6 +712,8 @@ type UpdateRunnerRequest struct {
 	TargetType string   `json:"target_type"`
 	Target     string   `json:"target"`
 	Labels     []string `json:"labels"`
+	CPUs       string   `json:"cpus"`
+	Memory     string   `json:"memory"`
 }
 
 // UpdateRunner updates a runner's config (PUT /api/runners/:name); the name cannot change and must match the directory
@@ -759,13 +761,18 @@ func UpdateRunner(c echo.Context) error {
 		if idx < 0 {
 			return echo.NewHTTPError(http.StatusNotFound, tr(c, "api.runner_not_found"))
 		}
-		cfg.Runners.Items[idx] = config.RunnerItem{
-			Name:       name,
-			Path:       req.Path,
-			TargetType: targetTypeNorm,
-			Target:     targetNorm,
-			Labels:     req.Labels,
+		item := cfg.Runners.Items[idx]
+		item.Name = name
+		item.Path = req.Path
+		item.TargetType = targetTypeNorm
+		item.Target = targetNorm
+		item.Labels = req.Labels
+		item.CPUs = strings.TrimSpace(req.CPUs)
+		item.Memory = strings.TrimSpace(req.Memory)
+		if err := (config.ResourceLimits{CPUs: item.CPUs, Memory: item.Memory}).Validate(); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		cfg.Runners.Items[idx] = item
 		return nil
 	}); err != nil {
 		if he, ok := err.(*echo.HTTPError); ok {
@@ -778,6 +785,9 @@ func UpdateRunner(c echo.Context) error {
 		return err
 	}
 	updated = runner.GetByName(cfg, name)
+	if cfg.Runners.ContainerMode {
+		applyLimitsQuietly(c.Request().Context(), cfg, name)
+	}
 	// If already registered and not running, start it automatically (container and process modes both go through StartIfInstalled)
 	msg := tr(c, "api.updated")
 	var started bool
