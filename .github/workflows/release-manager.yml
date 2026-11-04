@@ -1,0 +1,158 @@
+# 推送 tag v*.*.* 时：构建 Manager 二进制与镜像，并创建 GitHub Release
+name: Release (Manager)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: release-manager-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check release version consistency
+        uses: ./.github/actions/check-release-version
+        with:
+          tag: ${{ github.ref_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run tests
+        run: make test-coverage
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+
+      - name: Build Manager binaries
+        run: |
+          dist_dir="$RUNNER_TEMP/runner-deck-dist"
+          mkdir -p "$dist_dir"
+          VERSION=${{ steps.version.outputs.version }}
+          LDFLAGS="-s -w -X main.Version=v${VERSION} -X main.Commit=${{ steps.version.outputs.commit }} -X main.BuildDate=${{ steps.version.outputs.build_date }}"
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o "$dist_dir/runner-manager-linux-amd64" ./cmd/runner-manager
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o "$dist_dir/runner-manager-linux-arm64" ./cmd/runner-manager
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o "$dist_dir/runner-manager-darwin-amd64" ./cmd/runner-manager
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o "$dist_dir/runner-manager-darwin-arm64" ./cmd/runner-manager
+
+      - name: Generate checksums
+        run: |
+          cd "$RUNNER_TEMP/runner-deck-dist"
+          sha256sum * > checksums.txt
+
+      # Dockerfile 内已 COPY config.yaml.example 为 config/config.yaml 并 sed，无需在 workflow 中准备
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute canonical image name (lowercase for GHCR)
+        id: vars
+        shell: bash
+        run: |
+          set -eu
+          CANONICAL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "canonical=${CANONICAL,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata (Manager image)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.vars.outputs.canonical }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=true
+
+      - name: Build and push Manager Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.workspace }}
+          file: ${{ github.workspace }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.tag }}
+            COMMIT=${{ steps.version.outputs.commit }}
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
+          # scope 按 workflow 分开：tag push 会同时触发四个构建 workflow，
+          # 而 type=gha 不指定 scope 时都落在 BuildKit 默认的 scope=buildkit 上，
+          # 互相覆盖，一方正在写的层被另一方的索引替换后就是 layer blob not_found。
+          cache-from: type=gha,scope=release-manager
+          # ignore-error：缓存导出只是加速手段。镜像此时已经推送完成，
+          # 不能因为写缓存失败就把一次已经成功的发布标成红的。
+          cache-to: type=gha,mode=max,scope=release-manager,ignore-error=true
+          platforms: linux/amd64,linux/arm64
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/runner-deck-dist/*
+          name: Release ${{ steps.version.outputs.tag }}
+          body_path: .github/release-notes.md
+          draft: false
+          prerelease: false
+
+  report_release:
+    name: Dispatch verified release reports
+    needs: release
+    if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Request reports for the released tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh workflow run go-quality-reports.yml --repo "$REPOSITORY" --ref "$DEFAULT_BRANCH" \
+            -f "source_ref=refs/tags/$RELEASE_TAG" -f reuse_existing_tag_report=true

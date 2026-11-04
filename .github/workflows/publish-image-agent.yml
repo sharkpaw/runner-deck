@@ -1,0 +1,130 @@
+# push main/master 或 tag 时：构建并推送 Runner 容器镜像到 GHCR（tag 带 -runner 后缀）
+name: Publish image (Runner)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-runner-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build and push Runner image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # 缺任何一项就直接失败，不再只报一条 warning 然后跳过后续 step。
+      # 原先的写法是：清单缺一项 → 置一个 false 输出 → 下面每个 step 的 if 都不成立
+      # → job 全绿收场，只留一条 warning。也就是说 push 一个 v* tag 上来，release 建好了、
+      # tag 也在了，GHCR 上却没有新镜像，而没有任何东西是红的——README 正让用户照那个
+      # tag 起服务。这个 fail-open 是给「仓库里还没有完整源码」的骨架期准备的（原来的提示
+      # 语就是「请先提交完整源码再构建」），那个前提早就不成立：清单里每一项都是核心路径。
+      #
+      # 清单本身是构建上下文的契约。把其中任何一项改名或移走时（例如把
+      # scripts/install-runner.sh 的逻辑挪进 internal/runner），必须同时改这里。
+      - name: Verify build context (Dockerfile.runner 所需源码齐全)
+        run: |
+          set -eu
+          MISSING=""
+          for f in go.mod go.sum cmd/runner-agent/main.go; do
+            [ -f "$f" ] || MISSING="${MISSING} ${f}"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Runner 构建所需文件缺失（${MISSING# }），构建上下文不完整。"
+            exit 1
+          fi
+          echo "构建上下文完整。"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute canonical image name (lowercase)
+        id: vars
+        shell: bash
+        run: |
+          set -eu
+          IMAGE_REF="${IMAGE_NAME:-$GITHUB_REPOSITORY}"
+          CANONICAL_IMAGE="${REGISTRY}/${IMAGE_REF,,}"
+          echo "canonical=${CANONICAL_IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Get version for build
+        id: version
+        run: |
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev-$(git rev-parse --short HEAD)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Extract Docker metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.vars.outputs.canonical }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=short,prefix=sha-
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Prepare Runner tags (same image, tag suffix -runner)
+        id: runner-tags
+        run: |
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          # metadata-action 可能输出逗号/换行分隔；每行 image:tag 转为 image:tag-runner
+          echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            if [[ "$line" == *:* ]]; then
+              echo "$line" | sed 's/\(:.*\)$/\1-runner/'
+            else
+              echo "${line}:latest-runner"
+            fi
+          done >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Runner image (container mode)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.workspace }}
+          file: ${{ github.workspace }}/Dockerfile.runner
+          push: true
+          tags: ${{ steps.runner-tags.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          # scope 按 workflow 分开：tag push 会同时触发四个构建 workflow，
+          # 而 type=gha 不指定 scope 时都落在 BuildKit 默认的 scope=buildkit 上，
+          # 互相覆盖，一方正在写的层被另一方的索引替换后就是 layer blob not_found。
+          cache-from: type=gha,scope=publish-runner
+          # ignore-error：缓存导出只是加速手段。镜像此时已经推送完成，
+          # 不能因为写缓存失败就把一次已经成功的发布标成红的。
+          cache-to: type=gha,mode=max,scope=publish-runner,ignore-error=true

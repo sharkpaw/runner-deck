@@ -1,0 +1,141 @@
+# 仓库一致性校验：跨文件、跨语言的整体性检查，独立于 Go 的 CI。
+#
+# 前两个 job 与语言/构建无关，只读文件。第三个 quickstart 例外，它要构建镜像并把容器
+# 拉起来——因为它验的恰恰是「照文档做能不能成」，而这件事没有不执行就能验的办法。
+name: CI (Consistency)
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+env:
+  # 两个检查由 soulteary/ci-recipes 的 runner-fleet recipe 提供，本仓库只出
+  # scripts/ci-recipes.conf（基准路径与正则、ignore 标记、扫描 pathspec、文档语言与
+  # 文件列表）。这里是版本的唯一来源：Makefile 的 check target 用 sed 从本文件读它，
+  # 不再各钉一个——两处各钉一个却忘了同步，就是本地绿、CI 红的那个老口子。
+  #
+  # 钉的是 module 伪版本而不是短 SHA：伪版本是精确的模块版本，proxy 按版本号不可变地
+  # 从缓存里服务它；短 SHA 要回仓库里解析，commit 一旦不可达（比如被 squash 合并孤立）
+  # 就取不到了。这个伪版本对应 ci-recipes main 上合入 runner-fleet recipe 的那个合并提交。
+  # ci-recipes 发出 tag 之后换成 tag。
+  #
+  # 行尾的 version-check-ignore 是必需的：这是 ci-recipes 的模块版本，不是本仓库的版本号，
+  # 而版本号一致性检查只认「一个 vX.Y.Z 字面量」。换成 tag 之后同样需要，这一点跟 tag 无关。
+  CI_RECIPES_VERSION: "v0.0.0-20260921094536-68dc8a7f1123"  # version-check-ignore
+
+# 两个 job 各自装一遍 ci-recipes。合成一个 job 能省掉一次安装，但也会把 PR 上两个检查
+# 的名字合成一个——分支保护里按名字要求的必需检查会当场对不上。两个 job 本来并行，
+# 墙钟时间不变，多花的只是 runner 分钟数。
+jobs:
+  version:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install ci-recipes
+        run: |
+          set -eu
+          go install "github.com/soulteary/ci-recipes/cmd/ci-recipes@${CI_RECIPES_VERSION}"
+          # setup-go 只保证 GOROOT/bin 在 PATH 上，go install 的产物落在 GOPATH/bin。
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # 文档与示例里的版本号必须跟代码里的默认镜像 tag 一致。
+      # v1.0.1 / v1.1.0 / v1.1.1 三次发布都漏了同步，照 README 部署会拉到  version-check-ignore
+      # 落后三个版本的镜像；这一步让下次漏改直接在 PR 上失败。
+      - name: Check version references are in sync
+        run: ci-recipes runner-fleet check-version-consistency
+
+  docs:
+    name: Docs structure consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install ci-recipes
+        run: |
+          set -eu
+          go install "github.com/soulteary/ci-recipes/cmd/ci-recipes@${CI_RECIPES_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # 五种译文的 development.md 曾整整落后一个版本（v1.5.1/v1.6.0 新增的四节一节没跟上），  version-check-ignore
+      # 而没有任何东西会因此报错——译文语法完好，站点照常渲染。界面的 i18n 早有测试盯着
+      # 六种语言的键集，文档这一半一直没有；这一步补上。
+      - name: Check translated docs match the English section structure
+        run: ci-recipes runner-fleet check-docs-structure
+
+  quickstart:
+    name: Quick start runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # 照着文档抄的人不会先读一遍再判断哪条该跳过，他们整段贴进终端。所以这里也整段执行。
+      #
+      # 这一步守的是一类具体的事故：快速开始里的 chown 排在 mkdir -p runners 之前，
+      # 第一条命令必定 `cannot access 'runners'`，而且那段还把 runners chown 了两遍——
+      # 典型的两次修改叠出来、整段没人跑过。六份译文行号完全一致地错着，
+      # 标题结构检查与版本号检查都看不见这种事，因为两者都不执行任何东西。
+      - name: Extract the quick start block from the guide
+        run: |
+          set -euo pipefail
+          awk '
+            /^### .*docker-compose/ { insec=1; next }
+            insec && /^```bash$/    { inblk=1; next }
+            inblk && /^```/         { exit }
+            inblk                   { print }
+          ' docs/guide.md > quickstart.sh
+          if [ ! -s quickstart.sh ]; then
+            echo "::error file=docs/guide.md::没能抽出 docker-compose 快速开始的 bash 块。"
+            echo "::error::改过那一节的标题或围栏语言标记的话，这里的 awk 也要跟着改"
+            exit 1
+          fi
+          echo "抽到的命令块："
+          cat quickstart.sh
+
+      # 不拉已发布镜像，就地构建：升版本的那个 PR 里，新 tag 的镜像还不存在
+      # （镜像由 tag 触发的 release workflow 推），拉取必然失败，而那正是最需要这一步的 PR。
+      - name: Build the Manager image locally
+        run: docker build -t runner-deck:quickstart-ci .
+
+      - name: Run it
+        env:
+          MANAGER_IMAGE: runner-deck:quickstart-ci
+        run: bash -euxo pipefail quickstart.sh
+
+      # 查 /ready 而不是 /health：/health 只要进程活着就恒为 200，挂载目录不可写它照样绿，
+      # 等于只证明了「容器起来了」。/ready 在配置读不了、runner 根目录缺失或不可写时返回 503,
+      # 正好是这段命令真正要产生的结果。
+      - name: The deployment is actually ready
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 30 --retry-delay 2 --retry-connrefused \
+            http://127.0.0.1:8080/ready
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail=200 || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true

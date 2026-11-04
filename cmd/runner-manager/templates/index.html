@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="{{.Lang}}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{index .T "page.title"}}</title>
+  {{/* 内联 SVG 图标：不必为一个 16px 的图新增静态路由和二进制资源，
+       也省掉每次加载都要吃的一个 /favicon.ico 404 */}}
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' role='img' aria-label='Runner Deck'%3E%3Cdefs%3E%3ClinearGradient id='rf-bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234f9bf0'/%3E%3Cstop offset='1' stop-color='%231c5cab'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='256' height='256' rx='56' fill='url%28%23rf-bg%29'/%3E%3Cg fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M58 70h76' stroke-width='20'/%3E%3Cpath d='M58 128h104' stroke-width='20'/%3E%3Cpath d='M58 186h60' stroke-width='20'/%3E%3Cpath d='M154 54l18 16-18 16' stroke-width='14'/%3E%3Cpath d='M182 112l18 16-18 16' stroke-width='14'/%3E%3Cpath d='M138 170l18 16-18 16' stroke-width='14'/%3E%3C/g%3E%3Ccircle cx='196' cy='186' r='19' fill='%232fb67c' stroke='%23fff' stroke-width='8'/%3E%3C/svg%3E">
+  {{/* Applied before first paint so a light-theme user never sees a dark flash. */}}
+  <script>
+    (function () {
+      var mode = 'system';
+      try { mode = localStorage.getItem('runnerDeckTheme') || 'system'; } catch (_) {}
+      var dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/app.css?v={{.AssetVersion}}">
+</head>
+<body>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="rf-mark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f9bf0"/><stop offset="1" stop-color="#1c5cab"/></linearGradient></defs><rect width="256" height="256" rx="56" fill="url(#rf-mark)"/><g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><path d="M58 70h76" stroke-width="20"/><path d="M58 128h104" stroke-width="20"/><path d="M58 186h60" stroke-width="20"/><path d="M154 54l18 16-18 16" stroke-width="14"/><path d="M182 112l18 16-18 16" stroke-width="14"/><path d="M138 170l18 16-18 16" stroke-width="14"/></g><circle cx="196" cy="186" r="19" fill="#2fb67c" stroke="#fff" stroke-width="8"/></svg>
+      <div>
+        <h1>{{index .T "page.h1"}}</h1>
+        <p>{{index .T "nav.subtitle"}}</p>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="#runners" class="nav-link" data-view="runners"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>{{index .T "nav.runners"}}</a>
+      <a href="#system" class="nav-link" data-view="system"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>{{index .T "nav.system"}}</a>
+    </nav>
+    <div class="sidebar-foot">
+      <label class="sr-only" for="langSelect">{{index .T "page.lang_label"}}</label>
+      <select id="langSelect" aria-label="{{index .T "page.lang_label"}}" class="lang-select">
+        <option value="tr" {{if eq .Lang "tr"}}selected{{end}}>Türkçe</option>
+        <option value="en" {{if eq .Lang "en"}}selected{{end}}>English</option>
+        <option value="zh" {{if eq .Lang "zh"}}selected{{end}}>中文</option>
+        <option value="fr" {{if eq .Lang "fr"}}selected{{end}}>Français</option>
+        <option value="de" {{if eq .Lang "de"}}selected{{end}}>Deutsch</option>
+        <option value="ko" {{if eq .Lang "ko"}}selected{{end}}>한국어</option>
+        <option value="ja" {{if eq .Lang "ja"}}selected{{end}}>日本語</option>
+      </select>
+      <label class="sr-only" for="themeSelect">{{index .T "theme.label"}}</label>
+      <select id="themeSelect" aria-label="{{index .T "theme.label"}}" class="lang-select">
+        <option value="system">{{index .T "theme.system"}}</option>
+        <option value="light">{{index .T "theme.light"}}</option>
+        <option value="dark">{{index .T "theme.dark"}}</option>
+      </select>
+    </div>
+  </aside>
+  <div class="scrim" id="sidebarScrim"></div>
+  <div class="content">
+  <div class="mobile-bar">
+    <button type="button" id="sidebarToggle" class="icon-btn" aria-label="{{index .T "nav.menu"}}"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <span>{{index .T "page.h1"}}</span>
+  </div>
+  <main>
+  <section id="viewRunners" class="view">
+  <div class="card">
+    <h2>{{index .T "runner_list.title"}}</h2>
+    <p class="card-hint">{{index .T "runner_list.hint"}}</p>
+    <div class="list-stats" id="listStats">
+      <button type="button" class="stat-chip active" data-filter="all">{{index .T "filter.all"}}<span class="n">0</span></button>
+      <button type="button" class="stat-chip running" data-filter="running">{{index .T "filter.running"}}<span class="n">0</span></button>
+      <button type="button" class="stat-chip" data-filter="stopped">{{index .T "filter.stopped"}}<span class="n">0</span></button>
+      <button type="button" class="stat-chip" data-filter="new">{{index .T "filter.new"}}<span class="n">0</span></button>
+      <button type="button" class="stat-chip problem" data-filter="problem">{{index .T "filter.problem"}}<span class="n">0</span></button>
+      <button type="button" class="stat-chip drift" data-filter="drift">{{index .T "filter.drift"}}<span class="n">0</span></button>
+    </div>
+    <div class="filter-row">
+      <input type="search" id="runnerSearch" placeholder="{{index .T "filter.search_placeholder"}}" aria-label="{{index .T "filter.search_placeholder"}}">
+      <button type="button" id="filterClearBtn" class="btn-neutral" style="display:none">{{index .T "filter.clear"}}</button>
+      <span class="filter-count" id="filterCount" aria-live="polite"></span>
+    </div>
+    <div class="list-toolbar">
+      <label class="autorefresh"><input type="checkbox" id="autoRefreshToggle" checked>{{index .T "autorefresh.label"}}</label>
+      <span id="refreshStatus" class="refresh-status" aria-live="polite"></span>
+    </div>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>{{index .T "runner_list.table.name"}}</th>
+          <th>{{index .T "runner_list.table.target"}}</th>
+          <th class="col-status">{{index .T "runner_list.table.status"}}</th>
+          {{if .Config.Runners.ContainerMode}}<th>{{index .T "runner_list.table.docker_backend"}}</th>{{end}}
+          <th>{{index .T "runner_list.table.reg_github"}}</th>
+          <th>{{index .T "runner_list.table.install_dir"}}</th>
+          <th class="col-actions"></th>
+        </tr>
+      </thead>
+      <tbody id="runnerRowsBody">{{template "runnerRows" .}}</tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>{{index .T "form.quick_add"}}</h2>
+    <div class="parse-box">
+      <label>{{index .T "parse.label"}}</label>
+      <div class="parse-row">
+        <div>
+          <textarea id="githubCommandInput" rows="3" placeholder="{{index .T "parse.placeholder"}}"></textarea>
+        </div>
+        <div class="parse-btn-row">
+          <button type="button" id="parseCommandBtn" class="btn-parse">{{index .T "parse.btn"}}</button>
+        </div>
+      </div>
+      <div id="parseMsg" class="parse-msg"></div>
+    </div>
+    <form id="addForm">
+      <label>{{index .T "form.name_label"}}</label>
+      <input name="name" id="addFormName" required placeholder="{{index .T "form.name_placeholder"}}">
+      <div id="nameCheckMsg" class="check-msg" aria-live="polite"></div>
+      <label>{{index .T "form.path_label"}}</label>
+      <input name="path" id="addFormPath" placeholder="{{index .T "form.path_placeholder"}}">
+      <label>{{index .T "form.target_type_label"}}</label>
+      <select name="target_type" id="addFormTargetType" required>
+        <option value="org">{{index .T "form.target_type_org"}}</option>
+        <option value="repo">{{index .T "form.target_type_repo"}}</option>
+      </select>
+      <label>{{index .T "form.target_label"}}</label>
+      <input name="target" id="addFormTarget" required placeholder="{{index .T "form.target_placeholder"}}">
+      <label>{{index .T "form.labels_label"}}</label>
+      <input name="labelsStr" id="addFormLabelsStr" placeholder="{{index .T "form.labels_placeholder"}}">
+      <label>{{index .T "form.token_label"}}</label>
+      <input name="registration_token" id="addFormToken" type="password" placeholder="{{index .T "form.token_placeholder"}}">
+      <div>
+        <button type="submit">{{index .T "form.submit"}}</button>
+      </div>
+    </form>
+    <div id="addMsgWrap" class="msg-wrap" style="display: none;">
+      <div id="addMsg" class="msg"></div>
+      <div class="msg-wrap-actions"><button type="button" class="btn-close-msg" id="addMsgClose">{{index .T "msg.close"}}</button></div>
+    </div>
+  </div>
+
+  </section>
+
+  <section id="viewSystem" class="view" hidden>
+    <header class="view-head">
+      <h2>{{index .T "nav.system"}}</h2>
+      <p>{{index .T "system.subtitle"}}</p>
+    </header>
+    <div id="sysError" class="msg err" hidden></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">{{index .T "system.disk"}}</div><div class="stat-value" id="sysDisk">—</div><div class="stat-sub" id="sysDiskSub"></div><div class="meter"><i id="sysDiskMeter"></i></div></div>
+      <div class="stat"><div class="stat-label">{{index .T "system.running"}}</div><div class="stat-value" id="sysRunning">—</div><div class="stat-sub" id="sysRunningSub"></div></div>
+      <div class="stat"><div class="stat-label">{{index .T "system.cpu_total"}}</div><div class="stat-value" id="sysCpu">—</div><div class="stat-sub" id="sysCpuSub"></div></div>
+      <div class="stat"><div class="stat-label">{{index .T "system.mem_total"}}</div><div class="stat-value" id="sysMem">—</div><div class="stat-sub" id="sysMemSub"></div></div>
+    </div>
+    <div class="card card-flush">
+      <h2 class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>{{index .T "system.runners"}}</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>{{index .T "system.col_runner"}}</th>
+            <th>{{index .T "system.col_target"}}</th>
+            <th class="col-meter">{{index .T "system.col_cpu"}}</th>
+            <th class="col-meter">{{index .T "system.col_mem"}}</th>
+            <th>{{index .T "system.col_disk"}}</th>
+            <th>{{index .T "system.col_status"}}</th>
+          </tr></thead>
+          <tbody id="sysRows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="chart-grid">
+      <div class="card card-flush"><h2 class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>{{index .T "system.chart_cpu"}}</h2><div class="chart" id="sysChartCpu"></div></div>
+      <div class="card card-flush"><h2 class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 11v2M10 11v2M14 11v2M18 11v2"/></svg>{{index .T "system.chart_mem"}}</h2><div class="chart" id="sysChartMem"></div></div>
+    </div>
+    <div class="card card-flush">
+      <h2 class="card-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12H2M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/><path d="M6 16h.01M10 16h.01"/></svg>{{index .T "system.docker"}}</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>{{index .T "system.docker_type"}}</th>
+            <th>{{index .T "system.docker_count"}}</th>
+            <th>{{index .T "system.docker_size"}}</th>
+            <th>{{index .T "system.docker_reclaimable"}}</th>
+          </tr></thead>
+          <tbody id="sysDocker"></tbody>
+        </table>
+      </div>
+    </div>
+    <p class="card-hint">{{index .T "system.note"}}</p>
+  </section>
+  </main>
+  </div>
+
+  <div id="runnerModal" class="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-header">
+        <h3 id="modalTitle">{{index .T "modal.title"}}</h3>
+        {{/* &times; 对读屏器读作「times」，必须另给可访问名 */}}
+        <button type="button" class="modal-close" id="modalClose" aria-label="{{index .T "modal.btn_close"}}">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalView">
+          <div class="row"><label>{{index .T "modal.label_name"}}</label><div class="val" id="vName"></div></div>
+          <div class="row"><label>{{index .T "modal.label_path"}}</label><div class="val" id="vPath"></div></div>
+          <div class="row"><label>{{index .T "modal.label_target_type"}}</label><div class="val" id="vTargetType"></div></div>
+          <div class="row"><label>{{index .T "modal.label_target"}}</label><div class="val" id="vTarget"></div></div>
+          <div class="row"><label>{{index .T "modal.label_labels"}}</label><div class="val" id="vLabels"></div></div>
+          <div class="row"><label>{{index .T "modal.label_install_dir"}}</label><div class="val path" id="vInstallDir"></div></div>
+          <div class="row" id="vJobDockerBackendRow" style="display:none"><label>{{index .T "modal.label_docker_backend"}}</label><div class="val"><code id="vJobDockerBackend"></code></div></div>
+          <div class="row"><label>{{index .T "modal.label_status"}}</label><div class="val"><span id="vStatus"></span><span id="vRunning"></span><span id="vBusy"></span></div></div>
+          <div class="row" id="vDriftRow" style="display:none"><label>{{index .T "modal.label_drift"}}</label><div class="val" id="vDrift"></div></div>
+          <div class="row" id="vProbeErrorTypeRow"><label>{{index .T "modal.label_probe_error_type"}}</label><div class="val" id="vProbeErrorType"></div></div>
+          <div class="row" id="vProbeSuggestionRow"><label>{{index .T "modal.label_suggestion"}}</label><div class="val" id="vProbeSuggestion"></div></div>
+          <div class="row" id="vProbeCheckCmdRow"><label>{{index .T "modal.label_check_cmd"}}</label><div class="val"><button type="button" id="vCopyCheckCmdBtn" class="btn-copy-cmd" style="display:none">{{index .T "modal.btn_copy_cmd"}}</button><span id="vProbeCheckCommand"></span></div></div>
+          <div class="row" id="vProbeFixCmdRow"><label>{{index .T "modal.label_fix_cmd"}}</label><div class="val"><button type="button" id="vRevealFixCmdBtn" class="btn-reveal-fix" style="display:none">{{index .T "modal.btn_reveal_fix"}}</button><button type="button" id="vCopyFixCmdBtn" class="btn-copy-cmd" style="display:none">{{index .T "modal.btn_copy_cmd"}}</button><span id="vProbeFixCommand"></span></div></div>
+          <div class="row" id="vProbeErrorRow"><label>{{index .T "modal.label_probe_error"}}</label><div class="val" id="vProbeError"></div></div>
+          <div class="row" id="vRegistrationMessageRow"><label>{{index .T "modal.label_reg_result"}}</label><div class="val" id="vRegistrationMessage"></div></div>
+          <div class="row"><label>{{index .T "modal.label_reg_checked_at"}}</label><div class="val" id="vRegistrationCheckedAt"></div></div>
+          <div class="row"><label>{{index .T "modal.label_github_display"}}</label><div class="val"><a id="vGitHubLink" class="github-yes github-link" target="_blank" rel="noopener noreferrer" title="{{index .T "github.open_title"}}" style="display:none"></a><span id="vRegisteredOnGitHub"></span></div></div>
+          <div class="row"><label>{{index .T "modal.label_github_busy"}}</label><div class="val" id="vGitHubBusy"></div></div>
+          <div class="row"><label>{{index .T "modal.label_repo_visibility"}}</label><div class="val" id="vRepoVisibility"></div></div>
+          <div class="row"><label>{{index .T "modal.label_github_check_at"}}</label><div class="val" id="vGitHubCheckAt"></div></div>
+        </div>
+        <form id="modalEditForm" style="display:none">
+          <input type="hidden" name="name" id="eName">
+          <div class="row"><label>{{index .T "modal.label_name"}}</label><input type="text" name="nameDisplay" id="eNameDisplay" readonly class="input-readonly"></div>
+          <div class="row"><label>{{index .T "modal.label_path"}}</label><input type="text" name="path" id="ePath" placeholder="{{index .T "modal.edit_path_placeholder"}}"></div>
+          <div class="row"><label>{{index .T "form.target_type_label"}}</label><select name="target_type" id="eTargetType" required><option value="org">{{index .T "form.target_type_org"}}</option><option value="repo">{{index .T "form.target_type_repo"}}</option></select></div>
+          <div class="row"><label>{{index .T "form.target_label"}}</label><input type="text" name="target" id="eTarget" required placeholder="{{index .T "modal.edit_target_placeholder"}}"></div>
+          <div class="row"><label>{{index .T "modal.label_labels"}}</label><input type="text" name="labelsStr" id="eLabelsStr" placeholder="{{index .T "modal.edit_labels_placeholder"}}"></div>
+        </form>
+        <div id="modalMsg" class="msg modal-msg" style="display:none"></div>
+      </div>
+      <div class="modal-footer" id="modalFooter">
+        <span id="modalStartStopSpan" class="spacer-right" style="display:none">
+          <button type="button" id="modalStartBtnFooter" class="btn-start" style="display:none">{{index .T "modal.btn_start"}}</button>
+          <button type="button" id="modalStopBtnFooter" class="btn-stop" style="display:none">{{index .T "modal.btn_stop"}}</button>
+        </span>
+        <button type="button" id="modalEditBtn" class="btn-edit-primary" style="display:none">{{index .T "modal.btn_edit"}}</button>
+        <button type="button" id="modalSaveBtn" class="btn-save" style="display:none">{{index .T "modal.btn_save"}}</button>
+        <button type="button" class="modal-close" id="modalCancelBtn">{{index .T "modal.btn_close"}}</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastWrap" class="toast-wrap" aria-live="polite"></div>
+
+  <div id="confirmModal" class="modal-overlay">
+    <div class="modal" style="max-width: 520px" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <div class="modal-header">
+        <h3 id="confirmTitle">{{index .T "confirm.title"}}</h3>
+      </div>
+      <div class="modal-body"><div id="confirmText" class="confirm-text"></div></div>
+      <div class="modal-footer">
+        <button type="button" id="confirmOkBtn" class="btn-confirm">{{index .T "confirm.ok"}}</button>
+        <button type="button" id="confirmCancelBtn" class="modal-close">{{index .T "confirm.cancel"}}</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 字典必须内联：它是随页面语言一起渲染出来的，外链脚本拿不到。
+    window.__I18N = {{.TJSON}};
+  </script>
+  <script src="/static/app.js?v={{.AssetVersion}}" defer></script>
+</body>
+</html>
+
+{{/* runnerRows：列表的 <tbody> 内容。首屏由页面直接展开，自动刷新时由
+     /api/runner-rows 单独渲染同一个片段——两条路径共用一份行渲染逻辑，
+     GitHubYes/GitHubNo 这类三态判断不必在 JS 里再写一遍。 */}}
+{{define "runnerRows"}}
+        {{range .Runners}}
+        {{/* 筛选与计数读这些属性，而不是去解析单元格里的可见文本——那些文本是
+             按语言翻译过的，换一种语言筛选就会失灵。属性写在片段里，自动刷新
+             换回来的行才同样带着它们。 */}}
+        <tr data-name="{{.Name}}" data-target="{{.TargetType}}: {{.Target}}" data-status="{{.Status}}" data-running="{{if .Running}}1{{else}}0{{end}}" data-drift="{{if .ContainerDrift}}1{{else}}0{{end}}" data-probe="{{if .Probe}}1{{else}}0{{end}}">
+          <td>{{.Name}}</td>
+          <td>{{.TargetType}}: {{.Target}}</td>
+          <td class="col-status">
+            <span class="badge {{.Status}}">{{with index $.T (printf "status.%s" .Status)}}{{.}}{{else}}{{.Status}}{{end}}</span>
+            {{if .Running}}<span class="badge running">{{index $.T "badge.running"}}</span>{{end}}
+            {{/* 用 GitHubBusyYes 而不是 {{if .GitHubBusy}}：它同样是 *bool，
+                 指向 false 的指针在模板里也为真，「空闲」会显示成「忙碌中」 */}}
+            {{if .GitHubBusyYes}}<span class="badge busy has-tip" tabindex="0" role="note">{{index $.T "badge.busy"}}<span class="tip">{{index $.T "badge.busy_title"}}</span></span>{{end}}
+            {{/* 同理用 GitHubPublicYes：{{if .GitHubPublic}} 会给每个私有仓库都挂上这个徽标 */}}
+            {{if .GitHubPublicYes}}<span class="badge public-repo has-tip" tabindex="0" role="note">{{index $.T "badge.public_repo"}}<span class="tip">{{index $.T "badge.public_repo_title"}}</span></span>{{end}}
+            {{if .ContainerDrift}}<span class="badge drift has-tip" tabindex="0" role="note">{{index $.T "badge.drift"}}<span class="tip">{{.ContainerDrift}}</span></span>{{end}}
+            {{if .Probe}}<br><span class="probe-err has-tip" tabindex="0" role="note">{{index $.T "probe.failed"}}{{if .Probe.Type}} ({{.Probe.Type}}){{end}}<span class="tip">{{.Probe.Error}}</span></span>{{end}}
+          </td>
+          {{if $.Config.Runners.ContainerMode}}<td><code>{{.JobDockerBackend}}</code></td>{{end}}
+          <td>
+            {{if .RegistrationMessage}}
+              {{if and (eq .Status "installed") .GitHubURL}}
+                {{/* 提示里仍是注册结果原文：那是这一格真正的诊断信息，变成链接不该把它挤掉。
+                     「点了会去 GitHub」由虚下划线与下一行的 GitHub ✓ 交代 */}}
+                <a class="reg-ok github-link has-tip" href="{{.GitHubURL}}" target="_blank" rel="noopener noreferrer">{{index $.T "reg.registered"}}<span class="tip">{{.RegistrationMessage}}</span></a>
+              {{else}}
+                <span class="{{if eq .Status "installed"}}reg-ok{{else}}reg-err{{end}} has-tip" tabindex="0" role="note">{{if eq .Status "installed"}}{{index $.T "reg.registered"}}{{else}}{{index $.T "reg.failed"}}{{end}}<span class="tip">{{.RegistrationMessage}}</span></span>
+              {{end}}
+            {{else}}
+              <span class="github-unknown">—</span>
+            {{end}}
+            {{/* 三态要用 GitHubYes/GitHubNo：{{if .RegisteredOnGitHub}} 对指针只看是否为 nil，
+                 指向 false 的指针同样为真，「GitHub 上没有它」会被渲染成「GitHub ✓」 */}}
+            {{if .GitHubYes}}
+              <br>{{if .GitHubURL}}<a class="github-yes github-link" href="{{.GitHubURL}}" target="_blank" rel="noopener noreferrer" title="{{index $.T "github.open_title"}}">{{index $.T "github.yes"}}</a>{{else}}<span class="github-yes">{{index $.T "github.yes"}}</span>{{end}}
+            {{else if .GitHubNo}}
+              <br><span class="github-no">{{index $.T "github.no"}}</span>
+            {{else if .GitHubCheckAt}}
+              <br><span class="github-unknown has-tip" tabindex="0" role="note">{{index $.T "github.failed"}}<span class="tip">{{.GitHubCheckError}}</span></span>
+            {{else if .RegistrationMessage}}
+              <br><span class="github-unknown">{{index $.T "github.pending"}}</span>
+            {{end}}
+          </td>
+          <td class="path">{{.InstallDir}}</td>
+          <td class="col-actions">
+            {{if and (eq .Status "installed") (not .Running)}}<button type="button" class="btn-start" data-name="{{.Name}}" title="{{index $.T "btn.start_title"}}">{{index $.T "btn.start"}}</button>{{end}}
+            {{if .Running}}<button type="button" class="btn-stop" data-name="{{.Name}}" title="{{index $.T "btn.stop_title"}}">{{index $.T "btn.stop"}}</button>{{end}}
+            {{if eq .Status "unknown"}}
+            <button type="button" class="btn-start" data-name="{{.Name}}" title="{{index $.T "btn.start_unknown_title"}}">{{index $.T "btn.start"}}</button>
+            <button type="button" class="btn-stop" data-name="{{.Name}}" title="{{index $.T "btn.stop_unknown_title"}}">{{index $.T "btn.stop"}}</button>
+            {{end}}
+            {{if .ContainerDrift}}<button type="button" class="btn-recreate" data-name="{{.Name}}">{{index $.T "btn.recreate"}}</button>{{end}}
+            <button type="button" class="btn-view" data-name="{{.Name}}" title="{{index $.T "btn.view_title"}}">{{index $.T "btn.view"}}</button>
+            <button type="button" class="btn-edit" data-name="{{.Name}}" title="{{index $.T "btn.edit_title"}}">{{index $.T "btn.edit"}}</button>
+            <button type="button" class="btn-del" data-name="{{.Name}}" title="{{index $.T "btn.del_title"}}">{{index $.T "btn.delete"}}</button>
+          </td>
+        </tr>
+        {{end}}
+        {{if not .Runners}}
+        <tr><td colspan="{{if .Config.Runners.ContainerMode}}7{{else}}6{{end}}" class="cell-empty">{{index .T "runner_list.empty"}}</td></tr>
+        {{end}}
+        <tr id="noMatchRow" style="display:none"><td colspan="{{if .Config.Runners.ContainerMode}}7{{else}}6{{end}}" class="cell-empty">{{index .T "filter.no_match"}}</td></tr>
+{{end}}

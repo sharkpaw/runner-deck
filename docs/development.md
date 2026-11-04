@@ -1,0 +1,341 @@
+# Development & Build
+
+**文档 / Docs:** [EN](README.md) · [中文](zh/) · [Français](fr/) · [Deutsch](de/) · [한국어](ko/) · [日本語](ja/)
+
+![](../.github/assets/fleet.jpg)
+
+For production use container deployment; see [User Guide](guide.md). This doc is for contributors: local build and debug.
+
+## Requirements
+
+- Go 1.27.3 (match [go.mod](../go.mod)).
+
+## Architecture
+
+Three processes. The part worth knowing is which of them owns what.
+
+```mermaid
+flowchart LR
+  GH["GitHub Actions"]
+  subgraph host["Host"]
+    M["<b>Manager</b><br/>runner-manager :8080"]
+    SOCK[("docker.sock")]
+    DIR[("runners/&lt;name&gt;/")]
+    subgraph RC["Runner container — container mode only"]
+      AG["<b>Agent</b><br/>runner-agent :8081"]
+      RUN["run.sh → Runner.Listener"]
+    end
+  end
+  M -->|"docker create / start / stop / rm"| SOCK
+  SOCK -.->|"creates"| RC
+  M -->|"HTTP + Bearer AGENT_TOKEN<br/>/status /start /stop"| AG
+  AG -->|"spawns; reads /proc"| RUN
+  M -->|"config, tokens, registration result"| DIR
+  DIR -.->|"bind-mounted as /runner"| RC
+  RUN -->|"long-polls for jobs"| GH
+  M -.->|"optional PAT: listed? busy?"| GH
+```
+
+The diagram's labels stay in English in every translation: they are process names, paths and
+endpoints, and translating an identifier makes it harder to grep, not easier to read.
+
+**The Manager orchestrates; it does not host runners.** In container mode each runner is its own
+container, created by the Manager through the host's Docker socket — which is why the Manager
+needs that socket and must not be pointed at DinD. In the default mode there is no Agent and no
+runner container at all: the runner processes run inside the Manager's own container, and the
+Manager reads `/proc` directly. Either way, whoever holds PID 1 stops the runners before it exits:
+on SIGTERM the Agent stops its runner and waits for it, and in the default mode the Manager does the
+same for the runners in its own container. `tini` sits in front of both and reaps whatever a job
+orphans.
+
+**Status crosses a process boundary, so it crosses HTTP.** The Manager and a runner container are
+in different PID namespaces, so the Manager cannot see the runner's processes — it asks the Agent,
+which reads its own `/proc`. That call carries a per-runner bearer token, because any container on
+the same Docker network can reach the Agent's `/start` and `/stop`. When the call fails the answer
+is `unknown`, never `installed`: "registered but not running, so start it" must not fire on a
+runner the Manager could not reach. See [How running state is determined](#how-running-state-is-determined).
+
+**Nine things are fixed at `docker create` time** and never change afterwards: container name,
+image, network, mount directory, in-job Docker backend, DinD host, docker GID, agent token and the
+resource limits. `docker start` only restarts what was already built, so editing the config alone
+never reaches an existing container. That is the whole reason drift detection exists — the Manager
+compares each container's real create parameters against the current config, rebuilds a **stopped**
+one on its next start, and flags a **running** one instead of interrupting a job. The image is
+compared by ID as well as by reference, so rebuilding the same tag counts.
+
+## Build
+
+Run `make test-coverage` on Linux (or in a Linux container) before merging or releasing. It runs every production package with uncached race tests and requires at least 95% total statement coverage; `.coverage/` retains the JSON results and profile. Permission tests require a non-root user. Startup subprocess tests exercise the real entrypoints and contribute their coverage; no production code is excluded.
+
+```bash
+# Build runner-manager binary
+go build -o runner-manager ./cmd/runner-manager
+
+# With version (for /version and debugging)
+go build -ldflags "-X main.Version=v2.0.0" -o runner-manager ./cmd/runner-manager
+
+# Build Runner Agent only (container mode)
+go build -o runner-agent ./cmd/runner-agent
+
+# Or Make: make build / make build-agent / make build-all
+```
+
+Templates are embedded in the Manager binary (`cmd/runner-manager/templates/`); single binary, no need to ship `templates/`.
+
+## Local run & debug
+
+```bash
+mkdir -p config && cp config.yaml.example config/config.yaml
+go run ./cmd/runner-manager
+# Or make run (build then run); custom config: ./runner-manager -config /path/to/config.yaml
+```
+
+Listens on `:8080`, http://localhost:8080. Basic Auth for debug: `BASIC_AUTH_PASSWORD=secret go run ./cmd/runner-manager`; see [User Guide – Security](guide.md#4-security-and-validation).
+
+## CLI flags
+
+- `-config <path>`: Config file path.
+- `-version`: Print version and exit (inject at build with `-ldflags "-X main.Version=..."`).
+
+## HTTP API
+
+With Basic Auth, all requests except `/health` and `/ready` must include `Authorization: Basic <base64(user:password)>` in the header.
+
+| Path | Method | Description |
+|------|--------|-------------|
+| `/health` | GET | Liveness. Returns `{"status":"ok","service":"runner-deck"}`; always 200 while the process is up, with no dependency checks; always unauthenticated. |
+| `/ready` | GET | Readiness. Same body shape; 503 when the config cannot be loaded or the runner base path is missing/unwritable. For K8s `readinessProbe`; always unauthenticated, and never reports which check failed. |
+| `/version` | GET | Returns `{"version":"..."}`. |
+| `/metrics` | GET | Prometheus metrics (request counts and latency). Path labels use the Echo route template (`/api/runners/:name`), not the request URL. **Requires auth** when Basic Auth is enabled — configure `basic_auth` in the scrape job. |
+| `/api/runners` | GET | Runner list. In container mode, on probe failure returns `status=unknown` with structured `probe` (`error/type/suggestion/check_command/fix_command`). |
+| `/api/runners/:name` | GET | Single runner details. Same `probe` on probe failure in container mode. In container mode the response also carries `container_drift` when the container's create parameters no longer match the config. |
+| `/api/runners/:name/start` | POST | Start runner. On probe failure still attempts start, returns structured `probe` in response. |
+| `/api/runners/:name/stop` | POST | Stop runner. On probe failure still attempts stop, returns structured `probe` in response. |
+| `/api/runners` | POST | Add a runner (optionally install and register). On a name conflict returns **409** with `conflicts` and `suggested_name` instead of silently renaming; send `auto_rename: true` for the old auto-suffix behaviour. |
+| `/api/runners/:name` | DELETE | Remove a runner: stop it, deregister it from GitHub when a PAT is available, delete its install directory, drop it from the config. The response carries `github_deregistered` and a `message` that states what happened on the GitHub side. |
+| `/api/runners/:name/recreate` | POST | Remove and recreate the runner container with the current config (container mode only). Interrupts a job running on it — starting a stopped container already recreates it automatically when its create parameters drifted. |
+| `/api/runner-precheck` | GET | Pre-flight a name before adding: `?name=&path=`. Returns `available`, a `suggested_name` and the `conflicts` found (`name_taken`, `container_name`, `install_dir`, `dir_registered`, `dir_adopt`, `dir_exists`, `container_exists`), each with `level` (`error`/`warn`), `message`, `detail` and an optional `fix_command`. Read-only; the Web UI calls it while you type. |
+| `/api/runner-rows` | GET | Renders only the runner list's `<tbody>`, from the same template fragment the first paint uses. The Web UI polls it to refresh the list in place. |
+| `/static/*` | GET, HEAD | Embedded stylesheet and script (`//go:embed`). URLs carry a content fingerprint (`?v=<hash>`): fingerprinted requests cache long, unfingerprinted ones revalidate. `HEAD` is registered alongside `GET` so a probe or a proxy does not collect a 405. |
+
+### Cross-site requests (CSRF)
+
+Write endpoints (`POST`, `PUT`, `DELETE`) reject requests the browser reports as cross-site.
+Without this, a page on any other origin could submit a form to `POST /api/runners`: that is
+a CORS "simple request", so it goes out without a preflight and the browser attaches
+whatever Basic Auth credentials it has cached for this origin. Opening a malicious page was
+enough to add or stop a runner. `PUT` and `DELETE` always preflight, so they were never the
+exposed part — `POST` was, and `/api/runners/:name/{start,stop,recreate}` are all POST.
+
+The check reads `Sec-Fetch-Site` first: the browser computes it locally, so a reverse proxy
+rewriting `Host` cannot break it (Chrome 76+, Firefox 90+, Safari 16.4+). Only `same-origin`
+passes; `same-site` does not, because a subdomain or another port is a different origin and
+this is an admin surface. Browsers too old to send it fall back to comparing `Origin`
+against the request's `Host`, which every current browser sends on a cross-site POST.
+
+A request with **neither** header did not come from a browser (curl, CI scripts). It holds
+no cookie and no cached Basic Auth, so it cannot be a CSRF attack, and it passes — the API
+stays scriptable, and no token or extra header is needed anywhere.
+
+Two consequences:
+
+- **Request bodies are JSON only.** `AddRunnerRequest` and `UpdateRunnerRequest` carry no
+  `form` struct tags, so a form-encoded post binds to an empty struct and fails validation
+  even if it somehow got past the middleware. The Web UI already posts JSON — its
+  `FormData` use is only for reading fields out of the form element.
+- **`TRUSTED_ORIGINS` is the escape hatch.** If a reverse proxy rewrites `Host` such that
+  your own requests are refused, list the browser-visible origins there, comma-separated
+  (`https://ci.example.com`). They are allowed whatever `Sec-Fetch-Site` says, so keep the
+  list to origins you control.
+
+### Breaking change (upgrade note)
+
+Legacy flat `probe_*` fields are removed; use the `probe` object: `probe.error`, `probe.type`, `probe.suggestion`, `probe.check_command`, `probe.fix_command`. `probe.type` values: `docker-access`, `agent-http`, `agent-connect`, `unknown`. Web UI can still "Start/Stop" for self-heal when `status=unknown`.
+
+Example (probe failure):
+
+```json
+{
+  "name": "runner-a",
+  "status": "unknown",
+  "probe": {
+    "error": "agent returned 502: bad gateway",
+    "type": "agent-http",
+    "suggestion": "Check runner container logs and Agent + /runner process state",
+    "check_command": "docker ps -a | rg \"github-runner-\" && docker logs --tail=200 <runner_container_name>",
+    "fix_command": "docker restart <runner_container_name>"
+  }
+}
+```
+
+### How running state is determined
+
+`internal/runnerproc` answers "is this runner's process alive?" by scanning `/proc` for a
+process whose argv claims that install directory — `<dir>/bin/Runner.Listener`, or a shell
+running `<dir>/run.sh` or `<dir>/run-helper.sh`.
+
+It deliberately does **not** read a pid file, because actions/runner does not write one.
+None of `run.sh`, `run-helper.sh.template` or `runsvc.sh` writes a pid anywhere; the pid
+only ever lives in a shell variable. The `.path` file in an install directory holds a PATH
+string, not a pid (`runsvc.sh` does `export PATH=$(cat .path)`). Reading either of those
+names always failed, which made every runner report "registered but not running" forever.
+
+The supervising shell counts as running even when `Runner.Listener` is momentarily gone:
+`run-helper.sh` sleeps 5 seconds on exit code 2 and `run.sh` then relaunches the listener,
+so a listener-only test would report the runner dead during every restart.
+
+Two consequences for callers:
+
+- `runner.List` is a disk-level view. In container mode its `Running` is always false —
+  the Manager and the runners are in different PID namespaces. Use
+  `runner.ListWithLiveStatus`, which asks each container's Agent, whenever the answer
+  drives an action. It maps a probe failure to `status=unknown` rather than `installed`,
+  so "registered but not running, so start it" cannot fire on a runner it could not reach.
+- Detection needs `/proc`, so it is Linux-only; elsewhere it reports "not running".
+
+### Runner directory permissions
+
+A runner's install directory is created 0700. `config.sh` writes `.credentials_rsaparams`
+there — the RSA private key the runner authenticates to GitHub with — and actions/runner
+sets no Unix permissions on it (`ConfigurationStore` only sets the Windows Hidden attribute,
+so the file follows the umask, usually 0644). The directory mode is therefore the only thing
+standing between that key and other local users on the host.
+
+`MkdirAll` leaves an existing directory's mode alone, so directories created by older
+versions stay 0755. `Preflight` reports those with a ready-to-run `chmod 700` instead of
+changing them: tightening a directory when the Manager and the container run as different
+UIDs would break a working deployment, and that call belongs to a person.
+
+`base_path` itself is left traversable — it holds no credentials, and it is the host mount
+point in container mode.
+
+This does not change what a job can reach. Under `job_docker_backend: host-socket` a job can
+bind-mount any host path, which the deployment docs already warn about; the mode protects
+against other local users, not against that.
+
+### Runner removal and GitHub
+
+`DELETE /api/runners/:name` removes a runner from this tool **and** from GitHub. The GitHub
+side needs a credential, and the only one this tool ever has is the optional per-runner PAT
+at `config/tokens/<runner name>` — the same file the visibility check uses. So
+deregistration runs *before* the install directory is deleted: a PAT left there by an
+earlier version is migrated out of it on the way, and skipping that order silently loses
+the ability to do it at all.
+
+With no PAT the runner cannot be deregistered: GitHub wants a PAT or a fresh removal token,
+and `config.sh remove` wants the latter. The response then says so and names where to delete
+it by hand. It is worth saying rather than swallowing — a leftover runner makes the next
+`config.sh --name <same name>` fail with `A runner exists with the same name`.
+
+`registered_on_github` is a **nullable** bool: `true` / `false` are answers, `null` means no
+answer was reached, and `github_check_error` carries why. Templates must not test it with
+`{{if .RegisteredOnGitHub}}` — `html/template` judges a pointer by nil-ness alone, so a
+pointer to `false` is true. Use the `GitHubYes` / `GitHubNo` / `GitHubUnknown` helpers on
+`RunnerInfo`.
+
+## Makefile targets
+
+- `make help`: List all targets.
+- `make build`: Build Manager (with Version ldflags).
+- `make build-agent`: Build Runner Agent (container mode).
+- `make build-all`: Build Manager and Agent.
+- `make test`: Run tests.
+- `make test-race`: Run tests with the race detector (what CI runs).
+- `make lint`: Run golangci-lint over `./...` — the same step CI's Test job runs.
+- `make check`: Everything CI checks, in one target — gofmt, vet, lint, `-race` tests and both consistency checks. Run this before pushing.
+- `make run`: Build then run Manager.
+- `make docker-build` / `make docker-run` / `make docker-stop`: Manager image build and run; see [User Guide](guide.md).
+- `make docker-build-runner`: Build Runner image for container mode (`Dockerfile.runner`, default tag in `RUNNER_IMAGE`).
+- `make docker-build-runner-example`: Build a custom Runner image example (`EXAMPLE=android|node`, see [`examples/runner-images/`](../examples/runner-images/)).
+- `make clean`: Remove built binaries (runner-manager, runner-agent).
+
+Container mode uses Agent from `cmd/runner-agent` and Runner image from `Dockerfile.runner`.
+
+
+## Tests
+
+`go test ./...`, or `make test-race` for what CI actually runs. Every CI and release
+workflow runs `go test -race`, so a data race fails the build rather than surfacing later as
+an occasional wrong status in production — this project's concurrency (the single-worker
+registration queue, the per-runner `runnerOps` lock, the single-winner creation in
+`EnsureAgentToken`) rests on conventions the type system does not enforce. The repo's
+golangci-lint runs in CI; `errcheck` and `staticcheck` via `go run` cover most of what it
+flags if you cannot run it locally.
+
+A few conventions worth knowing before adding to the suite:
+
+- **Process detection is exercised against real processes**, not just a fake `/proc`
+  (`internal/runnerproc`, `internal/runner`, `cmd/runner-agent`). A scratch `run.sh` that
+  sleeps stands in for the runner; it must not `exec`, or the shell is replaced and the argv
+  no longer matches what `internal/runnerproc` looks for.
+- **`cmd/runner-manager` tests reach the wiring through the functions `main()` calls**
+  (`basicAuthMiddleware`, `httpErrorHandler`, `registerRoutes`, `listenAddr`, `loadI18n`).
+  Adding a route means updating `TestRegisterRoutes_AllEndpointsPresent`, which asserts the
+  exact set — the prompt to think about whether the new route needs authentication.
+- **Middleware is tested through `newEchoServer()`, not only on its own.** A guard that is
+  correct but never mounted is the typical way this kind of protection fails, so
+  `TestCSRFGuardIsMountedOnWriteRoutes` drives the real route table. Adding a write route
+  means adding it to `writeRoutes` there.
+- **The i18n files are cross-checked.** A key in `en.json` with no counterpart elsewhere
+  renders as a blank, silently, so tests assert the key sets match across all six languages,
+  that no value is empty, and that every key the template references exists.
+- **Template defects get template-level tests.** Two past bugs lived in `index.html` rather
+  than in Go — a `{{if}}` on a `*bool` that read a pointer to `false` as true, and an
+  `innerHTML` assignment that skipped `escapeHtml`. Both are covered by rendering the real
+  template or scanning it, because a test of the Go helper alone would not have noticed
+  either.
+- **Documentation is checked like code.** `internal/docsconsistency` holds tests and no
+  runtime code. They compare each translation against the English original *below* the
+  heading level ci-recipes checks — table rows, code blocks, list items, resolved link
+  targets — because the drift that actually happened was a table row, not a heading. They
+  also assert that paths referenced from non-Markdown files exist, that the marker the
+  troubleshooting docs tell you to `grep` is the one the code logs, and that every README
+  under `examples/` has a declared language policy.
+
+## Releasing
+
+Version references in docs and examples must match the default image tag in `internal/config/config.go`. CI enforces this via `ci-recipes runner-fleet check-version-consistency`; run it locally before opening a release PR:
+
+```bash
+ci-recipes runner-fleet check-version-consistency
+```
+
+Both checks come from [soulteary/ci-recipes](https://github.com/soulteary/ci-recipes), which replaces
+per-repository CI shell with one tested Go binary; this repository supplies only
+`scripts/ci-recipes.conf`. Install the version CI pins:
+
+```bash
+make install-ci-recipes
+```
+
+The pin lives only in `.github/workflows/ci-consistency.yml`; the Makefile reads it from there.
+
+If a line legitimately cites an older version (release notes, upgrade instructions), append a `version-check-ignore` marker to that line to skip it.
+
+The translated docs are checked the same way. `ci-recipes runner-fleet check-docs-structure` compares the
+heading-level sequence of every `docs/<lang>/*.md` against its English original — heading text
+is supposed to differ, the structure is not — so a section added in English and skipped in the
+five translations fails the PR instead of going unnoticed:
+
+```bash
+ci-recipes runner-fleet check-docs-structure
+```
+
+Two checks fire at release time instead of on every PR. `.github/actions/check-release-version`
+runs on a `v*.*.*` tag and refuses it unless the baseline in `internal/config/config.go` equals
+the tag and `CHANGELOG.md` carries a matching `## [X.Y.Z]` section with its link definition.
+`check-version-consistency` cannot see this: it takes that baseline as the truth, so a repo that
+is internally consistent one patch behind the published release passes it — which is exactly how
+one release went out with nothing in the tree pointing at it. The `Quick start runs` job in
+`CI (Consistency)` executes the guide's quick-start block against a locally built image and then
+asks for `GET /ready`, because a documented procedure that nobody runs is a procedure nobody
+knows is broken.
+
+Two maintainer notes live next to this file and are deliberately untranslated, because both
+record a build decision rather than product behaviour:
+[Migrating CI shell to ci-recipes](ci-recipes-migration.md) is the audit behind the move — which
+shell surfaces belonged there, the four defects the port fixed, and what it cost — and
+[the documentation improvement plan](docs-improvement-plan.md) is the audit these checks came
+out of, with what is done and what is still open.
+
+[← Back to docs](README.md)

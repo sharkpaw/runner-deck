@@ -1,0 +1,33 @@
+# 可执行文件（仅忽略仓库根目录的构建产物，不忽略 cmd/runner-manager、cmd/runner-agent 源码）
+/runner-manager
+/runner-agent
+*.exe
+
+# Runner 数据目录（按需取消注释）
+# runners/
+# 各 runner 目录下的敏感文件（若 runners/ 被纳入版本库请取消下一行注释）
+# **/.agent_token
+
+# 本地配置（若含敏感信息建议加入）
+config/config.yaml
+.env
+
+# Manager 侧凭据：可选 PAT 按 Runner 名存在这里。有人会把 config/ 纳入版本控制
+config/tokens/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 系统
+.DS_Store
+Thumbs.db
+
+.cursor/
+*.out
+
+# Local test evidence
+/.coverage/

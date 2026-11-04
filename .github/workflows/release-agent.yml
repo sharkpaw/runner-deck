@@ -1,0 +1,109 @@
+# 推送 tag v*.*.* 时：构建并推送 Runner 容器镜像（Agent，tag 带 -runner 后缀）
+name: Release (Runner)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: release-runner-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  release:
+    name: Build and push Runner image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check release version consistency
+        uses: ./.github/actions/check-release-version
+        with:
+          tag: ${{ github.ref_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run tests
+        run: make test-coverage
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute canonical image name (lowercase for GHCR)
+        id: vars
+        shell: bash
+        run: |
+          set -eu
+          CANONICAL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "canonical=${CANONICAL,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata (for tag)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.vars.outputs.canonical }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=true
+
+      - name: Prepare Runner tags (same image, tag suffix -runner)
+        id: runner-tags
+        run: |
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          # metadata-action 可能输出逗号/换行分隔；每行 image:tag 转为 image:tag-runner
+          echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            if [[ "$line" == *:* ]]; then
+              echo "$line" | sed 's/\(:.*\)$/\1-runner/'
+            else
+              echo "${line}:latest-runner"
+            fi
+          done >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Runner Docker image (container mode)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.workspace }}
+          file: ${{ github.workspace }}/Dockerfile.runner
+          push: true
+          tags: ${{ steps.runner-tags.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # scope 按 workflow 分开：tag push 会同时触发四个构建 workflow，
+          # 而 type=gha 不指定 scope 时都落在 BuildKit 默认的 scope=buildkit 上，
+          # 互相覆盖，一方正在写的层被另一方的索引替换后就是 layer blob not_found。
+          cache-from: type=gha,scope=release-runner
+          # ignore-error：缓存导出只是加速手段。镜像此时已经推送完成，
+          # 不能因为写缓存失败就把一次已经成功的发布标成红的。
+          cache-to: type=gha,mode=max,scope=release-runner,ignore-error=true
+          platforms: linux/amd64,linux/arm64

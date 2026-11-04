@@ -1,0 +1,169 @@
+# CI：Runner Agent 的测试与构建
+name: CI (Agent)
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+env:
+  WORKING_DIR: .
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Detect Go module root
+        id: modroot
+        uses: ./.github/actions/detect-go-module-root
+        with:
+          working_dir: ${{ env.WORKING_DIR }}
+
+      - name: Set up Go
+        if: steps.modroot.outputs.found == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ steps.modroot.outputs.root }}/go.mod
+          cache-dependency-path: ${{ steps.modroot.outputs.root }}/go.sum
+
+      - name: Vet
+        if: steps.modroot.outputs.found == 'true'
+        run: go vet ./cmd/runner-agent/... ./internal/...
+        working-directory: ${{ steps.modroot.outputs.root }}
+
+      - name: Lint
+        if: steps.modroot.outputs.found == 'true'
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --max-same-issues=100000 ./cmd/runner-agent/... ./internal/...
+          working-directory: ${{ steps.modroot.outputs.root }}
+
+      # -race：这个项目的并发面不小——单 worker 的注册队列、runnerOps 锁、
+      # EnsureAgentToken 的「单一胜者」创建，都是靠约定而非类型系统保证的。
+      # 竞态退化在普通 go test 下是静默的，只会表现为线上偶发的怪状态。
+      - name: Run tests
+        if: (steps.modroot.outputs.found == 'true') && (!(github.event_name == 'pull_request'))
+        run: go test -race -v ./cmd/runner-agent/... ./internal/...
+        working-directory: ${{ steps.modroot.outputs.root }}
+
+      - name: Remove stale generated report evidence
+        id: report_cleanup
+        if: "!cancelled() && (github.event_name == 'pull_request')"
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -L .github
+          rm -f -- .github/go-test-report.md .github/go-test-report.json .github/coverage.svg .github/goreportcard.svg .github/goreportcard-report.md
+          rm -rf -- .github/test-results
+      - name: Test, race and coverage (GTR v1.1.2)  # version-check-ignore: third-party tool version
+        id: go_test_report
+        uses: soulteary/go-test-report-action@bf04b539f7bf2a6f67d602da4259904b3dcdeba1  # v1.1.2  # version-check-ignore: third-party tool version
+        with:
+          directory: "."
+          packages: "./..."
+          race: "true"
+          coverage_threshold: "0"
+          test_args: "-count=1"
+          version: "v1.1.2"  # version-check-ignore: third-party tool version
+          cover_mode: "atomic"
+          commit: "false"
+        if: github.event_name == 'pull_request'
+      - name: Go quality report (v1.1.3)  # version-check-ignore: third-party tool version
+        if: "!cancelled() && (github.event_name == 'pull_request') && steps.report_cleanup.outcome == 'success'"
+        id: go_report_card
+        uses: soulteary/goreportcard-action@fc43049a5fe61c3313294d217c2a783f375a7970  # v1.1.3  # version-check-ignore: third-party tool version
+        with:
+          directory: "."
+          version: "v1.1.3"  # version-check-ignore: third-party tool version
+          threshold: "0"
+          report: "true"
+          commit: "false"
+      - name: Reuse GTR coverage profile
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PROFILE: ${{ steps.go_test_report.outputs.coverage_profile }}
+        run: |-
+          cp "$PROFILE" coverage.out
+      - name: Skip (no project structure)
+        if: steps.modroot.outputs.found != 'true'
+        run: 'echo "Skipped: no go.mod + cmd/runner-agent in this repo."'
+
+      - name: Upload read-only PR quality evidence
+        if: "always() && steps.report_cleanup.outcome == 'success' && ((github.event_name == 'pull_request'))"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr-go-quality-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .github/go-test-report.md
+            .github/go-test-report.json
+            .github/coverage.svg
+            .github/goreportcard.svg
+            .github/goreportcard-report.md
+            .github/test-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+    permissions:
+      contents: read
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Detect Go module root
+        id: modroot
+        uses: ./.github/actions/detect-go-module-root
+        with:
+          working_dir: ${{ env.WORKING_DIR }}
+
+      - name: Set up Go
+        if: steps.modroot.outputs.found == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ steps.modroot.outputs.root }}/go.mod
+          cache-dependency-path: ${{ steps.modroot.outputs.root }}/go.sum
+
+      - name: Build Runner Agent
+        if: steps.modroot.outputs.found == 'true'
+        run: go build -o runner-agent ./cmd/runner-agent
+        working-directory: ${{ steps.modroot.outputs.root }}
+
+      - name: Verify binary
+        if: steps.modroot.outputs.found == 'true'
+        run: test -x runner-agent && ls -la runner-agent
+        working-directory: ${{ steps.modroot.outputs.root }}
+
+      - name: Skip (no project structure)
+        if: steps.modroot.outputs.found != 'true'
+        run: 'echo "Skipped: no go.mod + cmd/runner-agent in this repo."'
+
+  image:
+    name: Image build context
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # 上面的 Build 在完整工作区里跑 go build，而镜像的 builder 阶段只 COPY 了其中一部分，
+      # 两者能力不同：Agent 新 import 一个 internal 包，Build 照过，镜像构建却直接失败。
+      # #25 就是这么漏过去的，之后每一次 main 推送都把 Publish image (Runner) 打红。
+      # 这里按 Dockerfile 自己的 COPY 列表真构建一次 builder 阶段——不另写一份路径清单，
+      # 所以它不会跟 Dockerfile 漂移。只构建 builder：运行阶段的 apt 安装与发布无关，
+      # 要验的是「构建上下文够不够编出这个二进制」。
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Verify both Linux image binary architectures
+        run: scripts/test-image-architecture.sh Dockerfile.runner runner-agent
