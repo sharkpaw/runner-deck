@@ -1,0 +1,13 @@
+# Loaded only by a plain "docker compose up". Coolify names its file explicitly and skips this one.
+services:
+  runner-manager:
+    user: "1001:${DOCKER_GID:-999}"
+    ports:
+      - "${MANAGER_PORT:-8080}:8080"
+    environment:
+      CONTAINER_MODE: ${CONTAINER_MODE:-}
+      VOLUME_HOST_PATH: ${VOLUME_HOST_PATH:-}
+      JOB_DOCKER_BACKEND: ${JOB_DOCKER_BACKEND:-}
+    volumes:
+      - ./config:/app/config
+      - ./runners:/app/runners

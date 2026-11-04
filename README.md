@@ -14,7 +14,7 @@
 
 ![System resources page](docs/images/system-en.png)
 
-Deploying on Coolify: see [`examples/deploy/coolify`](examples/deploy/coolify/docker-compose.yml). Screenshots use sample data.
+Screenshots use sample data. Deploying on Coolify: create a Docker Compose resource from this repository and assign a domain to `runner-manager`. Plain Docker: see the quick start below.
 
 HTTP management UI built with Golang Echo to view and manage multiple self-hosted GitHub Actions Runners on one machine. YAML-based config, no database required.
 
@@ -39,6 +39,7 @@ mkdir -p config runners && cp config.yaml.example config/config.yaml
 # Edit config/config.yaml: set runners.base_path to /app/runners
 sudo chown -R 1001:1001 config runners
 
+echo "SERVICE_PASSWORD_RUNNERDECK=$(openssl rand -hex 16)" >> .env
 docker network create runner-net 2>/dev/null || true
 docker compose up -d
 ```

@@ -6,4 +6,4 @@ First release of Runner Deck: add, stop and watch self-hosted GitHub Actions run
 - **Seven languages**, including Turkish.
 - **Interface:** sidebar, light and dark themes.
 - **System resources page:** CPU, memory and disk per runner, session charts and Docker disk usage.
-- **Coolify:** ready compose file in `examples/deploy/coolify`.
+- **Coolify:** the root `docker-compose.yml` deploys as is.

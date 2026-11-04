@@ -15,7 +15,7 @@ First release of Runner Deck.
 - Turkish translation.
 - New interface: sidebar, light and dark themes, and a logo.
 - System resources page: CPU, memory and disk per runner, session charts and Docker disk usage (`GET /api/system`).
-- Coolify compose example in `examples/deploy/coolify`.
+- The root `docker-compose.yml` deploys on Coolify as is.
 
 [Unreleased]: https://github.com/sharkpaw/runner-deck/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/sharkpaw/runner-deck/releases/tag/v2.0.0

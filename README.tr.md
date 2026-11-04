@@ -29,8 +29,8 @@ Her repo için ayrı compose dosyası tutmak yerine runner'larını tek arayüzd
 
 ## Coolify'a kurulum
 
-1. Coolify'da bu repodan **Docker Compose** kaynağı oluştur ve compose yolu olarak `examples/deploy/coolify/docker-compose.yml` yaz.
-2. `runner-manager` servisine bir domain ver ve deploy et.
+1. Coolify'da bu repodan **Docker Compose** kaynağı oluştur. Compose yolu varsayılan `docker-compose.yml` kalsın.
+2. Domain otomatik gelmez: `runner-manager` servisine domaini `https://alanadin.com:8080` biçiminde yazıp deploy et.
 3. Giriş parolası Coolify'ın ürettiği `SERVICE_PASSWORD_RUNNERDECK` değişkenindedir, kullanıcı adı `admin`.
 4. Arayüzden **Hızlı runner ekle** ile ilk runner'ını ekle.
 

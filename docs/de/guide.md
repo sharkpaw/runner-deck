@@ -33,6 +33,7 @@ mkdir -p config runners && cp config.yaml.example config/config.yaml
 
 sudo chown -R 1001:1001 config runners
 
+echo "SERVICE_PASSWORD_RUNNERDECK=$(openssl rand -hex 16)" >> .env
 docker network create runner-net 2>/dev/null || true
 docker compose up -d
 # Bei job_docker_backend: dind: docker compose --profile dind up -d
