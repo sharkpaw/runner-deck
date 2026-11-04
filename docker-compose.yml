@@ -1,6 +1,6 @@
 services:
   runner-manager:
-    image: ${MANAGER_IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.1.0}
+    image: ${MANAGER_IMAGE:-ghcr.io/sharkpaw/runner-deck:main}
     user: "0:0"
     expose:
       - "8080"
@@ -14,7 +14,7 @@ services:
       VOLUME_HOST_PATH: ${VOLUME_HOST_PATH:-/opt/runner-deck/runners}
       CONTAINER_NETWORK: runner-net
       JOB_DOCKER_BACKEND: ${JOB_DOCKER_BACKEND:-host-socket}
-      RUNNER_IMAGE: ${RUNNER_IMAGE:-ghcr.io/sharkpaw/runner-deck:v2.1.0-runner}
+      RUNNER_IMAGE: ${RUNNER_IMAGE:-ghcr.io/sharkpaw/runner-deck:main-runner}
       DOCKER_GID: ${DOCKER_GID:-}
       SERVER_PORT: "8080"
       SERVER_ADDR: 0.0.0.0
