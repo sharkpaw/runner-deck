@@ -19,6 +19,7 @@ const (
 // privilegeOps holds the system calls dropPrivileges makes, so its order can be tested.
 type privilegeOps struct {
 	geteuid   func() int
+	owner     func(path string) (uid, gid int, ok bool)
 	lchown    func(path string, uid, gid int) error
 	setgroups func(gids []int) error
 	setgid    func(gid int) error
@@ -28,6 +29,7 @@ type privilegeOps struct {
 
 var systemPrivilegeOps = privilegeOps{
 	geteuid:   os.Geteuid,
+	owner:     ownerOf,
 	lchown:    os.Lchown,
 	setgroups: syscall.Setgroups,
 	setgid:    syscall.Setgid,
@@ -51,7 +53,7 @@ func ownerOf(path string) (uid, gid int, ok bool) {
 // chownTree gives a directory to the app user. A directory the app user already owns is left
 // alone, so a restart does not walk a large _work tree.
 func chownTree(ops privilegeOps, root string) error {
-	uid, _, ok := ownerOf(root)
+	uid, _, ok := ops.owner(root)
 	if !ok || uid == appUID {
 		return nil
 	}
@@ -79,7 +81,7 @@ func dropPrivileges(ops privilegeOps, socket string, dirs ...string) error {
 		}
 	}
 	groups := []int{appGID}
-	if _, gid, ok := ownerOf(socket); ok && gid != 0 && gid != appGID {
+	if _, gid, ok := ops.owner(socket); ok && gid != 0 && gid != appGID {
 		groups = append(groups, gid)
 	}
 	// Order matters: once the uid changes, the groups can no longer be changed.
