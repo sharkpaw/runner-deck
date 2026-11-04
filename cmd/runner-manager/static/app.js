@@ -1263,10 +1263,81 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
       .finally(function () { polling = false; });
   }
 
+  // ===== Activity log =====
+  var eventsTimer = null;
+  var eventsRunner = el('eventsRunner');
+  var eventsErrors = el('eventsErrors');
+  function eventText(e) {
+    var key = 'event.' + e.code;
+    var text = t(key);
+    if (text === key) return e.code + (e.detail ? ': ' + e.detail : '');
+    return text.split('{{detail}}').join(e.detail || '');
+  }
+  function renderEvents(events) {
+    var body = el('eventsRows');
+    body.textContent = '';
+    if (!events.length) {
+      var empty = document.createElement('tr');
+      var cell = textCell(t('events.empty'), 'cell-empty');
+      cell.colSpan = 3;
+      empty.appendChild(cell);
+      body.appendChild(empty);
+      return;
+    }
+    events.forEach(function (e) {
+      var tr = document.createElement('tr');
+      if (e.level === 'error') tr.className = 'event-error';
+      else if (e.level === 'warn') tr.className = 'event-warn';
+      tr.appendChild(textCell(new Date(e.time).toLocaleString(document.documentElement.lang), 'tabular row-sub event-time'));
+      tr.appendChild(textCell(e.runner || '—'));
+      tr.appendChild(textCell(eventText(e), 'event-text'));
+      body.appendChild(tr);
+    });
+  }
+  function fillRunnerFilter() {
+    var names = Array.prototype.map.call(document.querySelectorAll('#runnerRowsBody tr[data-name]'), function (r) { return r.dataset.name; });
+    var current = eventsRunner.value;
+    while (eventsRunner.options.length > 1) eventsRunner.remove(1);
+    names.forEach(function (n) {
+      var o = document.createElement('option');
+      o.value = o.textContent = n;
+      eventsRunner.appendChild(o);
+    });
+    eventsRunner.value = names.indexOf(current) >= 0 ? current : '';
+  }
+  function loadEvents() {
+    var params = new URLSearchParams();
+    if (eventsRunner.value) params.set('runner', eventsRunner.value);
+    if (eventsErrors.checked) params.set('level', 'error');
+    el('eventsOutputBtn').hidden = !eventsRunner.value;
+    fetch('/api/events?' + params.toString())
+      .then(function (res) { return res.ok ? res.json() : { events: [] }; })
+      .then(function (data) { renderEvents(data.events || []); })
+      .catch(function () {});
+  }
+  eventsRunner.addEventListener('change', loadEvents);
+  eventsErrors.addEventListener('change', loadEvents);
+  el('eventsOutputBtn').addEventListener('click', function () {
+    var name = eventsRunner.value;
+    el('outputTitle').textContent = t('events.output_title').split('{{name}}').join(name);
+    el('outputBody').textContent = '';
+    el('outputModal').classList.add('show');
+    fetch('/api/runners/' + encodeURIComponent(name) + '/logs')
+      .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, body: b }; }); })
+      .then(function (r) {
+        el('outputBody').textContent = r.ok ? (r.body.logs || t('events.output_empty')) : (r.body.message || t('msg.load_failed'));
+        el('outputBody').scrollTop = el('outputBody').scrollHeight;
+      })
+      .catch(function () { el('outputBody').textContent = t('msg.load_failed'); });
+  });
+  el('outputClose').addEventListener('click', function () { el('outputModal').classList.remove('show'); });
+
   function showView() {
-    var view = location.hash === '#system' ? 'system' : 'runners';
+    var hash = location.hash;
+    var view = hash === '#system' ? 'system' : hash === '#events' ? 'events' : 'runners';
     el('viewRunners').hidden = view !== 'runners';
     el('viewSystem').hidden = view !== 'system';
+    el('viewEvents').hidden = view !== 'events';
     document.querySelectorAll('.nav-link').forEach(function (a) {
       var on = a.dataset.view === view;
       a.classList.toggle('active', on);
@@ -1275,6 +1346,13 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
     sidebar.classList.remove('open');
     clearInterval(pollTimer);
     pollTimer = null;
+    clearInterval(eventsTimer);
+    eventsTimer = null;
+    if (view === 'events') {
+      fillRunnerFilter();
+      loadEvents();
+      eventsTimer = setInterval(loadEvents, 15000);
+    }
     if (view === 'system') {
       pollSystem();
       pollTimer = setInterval(pollSystem, POLL_MS);

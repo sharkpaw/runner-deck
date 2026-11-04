@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Runners get 4 CPUs and 8 GB by default, editable from the panel, globally or per runner, without a restart.
+- Warnings when a runner hits its memory or CPU limit.
+- Activity log: starts, stops, job results, memory kills and errors, kept with their times.
+- Recreating a runner pulls its image first.
+
 ## [2.1.0] - 2026-11-05
 
 - Login page with a browser session and sign out. Scripts can keep using Basic Auth.

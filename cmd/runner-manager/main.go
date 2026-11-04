@@ -23,6 +23,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/sharkpaw/runner-deck/internal/config"
+	"github.com/sharkpaw/runner-deck/internal/eventlog"
 	"github.com/sharkpaw/runner-deck/internal/githubcheck"
 	"github.com/sharkpaw/runner-deck/internal/handler"
 	"github.com/sharkpaw/runner-deck/internal/runner"
@@ -132,6 +133,7 @@ func main() {
 	}
 
 	handler.ConfigPath = *configPath
+	handler.Events = eventlog.ForConfig(*configPath)
 	store := secrets.NewStore(*configPath)
 	handler.Secrets = store
 	handler.StartRegistrationWorker()
@@ -158,6 +160,8 @@ func main() {
 	secrets.MigrateAll(cfg, store)
 	go runAutoStartRunners(*configPath)
 	go runRegistrationCheck(*configPath, store)
+	handler.Events.Append(eventlog.Event{Level: eventlog.LevelInfo, Code: "manager_started", Detail: Version})
+	go handler.NewWatcher(func() (*config.Config, error) { return config.Load(*configPath) }).Run(context.Background(), 20*time.Second)
 	go func() {
 		log.Printf("listening on %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -493,6 +497,8 @@ func registerRoutes(e *echo.Echo) {
 	e.HEAD("/static/*", staticH)
 	e.GET("/api/system", handler.SystemInfo)
 	e.PUT("/api/settings/resources", handler.UpdateResourceLimits)
+	e.GET("/api/events", handler.ListEvents)
+	e.GET("/api/runners/:name/logs", handler.RunnerLogs)
 	e.GET("/api/runners", handler.ListRunners)
 	e.GET("/api/runner-rows", handler.RunnerRows)
 	e.GET("/api/runners/:name", handler.GetRunner)

@@ -469,3 +469,10 @@ form button:hover, .btn-parse:hover { background: var(--accent-strong); opacity:
 .limit-warn { max-width: 300px; margin-top: 6px; font-size: 12px; line-height: 1.4; white-space: normal; color: var(--warn); }
 .limit-warn.bad { color: var(--danger); }
 .badge + .badge { margin-left: 4px; }
+
+/* ===== Activity log ===== */
+.event-time { white-space: nowrap; }
+.event-text { overflow-wrap: anywhere; }
+.event-error .event-text { color: var(--danger); }
+.event-warn .event-text { color: var(--warn); }
+.output-body { max-height: 65vh; margin: 0; overflow: auto; padding: 12px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }

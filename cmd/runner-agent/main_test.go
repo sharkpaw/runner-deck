@@ -183,3 +183,8 @@ func writeBlockingRunScript(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 }
+
+func init() {
+	// Fake runners outlive a test; holding go test's stdout would make it wait for them.
+	runnerOutput = nil
+}

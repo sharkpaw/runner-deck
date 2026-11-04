@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -58,6 +59,10 @@ func getStatus(installDir string) (status string, running bool) {
 	return "installed", runnerproc.Running(installDir)
 }
 
+// runnerOutput receives the runner's status lines (job started, job result), which reach docker
+// logs for the Manager to read.
+var runnerOutput io.Writer = os.Stdout
+
 // startMu serializes the check-then-start steps of /start, see handleStart
 var startMu sync.Mutex
 
@@ -70,6 +75,8 @@ func startRunner(installDir string) error {
 	cmd.Dir = installDir
 	// run.sh runs the user's Job: the AGENT_TOKEN injected into the Agent must not be passed down, see internal/childenv
 	cmd.Env = childenv.Environ()
+	cmd.Stdout = runnerOutput
+	cmd.Stderr = runnerOutput
 	if runtime.GOOS != "windows" {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}

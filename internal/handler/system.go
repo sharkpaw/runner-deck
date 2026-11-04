@@ -18,6 +18,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/sharkpaw/runner-deck/internal/config"
+	"github.com/sharkpaw/runner-deck/internal/eventlog"
 	"github.com/sharkpaw/runner-deck/internal/runner"
 )
 
@@ -113,6 +114,10 @@ type containerStat struct {
 var (
 	dockerRun = func(ctx context.Context, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, "docker", args...).Output()
+	}
+
+	dockerRunCombined = func(ctx context.Context, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	}
 
 	statsCache  ttlCache[[]containerStat]
@@ -488,6 +493,7 @@ func UpdateResourceLimits(c echo.Context) error {
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, trf(c, "api.config_save_failed", err))
 	}
+	recordEvent("", eventlog.LevelInfo, "limits_updated", req.CPUs+" CPU / "+req.Memory)
 	cfg, err := getConfig(c)
 	if err != nil {
 		return err

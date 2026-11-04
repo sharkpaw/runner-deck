@@ -30,6 +30,7 @@ HTTP management UI built with Golang Echo to view and manage multiple self-hoste
 - **Config drift is repaired, not just reported**: image, network, mount directory, in-job Docker backend and the agent token are all fixed at `docker create` time, so editing the config never reached an existing container. The Manager compares each container against the current config — a **stopped** runner is rebuilt on its next start, a **running** one is flagged with the exact difference and rebuilt when you say so.
 - **Hosted-CLI baseline + custom images**: stock images align the CLI layer with GitHub-hosted `ubuntu-24.04`; extend with Android / Node and friends via [`examples/runner-images/`](examples/runner-images/) and per-runner `container_image`.
 - **Self-heals, and says why when it can't**: registered-but-stopped runners start ~15s after boot and are re-checked every 5 minutes; in container mode a failed probe returns a structured diagnosis — error type, a check command and a fix command — instead of a bare "unknown".
+- **Activity log**: starts, stops, job results, memory kills and errors, kept with their times across restarts.
 - **Login page**: a password-protected session in the browser; scripts can keep using Basic Auth.
 - **Observable**: `/ready` and Prometheus `/metrics` for the deployment, the registration result per runner, and an optional PAT that keeps the UI in sync with what GitHub actually lists.
 

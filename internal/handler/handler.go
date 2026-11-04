@@ -19,6 +19,7 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/atomicfile"
 	"github.com/sharkpaw/runner-deck/internal/childenv"
 	"github.com/sharkpaw/runner-deck/internal/config"
+	"github.com/sharkpaw/runner-deck/internal/eventlog"
 	"github.com/sharkpaw/runner-deck/internal/githubcheck"
 	"github.com/sharkpaw/runner-deck/internal/runner"
 	"github.com/sharkpaw/runner-deck/internal/runnerproc"
@@ -276,6 +277,11 @@ func runConfigScript(installDir, url, token, name string, labels []string, timeo
 
 // writeRegistrationResult writes the result of this registration to the runner directory.
 func writeRegistrationResult(installDir string, success bool, message string) {
+	if success {
+		recordEvent(filepath.Base(installDir), eventlog.LevelInfo, "registered", "")
+	} else {
+		recordEvent(filepath.Base(installDir), eventlog.LevelError, "registration_failed", message)
+	}
 	p := filepath.Join(installDir, runner.RegistrationResultFile)
 	body := struct {
 		Success bool   `json:"success"`
@@ -615,6 +621,7 @@ func StartRunner(c echo.Context) error {
 			"probe":   info.Probe,
 		})
 	}
+	recordEvent(name, eventlog.LevelInfo, "start_requested", "")
 	return c.JSON(http.StatusOK, map[string]any{"message": tr(c, "api.start_issued")})
 }
 
@@ -646,9 +653,17 @@ func RecreateRunner(c echo.Context) error {
 	}
 	ctx, cancel := lifecycleContext(c.Request().Context(), 90*time.Second)
 	defer cancel()
+	// Recreating is how a runner gets a newer image, and docker create alone reuses the local copy.
+	pullCtx, cancelPull := context.WithTimeout(c.Request().Context(), 5*time.Minute)
+	if out, err := dockerRunCombined(pullCtx, "pull", cfg.ContainerImageFor(name)); err != nil {
+		log.Printf("warning: cannot pull the image for %s, using the local copy: %v: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	cancelPull()
 	if err := runner.RecreateRunnerContainer(ctx, cfg, name, info.InstallDir); err != nil {
+		recordEvent(name, eventlog.LevelError, "recreate_failed", err.Error())
 		return echo.NewHTTPError(http.StatusInternalServerError, trf(c, "api.recreate_failed", err))
 	}
+	recordEvent(name, eventlog.LevelInfo, "recreated", "")
 	return c.JSON(http.StatusOK, map[string]any{"message": tr(c, "api.recreated")})
 }
 
@@ -696,11 +711,13 @@ func StopRunner(c echo.Context) error {
 				"probe":   info.Probe,
 			})
 		}
+		recordEvent(name, eventlog.LevelInfo, "stop_requested", "")
 		return c.JSON(http.StatusOK, map[string]any{"message": tr(c, "api.stopped_container")})
 	}
 	if err := runner.Stop(info.InstallDir); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, trf(c, "api.stop_failed", err))
 	}
+	recordEvent(name, eventlog.LevelInfo, "stop_requested", "")
 	return c.JSON(http.StatusOK, map[string]any{"message": tr(c, "api.stop_signalled")})
 }
 
@@ -874,6 +891,7 @@ func RemoveRunnerByName(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, trf(c, "api.remove_failed", err))
 	}
+	recordEvent(name, eventlog.LevelInfo, "removed", "")
 	return c.JSON(http.StatusOK, map[string]any{
 		"message":             trf(c, "api.removed", trf(c, dereg.MessageKey, dereg.MessageArgs...)),
 		"github_deregistered": dereg.Done,
