@@ -11,6 +11,14 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/eventlog"
 )
 
+// No test in this package may reach the real docker through these: the disk guard prunes for real.
+func init() {
+	dockerRunCombined = func(context.Context, ...string) ([]byte, error) {
+		return nil, errors.New("real docker is not available in tests")
+	}
+	diskUsageOf = func(string) *SystemDisk { return &SystemDisk{TotalBytes: 100, UsedBytes: 1} }
+}
+
 type guardFixture struct {
 	w       *Watcher
 	cfg     *config.Config
