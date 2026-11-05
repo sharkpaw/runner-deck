@@ -56,22 +56,27 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           # Without a certificate the build stays ad hoc signed. Tauri reads a set but empty variable as a value.
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             if [ -z "$(printenv "$name")" ]; then unset "$name"; fi
           done
           bun install --frozen-lockfile
-          # A pull request from a fork has no key, and has no use for an update package either.
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            bunx tauri build --bundles app,dmg --target ${{ matrix.target }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
-          else
-            bunx tauri build --bundles dmg --target ${{ matrix.target }}
+          # The certificate names its own identity, and Tauri refuses one that differs from the config's ad hoc "-".
+          config='{}'
+          if [ -n "${APPLE_CERTIFICATE:-}" ]; then
+            config="$(jq -c '.bundle.macOS.signingIdentity = null' <<< "$config")"
           fi
+          # A pull request from a fork has no key, and has no use for an update package either.
+          bundles=dmg
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            bundles=app,dmg
+            config="$(jq -c '.bundle.createUpdaterArtifacts = true' <<< "$config")"
+          fi
+          bunx tauri build --bundles "$bundles" --target ${{ matrix.target }} --config "$config"
       - name: Name the downloads
         run: |
           bundle=desktop/src-tauri/target/${{ matrix.target }}/release/bundle
