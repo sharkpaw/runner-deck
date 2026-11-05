@@ -1289,10 +1289,11 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
     el('sysMemSub').textContent = tfill('system.others_sub', { value: fmtBytes(data.others.mem_bytes) });
     var cpusInput = el('limitCpus');
     var memoryInput = el('limitMemory');
-    if (data.limits && document.activeElement !== cpusInput && document.activeElement !== memoryInput && document.activeElement !== el('limitAutoClean') && !limitsDirty) {
+    if (data.limits && document.activeElement !== cpusInput && document.activeElement !== memoryInput && document.activeElement !== el('limitAutoClean') && document.activeElement !== el('limitDiskGuard') && !limitsDirty) {
       cpusInput.value = data.limits.cpus || '';
       memoryInput.value = data.limits.memory || '';
       el('limitAutoClean').value = data.limits.auto_clean_days;
+      el('limitDiskGuard').value = data.limits.disk_guard_percent;
     }
     renderRunners(data);
     renderDocker(data);
@@ -1342,7 +1343,7 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
     fetch('/api/settings/resources', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cpus: el('limitCpus').value.trim(), memory: el('limitMemory').value.trim(), auto_clean_days: parseInt(el('limitAutoClean').value, 10) })
+      body: JSON.stringify({ cpus: el('limitCpus').value.trim(), memory: el('limitMemory').value.trim(), auto_clean_days: parseInt(el('limitAutoClean').value, 10), disk_guard_percent: parseInt(el('limitDiskGuard').value, 10) })
     })
       .then(function (res) { return res.json().catch(function () { return {}; }).then(function (body) { return { ok: res.ok, body: body }; }); })
       .then(function (r) {

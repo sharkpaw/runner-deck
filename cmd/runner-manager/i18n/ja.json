@@ -348,5 +348,9 @@
   "event.clean_failed": "クリーンアップ失敗: {{detail}}",
   "system.limit_autoclean": "アイドルのランナーを整理（日、0: オフ）",
   "system.autoclean_hint": "この期間ジョブがないランナーの作業ディレクトリを空にします。ツールキャッシュは残り、実行中のジョブには触れません。",
-  "event.work_auto_cleaned": "{{detail}} 日間アイドルのため作業ディレクトリを自動整理"
+  "event.work_auto_cleaned": "{{detail}} 日間アイドルのため作業ディレクトリを自動整理",
+  "system.limit_diskguard": "ディスク保護（%、0: オフ）",
+  "system.diskguard_hint": "この割合を超えると、サーバー全体でタグなしイメージと 6 時間より古いビルドキャッシュを削除し、足りなければキャッシュをすべて削除します。実行中のコンテナ、タグ付きイメージ、ボリュームには触れません。",
+  "event.disk_guard": "ディスク {{detail}}: タグなしイメージと古いキャッシュを削除",
+  "event.disk_still_full": "クリーンアップ後もディスクは {{detail}} です。未使用のタグ付きイメージや他のファイルを確認してください。"
 }

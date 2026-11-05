@@ -348,5 +348,9 @@
   "event.clean_failed": "Bereinigung fehlgeschlagen: {{detail}}",
   "system.limit_autoclean": "Inaktive Runner bereinigen nach (Tage, 0: aus)",
   "system.autoclean_hint": "Leert das Arbeitsverzeichnis, wenn ein Runner so lange keinen Job hatte. Der Tool-Cache bleibt, laufende Jobs bleiben unberührt.",
-  "event.work_auto_cleaned": "Arbeitsverzeichnis nach {{detail}} inaktiven Tagen automatisch bereinigt"
+  "event.work_auto_cleaned": "Arbeitsverzeichnis nach {{detail}} inaktiven Tagen automatisch bereinigt",
+  "system.limit_diskguard": "Festplattenschutz bei (%, 0: aus)",
+  "system.diskguard_hint": "Darüber werden auf dem ganzen Server Images ohne Tag und Build-Cache älter als 6 Stunden gelöscht, notfalls der gesamte Cache. Laufende Container, Images mit Tag und Volumes bleiben unberührt.",
+  "event.disk_guard": "Festplatte {{detail}}: Images ohne Tag und alter Cache gelöscht",
+  "event.disk_still_full": "Festplatte nach Bereinigung noch bei {{detail}}. Ungenutzte Images mit Tag oder andere Dateien prüfen."
 }

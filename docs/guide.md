@@ -150,6 +150,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | `runners.items[].job_docker_backend` | Per-runner Docker backend override (container mode); falls back to the global value | empty |
 | `runners.resources` | Resource limits for runner containers (`cpus` / `memory` / `memory_swap` / `pids_limit`), passed to `docker create` and applied to existing containers via `docker update` on start. Editable under System resources; a runner can override `cpus` and `memory` | `cpus: "4"`, `memory: 8g` |
 | `runners.auto_clean_days` | Days without a job before a runner's work directory is cleaned; `0` turns it off. Editable under System resources | `3` |
+| `runners.disk_guard_percent` | Disk use in percent at which untagged images and old build cache are removed for the whole server; `0` turns it off. Editable under System resources | `85` |
 
 Every field above that a container deployment needs to change can also come from the environment, so a full-container setup is `.env` only — see [Environment variables](#environment-variables) below.
 

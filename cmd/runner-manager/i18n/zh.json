@@ -348,5 +348,9 @@
   "event.clean_failed": "清理失败：{{detail}}",
   "system.limit_autoclean": "清理空闲 Runner（天，0：关闭）",
   "system.autoclean_hint": "Runner 在此期间没有作业时清空其工作目录。工具缓存保留，运行中的作业不受影响。",
-  "event.work_auto_cleaned": "空闲 {{detail}} 天后已自动清理工作目录"
+  "event.work_auto_cleaned": "空闲 {{detail}} 天后已自动清理工作目录",
+  "system.limit_diskguard": "磁盘保护阈值（%，0：关闭）",
+  "system.diskguard_hint": "超过此比例时，将删除整台服务器上未打标签的镜像和超过 6 小时的构建缓存；仍不够时删除全部构建缓存。运行中的容器、有标签的镜像和卷不受影响。",
+  "event.disk_guard": "磁盘 {{detail}}：已删除无标签镜像和旧构建缓存",
+  "event.disk_still_full": "清理后磁盘仍为 {{detail}}，请检查未使用的有标签镜像或其他文件。"
 }

@@ -150,6 +150,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | `runners.items[].job_docker_backend` | Surcharge du backend Docker par runner (mode conteneur) ; vide = valeur globale | vide |
 | `runners.resources` | Limites de ressources des conteneurs runner (`cpus` / `memory` / `memory_swap` / `pids_limit`), transmises à `docker create` et appliquées aux conteneurs existants via `docker update` au démarrage | vide (illimité) |
 | `runners.auto_clean_days` | Jours sans job avant le nettoyage du répertoire de travail d'un runner ; `0` désactive. Modifiable dans Ressources système | `3` |
+| `runners.disk_guard_percent` | Pourcentage d'utilisation du disque à partir duquel les images sans tag et l'ancien cache de build sont supprimés sur tout le serveur ; `0` désactive. Modifiable dans Ressources système | `85` |
 
 Tous les champs ci-dessus qu'un déploiement en conteneur doit changer peuvent venir de l'environnement, si bien qu'une installation tout-conteneur ne touche que `.env` — voir [Variables d'environnement](#variables-denvironnement) ci-dessous.
 

@@ -95,6 +95,7 @@ type Watcher struct {
 	started time.Time
 	metrics metricCollector
 	now     func() time.Time
+	guard   diskGuard
 }
 
 // NewWatcher returns a watcher reading the config through load.
@@ -264,6 +265,7 @@ func (w *Watcher) Pass(ctx context.Context) {
 		}
 	}
 	w.metrics.sampleMetrics(ctx, active, time.Now())
+	w.guardDisk(ctx, cfg)
 }
 
 // Run calls Pass on an interval until ctx ends.

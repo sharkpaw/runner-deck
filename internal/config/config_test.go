@@ -1412,3 +1412,18 @@ func TestAutoCleanAfter(t *testing.T) {
 		}
 	}
 }
+
+func TestDiskGuardAt(t *testing.T) {
+	cfg := &Config{}
+	cfg.Runners.BasePath = t.TempDir()
+	if got := cfg.DiskGuardAt(); got != DefaultDiskGuardPercent {
+		t.Errorf("default = %d", got)
+	}
+	for pct, ok := range map[int]bool{0: true, 50: true, 99: true, 49: false, 100: false, -1: false} {
+		p := pct
+		cfg.Runners.DiskGuardPercent = &p
+		if err := Validate(cfg); (err == nil) != ok {
+			t.Errorf("%d: %v", pct, err)
+		}
+	}
+}

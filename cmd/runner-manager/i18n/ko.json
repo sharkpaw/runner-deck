@@ -348,5 +348,9 @@
   "event.clean_failed": "정리 실패: {{detail}}",
   "system.limit_autoclean": "유휴 러너 정리 (일, 0: 끔)",
   "system.autoclean_hint": "러너에 이 기간 동안 작업이 없으면 작업 디렉터리를 비웁니다. 도구 캐시는 유지되며 실행 중인 작업은 건드리지 않습니다.",
-  "event.work_auto_cleaned": "{{detail}}일 유휴 후 작업 디렉터리 자동 정리됨"
+  "event.work_auto_cleaned": "{{detail}}일 유휴 후 작업 디렉터리 자동 정리됨",
+  "system.limit_diskguard": "디스크 보호 기준 (%, 0: 끔)",
+  "system.diskguard_hint": "이 비율을 넘으면 서버 전체에서 태그 없는 이미지와 6시간이 지난 빌드 캐시를 삭제하고, 부족하면 빌드 캐시 전체를 삭제합니다. 실행 중인 컨테이너, 태그된 이미지, 볼륨은 건드리지 않습니다.",
+  "event.disk_guard": "디스크 {{detail}}: 태그 없는 이미지와 오래된 캐시 삭제",
+  "event.disk_still_full": "정리 후에도 디스크가 {{detail}}입니다. 사용하지 않는 태그 이미지나 다른 파일을 확인하세요."
 }

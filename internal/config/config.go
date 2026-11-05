@@ -155,6 +155,8 @@ type RunnersConfig struct {
 	Resources ResourceLimits `yaml:"resources,omitempty"`
 	// Days without a job before a runner's work directory is cleaned; 0 turns it off.
 	AutoCleanDays *int `yaml:"auto_clean_days,omitempty"`
+	// Disk use, in percent, at which untagged images and old build cache are removed; 0 turns it off.
+	DiskGuardPercent *int `yaml:"disk_guard_percent,omitempty"`
 	// DockerGID is only used when job_docker_backend=host-socket: the docker group GID added when creating the Runner container (--group-add),
 	// so the in-container app (UID 1001) can access the mounted docker.sock; 0 means auto-detect the group that owns docker.sock
 	DockerGID int `yaml:"docker_gid"`
@@ -318,6 +320,17 @@ func (c *Config) AutoCleanAfter() int {
 	return *c.Runners.AutoCleanDays
 }
 
+// DefaultDiskGuardPercent is used when runners.disk_guard_percent is not set.
+const DefaultDiskGuardPercent = 85
+
+// DiskGuardAt returns the disk use in percent that triggers cleanup; 0 means never.
+func (c *Config) DiskGuardAt() int {
+	if c.Runners.DiskGuardPercent == nil {
+		return DefaultDiskGuardPercent
+	}
+	return *c.Runners.DiskGuardPercent
+}
+
 // applyDefaultResources fills in the default limits for fields nobody has set.
 func applyDefaultResources(r *ResourceLimits) {
 	if strings.TrimSpace(r.CPUs) == "" {
@@ -476,6 +489,9 @@ func Validate(c *Config) error {
 		if err := validator.ValidatePort(c.Server.Port); err != nil {
 			return fmt.Errorf("server.port must be between 1 and 65535, got %d (it may also come from MANAGER_PORT/SERVER_PORT)", c.Server.Port)
 		}
+	}
+	if p := c.DiskGuardAt(); p != 0 && (p < 50 || p > 99) {
+		return fmt.Errorf("runners.disk_guard_percent must be 0 or between 50 and 99, got %d", p)
 	}
 	if d := c.AutoCleanAfter(); d < 0 || d > MaxAutoCleanDays {
 		return fmt.Errorf("runners.auto_clean_days must be between 0 and %d, got %d", MaxAutoCleanDays, d)

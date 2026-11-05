@@ -348,5 +348,9 @@
   "event.clean_failed": "Temizleme başarısız: {{detail}}",
   "system.limit_autoclean": "Boştaki runner'ı temizle (gün, 0: kapalı)",
   "system.autoclean_hint": "Bir runner bu süre iş almazsa work dizini boşaltılır. Araç önbelleği kalır, çalışan işe dokunulmaz.",
-  "event.work_auto_cleaned": "{{detail}} gün boşta kaldığı için work dizini otomatik temizlendi"
+  "event.work_auto_cleaned": "{{detail}} gün boşta kaldığı için work dizini otomatik temizlendi",
+  "system.limit_diskguard": "Disk koruması (%, 0: kapalı)",
+  "system.diskguard_hint": "Bu oran aşılınca tüm sunucuda etiketsiz imajlar ve 6 saatten eski derleme önbelleği silinir; yetmezse önbelleğin tamamı. Çalışan konteynerlere, etiketli imajlara ve volume'lara dokunulmaz.",
+  "event.disk_guard": "Disk {{detail}}: etiketsiz imajlar ve eski derleme önbelleği silindi",
+  "event.disk_still_full": "Temizlikten sonra disk hâlâ {{detail}}. Kullanılmayan etiketli imajlara veya diğer dosyalara bakılmalı."
 }

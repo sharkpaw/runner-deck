@@ -150,6 +150,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | `runners.items[].job_docker_backend` | 按 Runner 覆盖 Job Docker 后端（仅容器模式），留空回落全局 | 空 |
 | `runners.resources` | Runner 容器资源上限（`cpus` / `memory` / `memory_swap` / `pids_limit`），透传给 `docker create`；启动时通过 `docker update` 对存量容器同样生效 | 空（不限制） |
 | `runners.auto_clean_days` | Runner 连续多少天没有作业后清理其工作目录；`0` 为关闭。可在系统资源页修改 | `3` |
+| `runners.disk_guard_percent` | 磁盘使用率达到该百分比时，删除整台服务器上未打标签的镜像和旧构建缓存；`0` 为关闭。可在系统资源页修改 | `85` |
 
 以上凡是容器部署需要改的字段，都可以改从环境变量来，所以全容器部署只改 `.env` 就够——见下面的[环境变量](#环境变量)。
 

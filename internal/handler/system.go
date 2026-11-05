@@ -84,7 +84,8 @@ type SystemLimits struct {
 	CPUs   string `json:"cpus"`
 	Memory string `json:"memory"`
 	// Nil in a request leaves the value as it is.
-	AutoCleanDays *int `json:"auto_clean_days,omitempty"`
+	AutoCleanDays    *int `json:"auto_clean_days,omitempty"`
+	DiskGuardPercent *int `json:"disk_guard_percent,omitempty"`
 }
 
 // cgroupStats says whether a runner has hit its limits since its container started.
@@ -388,8 +389,8 @@ func buildSystemRunners(cfg *config.Config, list []runner.RunnerInfo, stats []co
 }
 
 func systemLimitsOf(cfg *config.Config) SystemLimits {
-	days := cfg.AutoCleanAfter()
-	return SystemLimits{CPUs: cfg.Runners.Resources.CPUs, Memory: cfg.Runners.Resources.Memory, AutoCleanDays: &days}
+	days, guard := cfg.AutoCleanAfter(), cfg.DiskGuardAt()
+	return SystemLimits{CPUs: cfg.Runners.Resources.CPUs, Memory: cfg.Runners.Resources.Memory, AutoCleanDays: &days, DiskGuardPercent: &guard}
 }
 
 func collectSystem(cfg *config.Config, list []runner.RunnerInfo) SystemResponse {
@@ -497,6 +498,9 @@ func UpdateResourceLimits(c echo.Context) error {
 	if err := config.LoadAndSave(ConfigPath, func(cfg *config.Config) error {
 		if req.AutoCleanDays != nil {
 			cfg.Runners.AutoCleanDays = req.AutoCleanDays
+		}
+		if req.DiskGuardPercent != nil {
+			cfg.Runners.DiskGuardPercent = req.DiskGuardPercent
 		}
 		cfg.Runners.Resources.CPUs = req.CPUs
 		cfg.Runners.Resources.Memory = req.Memory

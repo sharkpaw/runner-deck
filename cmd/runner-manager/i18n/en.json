@@ -348,5 +348,9 @@
   "event.clean_failed": "Cleanup failed: {{detail}}",
   "system.limit_autoclean": "Clean idle runners after (days, 0: off)",
   "system.autoclean_hint": "Empties the work directory when a runner has had no job for this long. The tool cache stays, and a running job is never touched.",
-  "event.work_auto_cleaned": "Work directory cleaned automatically after {{detail}} idle days"
+  "event.work_auto_cleaned": "Work directory cleaned automatically after {{detail}} idle days",
+  "system.limit_diskguard": "Protect the disk at (%, 0: off)",
+  "system.diskguard_hint": "Past this, untagged images and build cache older than 6 hours are removed for the whole server, and all build cache if that is not enough. Running containers, tagged images and volumes are not touched.",
+  "event.disk_guard": "Disk at {{detail}}: untagged images and old build cache removed",
+  "event.disk_still_full": "Disk still at {{detail}} after cleanup. Unused tagged images or other files need attention."
 }

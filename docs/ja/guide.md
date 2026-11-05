@@ -150,6 +150,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | `runners.items[].job_docker_backend` | Runner ごとの Docker バックエンド上書き（コンテナモード）。空ならグローバル値 | 空 |
 | `runners.resources` | Runner コンテナのリソース上限（`cpus` / `memory` / `memory_swap` / `pids_limit`）。`docker create` に渡すほか、起動時に `docker update` で既存コンテナにも適用します | 空（無制限） |
 | `runners.auto_clean_days` | ジョブがない日数を超えるとランナーの作業ディレクトリを整理します。`0` でオフ。システムリソースで変更可能 | `3` |
+| `runners.disk_guard_percent` | ディスク使用率がこの値に達すると、サーバー全体のタグなしイメージと古いビルドキャッシュを削除します。`0` でオフ。システムリソースで変更可能 | `85` |
 
 上記のうちコンテナデプロイで変更が必要なフィールドはすべて環境変数から与えられるため、フルコンテナ構成は `.env` だけで済みます——下の[環境変数](#環境変数)を参照。
 

@@ -348,5 +348,9 @@
   "event.clean_failed": "Échec du nettoyage : {{detail}}",
   "system.limit_autoclean": "Nettoyer les runners inactifs après (jours, 0 : non)",
   "system.autoclean_hint": "Vide le répertoire de travail d'un runner sans job pendant cette durée. Le cache d'outils reste et un job en cours n'est jamais touché.",
-  "event.work_auto_cleaned": "Répertoire de travail nettoyé automatiquement après {{detail}} jours d'inactivité"
+  "event.work_auto_cleaned": "Répertoire de travail nettoyé automatiquement après {{detail}} jours d'inactivité",
+  "system.limit_diskguard": "Protéger le disque à (%, 0 : non)",
+  "system.diskguard_hint": "Au-delà, les images sans tag et le cache de build de plus de 6 heures sont supprimés sur tout le serveur, puis tout le cache si besoin. Les conteneurs actifs, images avec tag et volumes ne sont pas touchés.",
+  "event.disk_guard": "Disque {{detail}} : images sans tag et ancien cache supprimés",
+  "event.disk_still_full": "Disque encore à {{detail}} après nettoyage. Vérifiez les images avec tag inutilisées ou d'autres fichiers."
 }
