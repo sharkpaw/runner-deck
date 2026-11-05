@@ -95,6 +95,11 @@ pub fn install(app: &AppHandle, tr: bool) -> tauri::Result<()> {
             "tray_autostart" => {
                 let launch = app.autolaunch();
                 let want = autostart_item.is_checked().unwrap_or(false);
+                // A new macOS account may not have the folder the login item goes in.
+                #[cfg(target_os = "macos")]
+                if let Some(home) = std::env::var_os("HOME") {
+                    let _ = std::fs::create_dir_all(std::path::Path::new(&home).join("Library/LaunchAgents"));
+                }
                 let result = if want { launch.enable() } else { launch.disable() };
                 if result.is_err() {
                     let _ = autostart_item.set_checked(!want);
