@@ -25,12 +25,16 @@ xattr -dr com.apple.quarantine "/Applications/Runner Deck.app"
 
 Or open it, then choose Open Anyway under System Settings → Privacy & Security.
 
-macOS may ask to allow Keychain access after each update until the app is signed with a Developer ID.
+The app updates itself from GitHub Releases, checking at launch and every 6 hours. It installs when no
+job is running, because an update restarts the runners. macOS may ask to allow Keychain access after
+each update until the app is signed with a Developer ID.
 
 ## Release
 
 Raise `version` in `src-tauri/tauri.conf.json` and merge to `main`. The workflow builds both Macs and
-publishes the release, and the links above then give the new version.
+publishes the release, and the links above then give the new version. Installed apps pick it up from
+its `latest.json`. Publishing needs the `TAURI_SIGNING_PRIVATE_KEY` repository secret; losing that key
+means installed apps can no longer update.
 
 ## Build
 

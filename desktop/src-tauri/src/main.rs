@@ -4,6 +4,7 @@ mod manager;
 mod oauth;
 mod store;
 mod tray;
+mod updater;
 mod usage;
 mod vault;
 
@@ -21,7 +22,7 @@ pub struct AppState {
     // One login attempt per opening, so a wrong password cannot loop.
     login_tried: AtomicBool,
     booted: AtomicBool,
-    quitting: AtomicBool,
+    pub quitting: AtomicBool,
 }
 
 // What the connections page sees of a server, which never includes its token.
@@ -303,6 +304,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![HIDDEN_ARG]),
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![connections, open_local, open_server, add_server, remove_server, quit_confirmed, stop_confirmed])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {
@@ -351,6 +353,7 @@ fn main() {
                 }
             });
             tray::install(&handle, is_turkish())?;
+            updater::start(&handle);
             let hidden = std::env::args().any(|arg| arg == HIDDEN_ARG);
             if hidden {
                 #[cfg(target_os = "macos")]

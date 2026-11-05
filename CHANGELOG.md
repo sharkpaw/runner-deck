@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The desktop app updates itself from GitHub Releases, once no job is running.
 - MCP endpoint at `/mcp`, so Claude and other clients can manage runners.
 - OAuth 2.1 sign-in with PKCE and client registration: short JWT access tokens and rotating refresh tokens that keep a session for 180 days after its last use.
 - A client asking for access can be limited to read only on the consent page; such a token can look at everything and change nothing.
