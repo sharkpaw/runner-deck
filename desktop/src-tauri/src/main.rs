@@ -2,6 +2,8 @@
 
 mod manager;
 mod store;
+mod tray;
+mod usage;
 
 use manager::Manager;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,9 +13,9 @@ use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilde
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager as _, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
-struct AppState {
-    store: Mutex<Store>,
-    manager: Manager,
+pub struct AppState {
+    pub store: Mutex<Store>,
+    pub manager: Manager,
     // One login attempt per opening, so a wrong password cannot loop.
     login_tried: AtomicBool,
     booted: AtomicBool,
@@ -49,6 +51,7 @@ fn connections(state: tauri::State<AppState>) -> Connections {
 // Blocks until the Manager answers, so it runs off the main thread.
 #[tauri::command(async)]
 fn open_local(app: AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    state.manager.ensure_started()?;
     state.manager.wait_ready()?;
     let port = state.store.lock().unwrap().port;
     state.login_tried.store(false, Ordering::SeqCst);
@@ -81,7 +84,79 @@ fn remember(state: &AppState, id: &str) {
     let _ = store.save();
 }
 
-fn is_turkish() -> bool {
+pub fn show_main(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    if let Ok(window) = main_window(app) {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+// With the window closed the app lives in the menu bar only, with no Dock icon.
+fn hide_main(app: &AppHandle) {
+    if let Ok(window) = main_window(app) {
+        let _ = window.hide();
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+pub fn show_connections(app: &AppHandle) {
+    show_main(app);
+    if let Ok(window) = main_window(app) {
+        let _ = window.navigate(connections_url());
+    }
+}
+
+pub fn open_local_in_background(app: &AppHandle) {
+    show_main(app);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let opened = state.manager.ensure_started().and_then(|_| state.manager.wait_ready()).and_then(|_| {
+            let port = state.store.lock().unwrap().port;
+            state.login_tried.store(false, Ordering::SeqCst);
+            remember(&state, "local");
+            let url = Url::parse(&format!("http://127.0.0.1:{port}/")).map_err(|e| e.to_string())?;
+            main_window(&app)?.navigate(url).map_err(|e| e.to_string())
+        });
+        if opened.is_err() {
+            show_connections(&app);
+        }
+    });
+}
+
+fn stop_runners(app: &AppHandle) {
+    // The panel it was showing is about to go away.
+    let on_local = main_window(app)
+        .ok()
+        .and_then(|w| w.url().ok())
+        .is_some_and(|url| url.host_str() == Some("127.0.0.1"));
+    if on_local {
+        if let Ok(window) = main_window(app) {
+            let _ = window.navigate(connections_url());
+        }
+    }
+    let app = app.clone();
+    std::thread::spawn(move || app.state::<AppState>().manager.stop());
+}
+
+// Stopping cancels running jobs, so only then is it worth a question.
+pub fn toggle_runners(app: &AppHandle) {
+    if app.state::<AppState>().manager.running_pid().is_none() {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let _ = app.state::<AppState>().manager.ensure_started();
+        });
+    } else if app.state::<tray::Tray>().jobs() > 0 {
+        open_question(app, "quit.html#stop");
+    } else {
+        stop_runners(app);
+    }
+}
+
+pub fn is_turkish() -> bool {
     sys_locale::get_locale().is_some_and(|l| l.to_lowercase().starts_with("tr"))
 }
 
@@ -121,19 +196,14 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     MenuBuilder::new(app).item(&app_menu).item(&edit).item(&view).item(&window).build()
 }
 
-// Quitting stops the runners, and with them any running job, so it is worth one question.
-fn ask_to_quit(app: &AppHandle) {
-    if app.state::<AppState>().quitting.load(Ordering::SeqCst) {
-        return;
-    }
+fn open_question(app: &AppHandle, page: &'static str) {
     if let Some(window) = app.get_webview_window("quit") {
-        let _ = window.set_focus();
-        return;
+        let _ = window.close();
     }
     // Creating a window from an event handler can deadlock on Windows.
     let app = app.clone();
     std::thread::spawn(move || {
-        let _ = WebviewWindowBuilder::new(&app, "quit", WebviewUrl::App("quit.html".into()))
+        if let Ok(window) = WebviewWindowBuilder::new(&app, "quit", WebviewUrl::App(page.into()))
             .title("Runner Deck")
             .inner_size(440.0, 190.0)
             .resizable(false)
@@ -141,8 +211,26 @@ fn ask_to_quit(app: &AppHandle) {
             .maximizable(false)
             .always_on_top(true)
             .center()
-            .build();
+            .build()
+        {
+            let _ = window.set_focus();
+        }
     });
+}
+
+// Quitting stops the runners, and with them any running job, so it is worth one question.
+pub fn ask_to_quit(app: &AppHandle) {
+    if !app.state::<AppState>().quitting.load(Ordering::SeqCst) {
+        open_question(app, "quit.html");
+    }
+}
+
+#[tauri::command]
+fn stop_confirmed(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("quit") {
+        let _ = window.close();
+    }
+    stop_runners(&app);
 }
 
 #[tauri::command]
@@ -173,9 +261,16 @@ fn open_external(url: &Url) {
     }
 }
 
+// Passed when started at login, so the app comes up in the menu bar with no window.
+const HIDDEN_ARG: &str = "--hidden";
+
 fn main() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![connections, open_local, open_server, add_server, remove_server, quit_confirmed])
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![HIDDEN_ARG]),
+        ))
+        .invoke_handler(tauri::generate_handler![connections, open_local, open_server, add_server, remove_server, quit_confirmed, stop_confirmed])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {
                 return;
@@ -218,19 +313,18 @@ fn main() {
                     "reload" => {
                         let _ = window.eval("location.reload()");
                     }
-                    "local" => {
-                        let port = app.state::<AppState>().store.lock().unwrap().port;
-                        if let Ok(url) = Url::parse(&format!("http://127.0.0.1:{port}/")) {
-                            let state = app.state::<AppState>();
-                            state.login_tried.store(false, Ordering::SeqCst);
-                            remember(&state, "local");
-                            let _ = window.navigate(url);
-                        }
-                    }
+                    "local" => open_local_in_background(app),
                     _ => {}
                 }
             });
+            tray::install(&handle, is_turkish())?;
+            let hidden = std::env::args().any(|arg| arg == HIDDEN_ARG);
+            if hidden {
+                #[cfg(target_os = "macos")]
+                let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .visible(!hidden)
                 .title("Runner Deck")
                 .inner_size(1280.0, 860.0)
                 .min_inner_size(900.0, 600.0)
@@ -247,11 +341,7 @@ fn main() {
                     return;
                 }
                 api.prevent_close();
-                if cfg!(target_os = "macos") {
-                    let _ = window.hide();
-                } else {
-                    ask_to_quit(window.app_handle());
-                }
+                hide_main(window.app_handle());
             }
         })
         .build(tauri::generate_context!())
@@ -267,10 +357,7 @@ fn main() {
         RunEvent::Exit => app.state::<AppState>().manager.stop(),
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => {
-            if let Ok(window) = main_window(app) {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_main(app);
         }
         _ => {}
     });

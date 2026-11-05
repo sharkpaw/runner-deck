@@ -358,3 +358,67 @@ func TestWatcher_LastActivity(t *testing.T) {
 		t.Errorf("after a clean = %v", got)
 	}
 }
+
+func TestWatcher_ReadsJobsFromAProcessRunnersLog(t *testing.T) {
+	store := useEventStore(t)
+	load := writeWatchConfig(t, false)
+	cfg, err := load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(cfg.Runners.BasePath, "a")
+	if err := os.MkdirAll(filepath.Join(dir, "_work", "repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w := NewWatcher(load)
+	w.Pass(context.Background())
+	stamp := time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano)
+	line := stamp + " Job build completed with result: Succeeded\n"
+	if err := os.WriteFile(filepath.Join(dir, runner.LogFileName), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.Pass(context.Background())
+	if got := codes(store.Read(eventlog.Query{})); got != "job_succeeded" {
+		t.Fatalf("got %s", got)
+	}
+
+	// An idle runner's work directory is emptied without docker.
+	w.now = func() time.Time { return time.Now().Add(365 * 24 * time.Hour) }
+	w.Pass(context.Background())
+	if _, err := os.Stat(filepath.Join(dir, "_work", "repo")); !os.IsNotExist(err) {
+		t.Errorf("work not cleaned: %v", err)
+	}
+}
+
+func TestInstallRunnerScript_FallsBackToTheEmbeddedCopy(t *testing.T) {
+	old := installRunnerScriptPath
+	installRunnerScriptPath = filepath.Join(t.TempDir(), "missing.sh")
+	t.Cleanup(func() { installRunnerScriptPath = old })
+	path, cleanup, err := installRunnerScript()
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("not executable: %v %v", info, err)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("temporary copy left behind: %v", err)
+	}
+}
+
+func TestCleanContainerWork_ReportsDockerOutput(t *testing.T) {
+	orig := dockerRunCombined
+	t.Cleanup(func() { dockerRunCombined = orig })
+	dockerRunCombined = func(context.Context, ...string) ([]byte, error) {
+		return []byte("no such container"), errors.New("exit 1")
+	}
+	if err := cleanContainerWork(context.Background(), "a"); err == nil || !strings.Contains(err.Error(), "no such container") {
+		t.Fatalf("got %v", err)
+	}
+	dockerRunCombined = func(context.Context, ...string) ([]byte, error) { return nil, errors.New("exit 1") }
+	if err := cleanContainerWork(context.Background(), "a"); err == nil || err.Error() != "exit 1" {
+		t.Fatalf("got %v", err)
+	}
+}

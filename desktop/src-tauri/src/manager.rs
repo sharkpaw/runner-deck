@@ -128,6 +128,20 @@ impl Manager {
         Ok(())
     }
 
+    /// The Manager's pid while it is alive.
+    pub fn running_pid(&self) -> Option<u32> {
+        let mut child = self.child.lock().unwrap();
+        let child = child.as_mut()?;
+        matches!(child.try_wait(), Ok(None)).then(|| child.id())
+    }
+
+    pub fn ensure_started(&self) -> Result<(), String> {
+        if self.running_pid().is_some() {
+            return Ok(());
+        }
+        self.start()
+    }
+
     pub fn wait_ready(&self) -> Result<(), String> {
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
         let started = Instant::now();

@@ -49,7 +49,9 @@ func TestOpenLog_Rotates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if info, _ := os.Stat(path); info.Size() != 0 {
 		t.Errorf("log was not rotated: %d", info.Size())
 	}
@@ -80,5 +82,49 @@ func TestCleanWork_KeepsToolCache(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "_work/_tool/node/x")); err != nil {
 		t.Errorf("tool cache removed: %v", err)
+	}
+}
+
+func TestStart_KeepsOutputInTheLog(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho Running job: build\n"
+	if err := os.WriteFile(filepath.Join(dir, RunScriptName()), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := Start(dir); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, err := ReadLog(dir, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(got), "Z Running job: build\n") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("log = %q", got)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestOpenLog_ReportsAnUnwritableDirectory(t *testing.T) {
+	if _, err := openLog(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("want an error")
+	}
+	if got, err := ReadLog(t.TempDir()+"\x00", 10); err == nil {
+		t.Fatalf("want an error, got %q", got)
+	}
+}
+
+func TestCleanWork_ReportsAnUnreadableWorkDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "_work"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CleanWork(dir); err == nil {
+		t.Fatal("want an error")
 	}
 }

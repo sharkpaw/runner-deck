@@ -6,7 +6,9 @@ that means Xcode and iOS builds. The same window can also open the panel of any 
 Data lives in `~/.runner-deck`: `config/`, `runners/`, `manager.log` and `desktop.json`, which holds
 the generated password for the local panel and the list of servers.
 
-Closing the window on a Mac leaves the runners working; quitting the app asks first, then stops them.
+Closing the window leaves the app in the menu bar with the runners working. The icon there shows CPU
+and memory, counted over the Manager, its runners and their jobs, plus the disk `~/.runner-deck` takes.
+Its menu stops and starts the runners, opens the app at login, and quits, which asks first.
 
 ## Build
 
