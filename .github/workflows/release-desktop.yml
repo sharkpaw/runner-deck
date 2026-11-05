@@ -1,0 +1,100 @@
+# Builds the desktop app. A pull request only builds. On main, raising the version in tauri.conf.json
+# publishes a release, and the fixed desktop-latest release keeps download links stable, because the
+# repository's "latest" release belongs to the Manager.
+name: Release (Desktop)
+
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'cmd/runner-manager/**'
+      - 'internal/**'
+      - '.github/workflows/release-desktop.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/src-tauri/tauri.conf.json'
+  workflow_dispatch:
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64, target: aarch64-apple-darwin }
+          - { arch: x64, target: x86_64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+      - name: Add the Rust target
+        run: rustup target add ${{ matrix.target }}
+      - name: Test the app
+        if: matrix.arch == 'arm64'
+        working-directory: desktop/src-tauri
+        run: |
+          mkdir -p ../ui binaries
+          touch binaries/runner-manager-aarch64-apple-darwin
+          cargo test --release
+      - name: Build
+        working-directory: desktop
+        run: |
+          bun install --frozen-lockfile
+          bunx tauri build --bundles dmg --target ${{ matrix.target }}
+      - name: Name the download
+        run: mv desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg RunnerDeck-macos-${{ matrix.arch }}.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: RunnerDeck-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        run: |
+          version="$(jq -r .version desktop/src-tauri/tauri.conf.json)"
+          tag="desktop-v${version}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already published; raise the version in tauri.conf.json to publish again."
+            exit 0
+          fi
+          gh release create "$tag" dist/*.dmg --target "$GITHUB_SHA" --latest=false \
+            --title "Runner Deck Desktop ${version}" \
+            --notes "Install steps: https://github.com/${GH_REPO}/blob/main/desktop/README.md"
+          if gh release view desktop-latest >/dev/null 2>&1; then
+            gh release upload desktop-latest dist/*.dmg --clobber
+            gh release edit desktop-latest --title "Runner Deck Desktop (latest: ${version})"
+          else
+            gh release create desktop-latest dist/*.dmg --target "$GITHUB_SHA" --latest=false \
+              --title "Runner Deck Desktop (latest: ${version})" \
+              --notes "Always holds the newest desktop app, so its download links do not change."
+          fi
