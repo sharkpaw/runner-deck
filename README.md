@@ -52,6 +52,10 @@ Open http://localhost:8080. The default image tag is the stable release (e.g. v2
 
 Two copy-and-go deployments live in [`examples/deploy/`](examples/deploy/): `standalone/` (single container, runner processes inside the Manager — `docker run` or Compose) and `fleet/` (one container per runner, image and toolchain caches shared, build caches isolated).
 
+## MCP
+
+Add `https://your-manager/mcp` to Claude or another MCP client. It signs in with OAuth, where you choose read-only or full access, and you can see and end it on the Sessions page.
+
 ## Desktop app
 
 For builds that need a real Mac, the [desktop app](desktop/README.md) runs the Manager on your computer and runners as normal processes, with no Docker. The same window opens the panels of your servers. Download it for [Apple Silicon](https://github.com/sharkpaw/runner-deck/releases/download/desktop-latest/RunnerDeck-macos-arm64.dmg) or [Intel](https://github.com/sharkpaw/runner-deck/releases/download/desktop-latest/RunnerDeck-macos-x64.dmg).

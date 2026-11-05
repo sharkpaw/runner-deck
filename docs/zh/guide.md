@@ -176,6 +176,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | 变量 | 作用 | 默认值 |
 |---|---|---|
 | `BASIC_AUTH_PASSWORD` | 设了就启用 Basic Auth | 空（不鉴权） |
+| `PUBLIC_URL` | 客户端访问此 Manager 的地址，用于 OAuth 和 MCP；留空则使用代理报告的地址 | 空 |
 | `BASIC_AUTH_USER` | Basic Auth 用户名 | `admin` |
 | `TRUSTED_ORIGINS` | 免除跨站检查的来源，逗号分隔；见[四、安全与校验](#四安全与校验) | 空 |
 | `LOG_LEVEL` | `trace` / `debug` / `info` / `warn` / `error` | `info` |

@@ -1491,12 +1491,69 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
   });
   el('outputClose').addEventListener('click', function () { el('outputModal').classList.remove('show'); });
 
+  function sessionLabel(s) {
+    if (s.kind === 'oauth') return s.client_name || s.client_id;
+    var ua = s.user_agent || '';
+    var browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+    var system = /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Linux/.test(ua) ? 'Linux' : '';
+    return [browser || t('sessions.browser'), system].filter(Boolean).join(' · ');
+  }
+
+  function renderSession(s) {
+    var lang = document.documentElement.lang;
+    var tr = document.createElement('tr');
+    var device = document.createElement('td');
+    device.className = 'session-device';
+    device.textContent = sessionLabel(s);
+    if (s.current) {
+      var mark = document.createElement('span');
+      mark.className = 'session-current';
+      mark.textContent = t('sessions.current');
+      device.appendChild(mark);
+    }
+    tr.appendChild(device);
+    [t(s.scope === 'runners:read' ? 'consent.read' : 'consent.write'), s.ip || '-', new Date(s.last_used_at).toLocaleString(lang), new Date(s.expires_at).toLocaleDateString(lang)].forEach(function (text) {
+      var td = document.createElement('td');
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    var action = document.createElement('td');
+    var end = document.createElement('button');
+    end.type = 'button';
+    end.className = 'btn-secondary';
+    end.textContent = t('sessions.end');
+    end.addEventListener('click', function () {
+      fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' }).then(function (r) {
+        if (s.current && r.ok) { location.href = '/login'; return; }
+        showToast(t(r.ok ? 'api.session_ended' : 'msg.load_failed'), r.ok ? 'success' : 'error');
+        loadSessions();
+      });
+    });
+    action.appendChild(end);
+    tr.appendChild(action);
+    return tr;
+  }
+
+  function loadSessions() {
+    fetch('/api/sessions').then(function (r) { return r.ok ? r.json() : Promise.reject(r); }).then(function (data) {
+      el('sessionsBody').replaceChildren.apply(el('sessionsBody'), data.sessions.map(renderSession));
+      el('mcpUrl').textContent = data.mcp_url;
+    }).catch(function () { showToast(t('msg.load_failed'), 'error'); });
+  }
+
+  el('mcpCopy').addEventListener('click', function () {
+    copyCommandText(el('mcpUrl').textContent).then(function (ok) {
+      if (ok) showToast(t('mcp.copied'), 'success');
+    });
+  });
+
   function showView() {
     var hash = location.hash;
-    var view = hash === '#system' ? 'system' : hash === '#events' ? 'events' : 'runners';
+    var view = hash === '#system' ? 'system' : hash === '#events' ? 'events' : hash === '#sessions' ? 'sessions' : 'runners';
     el('viewRunners').hidden = view !== 'runners';
     el('viewSystem').hidden = view !== 'system';
     el('viewEvents').hidden = view !== 'events';
+    el('viewSessions').hidden = view !== 'sessions';
     document.querySelectorAll('.nav-link').forEach(function (a) {
       var on = a.dataset.view === view;
       a.classList.toggle('active', on);
@@ -1512,6 +1569,7 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
       loadEvents();
       eventsTimer = setInterval(loadEvents, 15000);
     }
+    if (view === 'sessions') loadSessions();
     if (view === 'system') {
       pollSystem();
       loadSavedHistory();

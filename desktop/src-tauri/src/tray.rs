@@ -16,12 +16,17 @@ pub struct Tray {
     status: MenuItem<Wry>,
     usage: MenuItem<Wry>,
     toggle: MenuItem<Wry>,
+    update: MenuItem<Wry>,
     disk_kb: Mutex<Option<u64>>,
     busy_jobs: Mutex<u32>,
     tr: bool,
 }
 
 impl Tray {
+    pub fn set_update_text(&self, text: &str) {
+        let _ = self.update.set_text(text);
+    }
+
     pub fn jobs(&self) -> u32 {
         *self.busy_jobs.lock().unwrap()
     }
@@ -65,6 +70,7 @@ pub fn install(app: &AppHandle, tr: bool) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "tray_open", t("Paneli Aç", "Open Panel"), true, None::<&str>)?;
     let list = MenuItem::with_id(app, "tray_list", t("Bağlantılar", "Connections"), true, None::<&str>)?;
     let toggle = MenuItem::with_id(app, "tray_toggle", t("Runner'ları Durdur", "Stop Runners"), true, None::<&str>)?;
+    let update = MenuItem::with_id(app, "tray_update", crate::updater::idle_text(app, tr), true, None::<&str>)?;
     let enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart =
         CheckMenuItem::with_id(app, "tray_autostart", t("Açılışta Başlat", "Open at Login"), true, enabled, None::<&str>)?;
@@ -78,6 +84,7 @@ pub fn install(app: &AppHandle, tr: bool) -> tauri::Result<()> {
         .separator()
         .item(&toggle)
         .item(&autostart)
+        .item(&update)
         .separator()
         .item(&quit)
         .build()?;
@@ -91,6 +98,7 @@ pub fn install(app: &AppHandle, tr: bool) -> tauri::Result<()> {
             "tray_open" => crate::open_local_in_background(app),
             "tray_list" => crate::show_connections(app),
             "tray_toggle" => crate::toggle_runners(app),
+            "tray_update" => crate::updater::check_now(app),
             "tray_quit" => crate::ask_to_quit(app),
             "tray_autostart" => {
                 let launch = app.autolaunch();
@@ -108,7 +116,7 @@ pub fn install(app: &AppHandle, tr: bool) -> tauri::Result<()> {
             _ => {}
         })
         .build(app)?;
-    app.manage(Tray { icon, status, usage: usage_item, toggle, disk_kb: Mutex::new(None), busy_jobs: Mutex::new(0), tr });
+    app.manage(Tray { icon, status, usage: usage_item, toggle, update, disk_kb: Mutex::new(None), busy_jobs: Mutex::new(0), tr });
 
     let handle = app.clone();
     std::thread::spawn(move || loop {

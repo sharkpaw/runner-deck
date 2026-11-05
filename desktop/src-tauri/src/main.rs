@@ -1,9 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod manager;
+mod oauth;
 mod store;
 mod tray;
+mod updater;
 mod usage;
+mod vault;
 
 use manager::Manager;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,13 +21,24 @@ pub struct AppState {
     pub manager: Manager,
     // One login attempt per opening, so a wrong password cannot loop.
     login_tried: AtomicBool,
+    // One attempt per opening, for the same reason.
+    resume_tried: AtomicBool,
     booted: AtomicBool,
-    quitting: AtomicBool,
+    pub quitting: AtomicBool,
+}
+
+// What the connections page sees of a server, which never includes its token.
+#[derive(serde::Serialize)]
+struct ServerView {
+    id: String,
+    name: String,
+    url: String,
+    signed_in: bool,
 }
 
 #[derive(serde::Serialize)]
 struct Connections {
-    servers: Vec<Server>,
+    servers: Vec<ServerView>,
     last: String,
     first_load: bool,
 }
@@ -42,7 +56,11 @@ fn connections_url() -> Url {
 fn connections(state: tauri::State<AppState>) -> Connections {
     let store = state.store.lock().unwrap();
     Connections {
-        servers: store.servers.clone(),
+        servers: store
+            .servers
+            .iter()
+            .map(|s| ServerView { id: s.id.clone(), name: s.name.clone(), url: s.url.clone(), signed_in: s.signed_in })
+            .collect(),
         last: store.last.clone(),
         first_load: !state.booted.swap(true, Ordering::SeqCst),
     }
@@ -60,22 +78,82 @@ fn open_local(app: AppHandle, state: tauri::State<AppState>) -> Result<(), Strin
     main_window(&app)?.navigate(url).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+// Can wait minutes for the person to sign in, so it runs off the main thread.
+#[tauri::command(async)]
 fn open_server(app: AppHandle, state: tauri::State<AppState>, id: String) -> Result<(), String> {
-    let url = state.store.lock().unwrap().servers.iter().find(|s| s.id == id).map(|s| s.url.clone());
-    let url = url.ok_or_else(|| "unknown server".to_string())?;
+    let (url, signed_in) = {
+        let store = state.store.lock().unwrap();
+        let server = store.servers.iter().find(|s| s.id == id).ok_or_else(|| "unknown server".to_string())?;
+        (server.url.clone(), server.signed_in)
+    };
     remember(&state, &id);
-    main_window(&app)?.navigate(Url::parse(&url).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    // The window's own cookie lasts as long as the session, so usually no token is needed at all, and
+    // neither is the Keychain. If the cookie has gone, the page load below signs it in again.
+    if signed_in {
+        state.resume_tried.store(false, Ordering::SeqCst);
+        return main_window(&app)?.navigate(Url::parse(&url).map_err(|e| e.to_string())?).map_err(|e| e.to_string());
+    }
+    let done = if is_turkish() {
+        "Giriş tamamlandı, Runner Deck'e dönebilirsin."
+    } else {
+        "Signed in. You can go back to Runner Deck."
+    };
+    let opened = oauth::open(&url, None, &open_external, done)?;
+    state.store.lock().unwrap().set_refresh_token(&id, opened.refresh_token)?;
+    show_main(&app);
+    main_window(&app)?.navigate(Url::parse(&opened.url).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+// A signed-in server showing its login page has lost the window's cookie. Logging out also lands
+// here, and then the server refuses the token, so the login page stays and no browser opens.
+fn resume_session(app: &AppHandle, page: &Url) {
+    let state = app.state::<AppState>();
+    let found = {
+        let store = state.store.lock().unwrap();
+        store.servers.iter().find(|s| s.signed_in && same_origin(&s.url, page)).map(|s| (s.id.clone(), s.url.clone()))
+    };
+    let Some((id, url)) = found else { return };
+    if state.resume_tried.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let token = state.store.lock().unwrap().refresh_token(&id);
+        let Some(token) = token else { return };
+        match oauth::resume(&url, &token) {
+            Ok(Some(opened)) => {
+                let _ = state.store.lock().unwrap().set_refresh_token(&id, opened.refresh_token);
+                if let (Ok(window), Ok(target)) = (main_window(&app), Url::parse(&opened.url)) {
+                    let _ = window.navigate(target);
+                }
+            }
+            Ok(None) => {
+                let _ = state.store.lock().unwrap().set_refresh_token(&id, None);
+            }
+            Err(e) => eprintln!("cannot resume the session: {e}"),
+        }
+    });
+}
+
+fn same_origin(server: &str, page: &Url) -> bool {
+    Url::parse(server).is_ok_and(|s| s.origin() == page.origin())
 }
 
 #[tauri::command]
-fn add_server(state: tauri::State<AppState>, name: String, url: String) -> Result<Server, String> {
-    state.store.lock().unwrap().add_server(&name, &url)
+fn add_server(state: tauri::State<AppState>, name: String, url: String) -> Result<String, String> {
+    state.store.lock().unwrap().add_server(&name, &url).map(|server: Server| server.id)
 }
 
 #[tauri::command]
 fn remove_server(state: tauri::State<AppState>, id: String) -> Result<(), String> {
-    state.store.lock().unwrap().remove_server(&id)
+    let mut store = state.store.lock().unwrap();
+    // Forgetting a server also signs out of it, so no live session is left behind.
+    let url = store.servers.iter().find(|s| s.id == id).map(|s| s.url.clone());
+    if let (Some(url), Some(token)) = (url, store.refresh_token(&id)) {
+        std::thread::spawn(move || oauth::revoke(&url, &token));
+    }
+    store.remove_server(&id)
 }
 
 fn remember(state: &AppState, id: &str) {
@@ -270,6 +348,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![HIDDEN_ARG]),
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![connections, open_local, open_server, add_server, remove_server, quit_confirmed, stop_confirmed])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {
@@ -287,16 +366,19 @@ fn main() {
                 let _ = webview.eval(store::login_script(&password));
             } else if url.host_str() == Some("127.0.0.1") && url.path() != "/login" {
                 state.login_tried.store(false, Ordering::SeqCst);
+            } else if url.path() == "/login" {
+                resume_session(webview.app_handle(), url);
             }
         })
         .setup(|app| {
-            let store = Store::load()?;
+            let store = Store::load(std::sync::Arc::new(vault::Keychain))?;
             let manager = Manager::new(store.dir.clone(), store.port, store.password.clone());
             manager.start()?;
             app.manage(AppState {
                 store: Mutex::new(store),
                 manager,
                 login_tried: AtomicBool::new(false),
+                resume_tried: AtomicBool::new(false),
                 booted: AtomicBool::new(false),
                 quitting: AtomicBool::new(false),
             });
@@ -318,6 +400,7 @@ fn main() {
                 }
             });
             tray::install(&handle, is_turkish())?;
+            updater::start(&handle);
             let hidden = std::env::args().any(|arg| arg == HIDDEN_ARG);
             if hidden {
                 #[cfg(target_os = "macos")]

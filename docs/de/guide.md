@@ -177,6 +177,7 @@ Diese haben keine Entsprechung in der Konfigurationsdatei:
 | Variable | Wirkung | Standard |
 |---|---|---|
 | `BASIC_AUTH_PASSWORD` | Setzen aktiviert Basic Auth | leer (keine Auth) |
+| `PUBLIC_URL` | Adresse, unter der Clients diesen Manager erreichen, für OAuth und MCP; leer nutzt die Angabe des Proxys | leer |
 | `BASIC_AUTH_USER` | Benutzername für Basic Auth | `admin` |
 | `TRUSTED_ORIGINS` | Kommagetrennte Ursprünge, die von der Cross-Site-Prüfung ausgenommen sind; siehe [4. Sicherheit und Validierung](#4-sicherheit-und-validierung) | leer |
 | `LOG_LEVEL` | `trace` / `debug` / `info` / `warn` / `error` | `info` |

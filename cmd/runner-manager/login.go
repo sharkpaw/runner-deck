@@ -1,25 +1,21 @@
 package main
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/sharkpaw/runner-deck/internal/auth"
 	"github.com/sharkpaw/runner-deck/internal/handler"
 	secure "github.com/soulteary/secure-kit/v2"
 )
 
 const (
 	sessionCookie = "runner_deck_session"
-	sessionTTL    = 7 * 24 * time.Hour
 
 	loginWindow     = 15 * time.Minute
 	loginMaxPerIP   = 10
@@ -34,32 +30,6 @@ func credentials() (user, pass string) {
 		user = "admin"
 	}
 	return user, pass
-}
-
-// signSession signs the expiry with a key derived from the password, so sessions need no
-// storage and changing the password ends all of them.
-func signSession(user, pass string, expires int64) string {
-	key := sha256.Sum256([]byte("runner-deck/session/v1\x00" + pass))
-	mac := hmac.New(sha256.New, key[:])
-	mac.Write([]byte(user + "\x00" + strconv.FormatInt(expires, 10)))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func newSessionValue(user, pass string, now time.Time) string {
-	expires := now.Add(sessionTTL).Unix()
-	return strconv.FormatInt(expires, 10) + "." + signSession(user, pass, expires)
-}
-
-func validSession(value, user, pass string, now time.Time) bool {
-	expText, sig, ok := strings.Cut(value, ".")
-	if !ok {
-		return false
-	}
-	expires, err := strconv.ParseInt(expText, 10, 64)
-	if err != nil || now.Unix() >= expires {
-		return false
-	}
-	return hmac.Equal([]byte(sig), []byte(signSession(user, pass, expires)))
 }
 
 // loginThrottle limits wrong passwords. The per-address limit keeps one client from locking out
@@ -108,7 +78,10 @@ func basicAuthMiddleware() (echo.MiddlewareFunc, string) {
 	}
 	skip := func(c echo.Context) bool {
 		p := c.Path()
-		return p == "/health" || p == "/ready" || p == "/login" || p == "/static/*"
+		if isTokenEndpoint(p) || p == "/oauth/authorize" || p == "/login/ticket" {
+			return true // they check their own credentials
+		}
+		return p == "/health" || p == "/ready" || p == "/login" || p == "/static/*" || isInternal(c.Request())
 	}
 	basic := middleware.BasicAuthWithConfig(middleware.BasicAuthConfig{
 		Skipper: skip,
@@ -126,7 +99,19 @@ func basicAuthMiddleware() (echo.MiddlewareFunc, string) {
 			if skip(c) {
 				return next(c)
 			}
-			if ck, err := c.Cookie(sessionCookie); err == nil && validSession(ck.Value, expectedUser, pw, time.Now()) {
+			if sid, ok := cookieSession(c); ok {
+				c.Set(sessionIDKey, sid)
+				return next(c)
+			}
+			if token := bearerToken(c.Request()); token != "" {
+				v, err := authStore.VerifyAccess(token)
+				if err != nil {
+					return unauthorizedBearer(c)
+				}
+				if !bearerAllows(v, c.Request()) {
+					return insufficientScope(c)
+				}
+				c.Set(sessionIDKey, v.SessionID)
 				return next(c)
 			}
 			if c.Request().Header.Get(echo.HeaderAuthorization) == "" {
@@ -160,16 +145,18 @@ func setSessionCookie(c echo.Context, value string, maxAge int) {
 func renderLogin(c echo.Context, status int, errKey string) error {
 	data := handler.PageData(c)
 	data["Error"] = errKey
+	if next := safeNext(c.FormValue("next")); next != "/" {
+		data["Next"] = next
+	}
 	return c.Render(status, "login.html", data)
 }
 
 func loginPage(c echo.Context) error {
-	user, pw := credentials()
-	if pw == "" {
+	if !authEnabled() {
 		return c.Redirect(http.StatusSeeOther, "/")
 	}
-	if ck, err := c.Cookie(sessionCookie); err == nil && validSession(ck.Value, user, pw, time.Now()) {
-		return c.Redirect(http.StatusSeeOther, "/")
+	if _, ok := cookieSession(c); ok {
+		return c.Redirect(http.StatusSeeOther, safeNext(c.QueryParam("next")))
 	}
 	return renderLogin(c, http.StatusOK, "")
 }
@@ -190,11 +177,21 @@ func loginSubmit(c echo.Context) error {
 		loginLimiter.fail(ip, now)
 		return renderLogin(c, http.StatusUnauthorized, "login.invalid")
 	}
-	setSessionCookie(c, newSessionValue(user, pw, now), int(sessionTTL/time.Second))
-	return c.Redirect(http.StatusSeeOther, "/")
+	value, err := authStore.StartBrowserSession(requestMeta(c))
+	if err != nil {
+		return err
+	}
+	setSessionCookie(c, value, int(auth.SessionTTL/time.Second))
+	return c.Redirect(http.StatusSeeOther, safeNext(c.FormValue("next")))
 }
 
 func logoutSubmit(c echo.Context) error {
+	// Only a cookie's own session ends here; revoking from the sessions page covers the rest.
+	if ck, err := c.Cookie(sessionCookie); err == nil {
+		if v, err := authStore.VerifyCookie(ck.Value); err == nil {
+			_, _ = authStore.Revoke(v.SessionID)
+		}
+	}
 	setSessionCookie(c, "", -1)
 	return c.Redirect(http.StatusSeeOther, "/login")
 }

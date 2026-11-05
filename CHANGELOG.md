@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The desktop app updates itself from GitHub Releases, once no job is running.
+- MCP endpoint at `/mcp`, so Claude and other clients can manage runners.
+- OAuth 2.1 sign-in with PKCE and client registration: short JWT access tokens and rotating refresh tokens that keep a session for 180 days after its last use.
+- A client asking for access can be limited to read only on the consent page; such a token can look at everything and change nothing.
+- Sessions page: see everything signed in and end any of it. Browser sign-ins now last 180 days too, and logging out ends the session on the server.
 - Desktop app for macOS: the Manager runs on your own computer, runners work as normal processes with no Docker, so Xcode and iOS builds work. The same window opens the panels of your servers.
 - Without container mode, runner output is kept in `runner.log`, so logs, job results and work cleanup work there too.
 - Runners get 4 CPUs and 8 GB by default, editable from the panel, globally or per runner, without a restart.

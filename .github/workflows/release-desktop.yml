@@ -51,15 +51,45 @@ jobs:
           cargo test --release
       - name: Build
         working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Without a certificate the build stays ad hoc signed. Tauri reads a set but empty variable as a value.
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "$(printenv "$name")" ]; then unset "$name"; fi
+          done
           bun install --frozen-lockfile
-          bunx tauri build --bundles dmg --target ${{ matrix.target }}
-      - name: Name the download
-        run: mv desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg RunnerDeck-macos-${{ matrix.arch }}.dmg
+          # The certificate names its own identity, and Tauri refuses one that differs from the config's ad hoc "-".
+          config='{}'
+          if [ -n "${APPLE_CERTIFICATE:-}" ]; then
+            config="$(jq -c '.bundle.macOS.signingIdentity = null' <<< "$config")"
+          fi
+          # A pull request from a fork has no key, and has no use for an update package either.
+          bundles=dmg
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            bundles=app,dmg
+            config="$(jq -c '.bundle.createUpdaterArtifacts = true' <<< "$config")"
+          fi
+          bunx tauri build --bundles "$bundles" --target ${{ matrix.target }} --config "$config"
+      - name: Name the downloads
+        run: |
+          bundle=desktop/src-tauri/target/${{ matrix.target }}/release/bundle
+          mkdir out
+          mv "$bundle"/dmg/*.dmg out/RunnerDeck-macos-${{ matrix.arch }}.dmg
+          if ls "$bundle"/macos/*.app.tar.gz >/dev/null 2>&1; then
+            mv "$bundle"/macos/*.app.tar.gz out/RunnerDeck-macos-${{ matrix.arch }}.app.tar.gz
+            mv "$bundle"/macos/*.app.tar.gz.sig out/RunnerDeck-macos-${{ matrix.arch }}.app.tar.gz.sig
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: dmg-${{ matrix.arch }}
-          path: RunnerDeck-macos-${{ matrix.arch }}.dmg
+          path: out/*
           if-no-files-found: error
 
   publish:
@@ -87,14 +117,23 @@ jobs:
             echo "$tag is already published; raise the version in tauri.conf.json to publish again."
             exit 0
           fi
-          gh release create "$tag" dist/*.dmg --target "$GITHUB_SHA" --latest=false \
+          # Without the signing key there is nothing installed apps could accept, so stop here.
+          base="https://github.com/${GH_REPO}/releases/download/${tag}"
+          jq -n --arg version "$version" \
+            --arg arm "$base/RunnerDeck-macos-arm64.app.tar.gz" --rawfile armsig dist/RunnerDeck-macos-arm64.app.tar.gz.sig \
+            --arg x64 "$base/RunnerDeck-macos-x64.app.tar.gz" --rawfile x64sig dist/RunnerDeck-macos-x64.app.tar.gz.sig \
+            '{version: $version, platforms: {
+              "darwin-aarch64": {url: $arm, signature: ($armsig | rtrimstr("\n"))},
+              "darwin-x86_64": {url: $x64, signature: ($x64sig | rtrimstr("\n"))}
+            }}' > dist/latest.json
+          gh release create "$tag" dist/*.dmg dist/*.app.tar.gz dist/latest.json --target "$GITHUB_SHA" --latest=false \
             --title "Runner Deck Desktop ${version}" \
             --notes "Install steps: https://github.com/${GH_REPO}/blob/main/desktop/README.md"
           if gh release view desktop-latest >/dev/null 2>&1; then
-            gh release upload desktop-latest dist/*.dmg --clobber
+            gh release upload desktop-latest dist/*.dmg dist/latest.json --clobber
             gh release edit desktop-latest --title "Runner Deck Desktop (latest: ${version})"
           else
-            gh release create desktop-latest dist/*.dmg --target "$GITHUB_SHA" --latest=false \
+            gh release create desktop-latest dist/*.dmg dist/latest.json --target "$GITHUB_SHA" --latest=false \
               --title "Runner Deck Desktop (latest: ${version})" \
               --notes "Always holds the newest desktop app, so its download links do not change."
           fi

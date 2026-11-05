@@ -177,6 +177,7 @@ Celles-ci n'ont pas d'équivalent dans le fichier de configuration :
 | Variable | Rôle | Défaut |
 |---|---|---|
 | `BASIC_AUTH_PASSWORD` | La définir active l'authentification Basic | vide (pas d'auth) |
+| `PUBLIC_URL` | Adresse par laquelle les clients joignent ce Manager, pour OAuth et MCP ; vide utilise ce que signale le proxy | vide |
 | `BASIC_AUTH_USER` | Nom d'utilisateur Basic Auth | `admin` |
 | `TRUSTED_ORIGINS` | Origines exemptées du contrôle intersites, séparées par des virgules ; voir [4. Sécurité et validation](#4-sécurité-et-validation) | vide |
 | `LOG_LEVEL` | `trace` / `debug` / `info` / `warn` / `error` | `info` |
