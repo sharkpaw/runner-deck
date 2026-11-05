@@ -18,6 +18,23 @@ set -e
 RUNNER_NAME="${1:?Usage: install-runner.sh <runner_name> [version]}"
 BASE="${RUNNERS_BASE_PATH:-/app/runners}"
 
+detect_os() {
+    case "$(uname -s)" in
+        Linux) echo "linux" ;;
+        Darwin) echo "osx" ;;
+        *) echo "" ;;
+    esac
+}
+
+# macOS ships shasum instead of sha256sum
+verify_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c -
+    else
+        shasum -a 256 -c -
+    fi
+}
+
 # Fallback version used when the latest release can't be queried, and its official SHA256 (x64 only)
 FALLBACK_VERSION="2.331.0"
 FALLBACK_SHA256_X64="5fcc01bd546ba5c3f1291c2803658ebd3cedb3836489eda3be357d41bfcf28a7"
@@ -93,7 +110,13 @@ if [ -z "$VERSION" ]; then
     fi
 fi
 
-TARBALL="actions-runner-linux-${ARCH}-${VERSION}.tar.gz"
+OS="$(detect_os)"
+if [ -z "$OS" ]; then
+    echo "Unsupported system: $(uname -s)" >&2
+    exit 1
+fi
+
+TARBALL="actions-runner-${OS}-${ARCH}-${VERSION}.tar.gz"
 URL="https://github.com/actions/runner/releases/download/v${VERSION}/${TARBALL}"
 INSTALL_DIR="${BASE}/${RUNNER_NAME}"
 
@@ -107,7 +130,7 @@ EXPECTED="${RUNNER_SHA256:-}"
 if [ -z "$EXPECTED" ]; then
     EXPECTED="$(resolve_sha256 "$VERSION" "$TARBALL" || true)"
 fi
-if [ -z "$EXPECTED" ] && [ "$VERSION" = "$FALLBACK_VERSION" ] && [ "$ARCH" = "x64" ]; then
+if [ -z "$EXPECTED" ] && [ "$OS" = "linux" ] && [ "$VERSION" = "$FALLBACK_VERSION" ] && [ "$ARCH" = "x64" ]; then
     EXPECTED="$FALLBACK_SHA256_X64"
 fi
 if [ -z "$EXPECTED" ]; then
@@ -132,7 +155,7 @@ echo "Downloading ${TARBALL} ..."
 curl -fSL --retry 3 -o "$TARBALL" "$URL"
 
 echo "Verifying SHA256 ..."
-echo "${EXPECTED}  ${TARBALL}" | sha256sum -c -
+echo "${EXPECTED}  ${TARBALL}" | verify_sha256
 
 echo "Extracting..."
 tar xzf "$TARBALL"

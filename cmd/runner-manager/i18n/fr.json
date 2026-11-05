@@ -283,7 +283,6 @@
   "system.custom_limit": "limite propre",
   "modal.label_cpus": "Limite CPU (vide : défaut)",
   "modal.label_memory": "Limite mémoire (vide : défaut)",
-  "api.logs_container_mode_only": "La sortie du runner n'est disponible qu'en mode conteneur",
   "api.logs_failed": "Lecture de la sortie du runner impossible : %s",
   "nav.events": "Journal d'activité",
   "events.subtitle": "Ce qui est arrivé à vos runners et quand. Conservé après un redémarrage.",

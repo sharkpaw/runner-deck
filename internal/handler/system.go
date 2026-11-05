@@ -413,6 +413,19 @@ func collectSystem(cfg *config.Config, list []runner.RunnerInfo) SystemResponse 
 	}
 	dirSizesMu.Unlock()
 
+	// Process runners have no containers, and any Docker on this machine is not ours to report on.
+	if !cfg.Runners.ContainerMode {
+		resp.Runners, resp.Others = buildSystemRunners(cfg, list, nil, sizes, nil, runner.ContainerName)
+		running := make(map[string]bool, len(list))
+		for _, item := range list {
+			running[item.Name] = item.Running
+		}
+		for i := range resp.Runners {
+			resp.Runners[i].Running = running[resp.Runners[i].Name]
+		}
+		return resp
+	}
+
 	// Not tied to the request: the result is shared, so a reloaded page must not kill the docker call.
 	stats, err := statsCache.get(systemStatsTTL, func() ([]containerStat, error) {
 		cctx, cancel := context.WithTimeout(context.Background(), systemCmdTimeout)

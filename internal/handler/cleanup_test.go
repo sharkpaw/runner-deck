@@ -93,10 +93,13 @@ func TestCleanRunnerWork_RefusesWhileAJobRuns(t *testing.T) {
 	}
 }
 
-func TestCleanRunnerWork_ProcessModeRefused(t *testing.T) {
+func TestCleanRunnerWork_ProcessModeNeedsNoDocker(t *testing.T) {
 	useWatchConfig(t, false)
-	cleanFixture(t, func(...string) ([]byte, error) { return nil, nil })
-	if _, err := cleanRunner(t, "a"); httpCode(err) != http.StatusBadRequest {
+	cleanFixture(t, func(args ...string) ([]byte, error) {
+		t.Errorf("docker called: %v", args)
+		return nil, nil
+	})
+	if _, err := cleanRunner(t, "a"); err != nil {
 		t.Fatalf("got %v", err)
 	}
 }

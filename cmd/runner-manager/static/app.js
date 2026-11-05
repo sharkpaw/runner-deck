@@ -1293,6 +1293,9 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
       cpusInput.value = data.limits.cpus || '';
       memoryInput.value = data.limits.memory || '';
       el('limitAutoClean').value = data.limits.auto_clean_days;
+      // CPU, memory and the disk guard act on containers; process runners have neither.
+      ['limitCpus', 'limitMemory', 'limitDiskGuard'].forEach(function (id) { el(id).parentElement.hidden = !data.container_mode; });
+      el('limitsForm').querySelectorAll('.limits-hint')[1].hidden = !data.container_mode;
       el('limitDiskGuard').value = data.limits.disk_guard_percent;
     }
     renderRunners(data);

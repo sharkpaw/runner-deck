@@ -283,7 +283,6 @@
   "system.custom_limit": "eigenes Limit",
   "modal.label_cpus": "CPU-Limit (leer: Standard)",
   "modal.label_memory": "Speicherlimit (leer: Standard)",
-  "api.logs_container_mode_only": "Runner-Ausgabe gibt es nur im Containermodus",
   "api.logs_failed": "Runner-Ausgabe nicht lesbar: %s",
   "nav.events": "Aktivitätsprotokoll",
   "events.subtitle": "Was wann mit Ihren Runnern passiert ist. Bleibt nach Neustarts erhalten.",

@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/sharkpaw/runner-deck/internal/config"
 	"github.com/sharkpaw/runner-deck/internal/eventlog"
+	"github.com/sharkpaw/runner-deck/internal/runner"
 )
 
 func useEventStore(t *testing.T) *eventlog.Store {
@@ -262,11 +263,18 @@ func TestRunnerLogs(t *testing.T) {
 		t.Error("a docker failure must surface")
 	}
 	ConfigPath = filepath.Join(t.TempDir(), "plain.yaml")
-	if err := os.WriteFile(ConfigPath, []byte("runners:\n  base_path: "+t.TempDir()+"\n  items:\n    - {name: a, target_type: repo, target: o/r}\n"), 0o644); err != nil {
+	base := t.TempDir()
+	if err := os.WriteFile(ConfigPath, []byte("runners:\n  base_path: "+base+"\n  items:\n    - {name: a, target_type: repo, target: o/r}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call("a", ""); err == nil {
-		t.Error("process mode has no container logs")
+	if err := os.MkdirAll(filepath.Join(base, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "a", runner.LogFileName), []byte("process line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rec, err := call("a", ""); err != nil || !strings.Contains(rec.Body.String(), "process line") {
+		t.Errorf("process mode reads its log file: %v", err)
 	}
 }
 

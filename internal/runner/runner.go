@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/sharkpaw/runner-deck/internal/atomicfile"
 	"github.com/sharkpaw/runner-deck/internal/childenv"
@@ -395,13 +396,21 @@ func Start(installDir string) error {
 	if runtime.GOOS != "windows" {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
+	log, err := openLog(installDir)
+	if err != nil {
+		return fmt.Errorf("cannot open the runner log: %w", err)
+	}
+	output := &stampWriter{out: log, now: time.Now}
+	cmd.Stdout, cmd.Stderr = output, output
 	if err := cmd.Start(); err != nil {
+		log.Close()
 		return err
 	}
 	// The child process must be waited on, otherwise an exited run.sh becomes a zombie process when running inside a container (where the main process is PID 1).
 	// Wait in a background goroutine, so Start returns without blocking.
 	go func() {
 		_ = cmd.Wait()
+		log.Close()
 	}()
 	return nil
 }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -22,6 +23,8 @@ const (
 	eventsMaxLimit     = 5000
 	logsDefaultTail    = 300
 	logsMaxTail        = 5000
+	// Comfortably more than a runner writes between two watcher passes.
+	processLogBytes = 256 << 10
 )
 
 func recordEvent(name, level, code, detail string) {
@@ -52,11 +55,16 @@ func RunnerLogs(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := cfg.FindItem(name); !ok {
+	item, ok := cfg.FindItem(name)
+	if !ok {
 		return echo.NewHTTPError(http.StatusNotFound, tr(c, "api.runner_not_found"))
 	}
 	if !cfg.Runners.ContainerMode {
-		return echo.NewHTTPError(http.StatusBadRequest, tr(c, "api.logs_container_mode_only"))
+		out, err := runner.ReadLog(item.InstallPath(cfg.Runners.BasePath), processLogBytes)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, trf(c, "api.logs_failed", err.Error()))
+		}
+		return c.JSON(http.StatusOK, map[string]any{"logs": string(out)})
 	}
 	tail, err := strconv.Atoi(c.QueryParam("tail"))
 	if err != nil || tail <= 0 {
@@ -86,6 +94,8 @@ type watchedRunner struct {
 	logsFrom time.Time
 	// When the runner last did something worth cleaning up after; zero once it has been cleaned.
 	dirtySince time.Time
+	// Set for a process runner; a container's work directory is reached through docker instead.
+	installDir string
 }
 
 // Watcher turns changes in runner state into events.
@@ -189,16 +199,36 @@ func (w *Watcher) checkContainer(ctx context.Context, name string, st *watchedRu
 	w.autoClean(ctx, name, st, days)
 }
 
+// checkProcessLog reads job results from a process runner's log.
+func (w *Watcher) checkProcessLog(ctx context.Context, name string, st *watchedRunner, days int) {
+	out, err := runner.ReadLog(st.installDir, processLogBytes)
+	if err != nil {
+		return
+	}
+	events, last := parseJobEvents(name, out, st.logsFrom)
+	for _, e := range events {
+		Events.Append(e)
+		st.dirtySince = e.Time
+	}
+	st.logsFrom = last
+	w.autoClean(ctx, name, st, days)
+}
+
 // autoClean empties the work directory of a runner idle for the given days. A job that is running
 // makes the script refuse, which simply tries again on the next pass.
 func (w *Watcher) autoClean(ctx context.Context, name string, st *watchedRunner, days int) {
 	if days <= 0 || st.dirtySince.IsZero() || w.now().Sub(st.dirtySince) < time.Duration(days)*24*time.Hour {
 		return
 	}
-	out, err := dockerRunCombined(ctx, "exec", "-u", "0", runner.ContainerName(name), "sh", "-c", cleanWorkScript)
+	var err error
+	if st.installDir != "" {
+		err = runner.CleanWork(st.installDir)
+	} else {
+		err = cleanContainerWork(ctx, name)
+	}
 	if err != nil {
-		if exitCodeOf(err) != cleanBusyExit {
-			recordEvent(name, eventlog.LevelError, "clean_failed", strings.TrimSpace(string(out)))
+		if !errors.Is(err, runner.ErrWorkBusy) {
+			recordEvent(name, eventlog.LevelError, "clean_failed", err.Error())
 			st.dirtySince = w.now()
 		}
 		return
@@ -250,6 +280,7 @@ func (w *Watcher) Pass(ctx context.Context) {
 			}
 			continue
 		}
+		st.installDir = info.InstallDir
 		if known && info.Running != st.running {
 			if info.Running {
 				recordEvent(info.Name, eventlog.LevelInfo, "started", "")
@@ -258,6 +289,7 @@ func (w *Watcher) Pass(ctx context.Context) {
 			}
 		}
 		st.running = info.Running
+		w.checkProcessLog(ctx, info.Name, st, cfg.AutoCleanAfter())
 	}
 	for name := range w.state {
 		if !seen[name] {

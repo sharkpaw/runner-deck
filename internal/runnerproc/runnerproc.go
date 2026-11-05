@@ -14,8 +14,7 @@
 // this package keeps only the actions/runner-specific knowledge: which scripts and which executable,
 // and why both must be matched (see runnerSpec).
 //
-// Only works on systems with procfs (Linux). Every other platform always returns "not found",
-// which matches the actual behavior before the fix (the pid file never existed then either).
+// Linux reads procfs and macOS reads sysctl (scan_darwin.go). Other platforms always return "not found".
 package runnerproc
 
 import (
@@ -41,9 +40,18 @@ const StopGracePeriod = 30 * time.Second
 const ShutdownReserve = 5 * time.Second
 
 // procRoot is the procfs mount point, made a variable only so tests can replace it.
-var procRoot = "/proc"
+var procRoot = defaultProcRoot
 
-func scanner() procfind.Scanner { return procfind.Scanner{Root: procRoot} }
+const defaultProcRoot = "/proc"
+
+// processScanner finds a program's processes by the paths in their argv.
+type processScanner interface {
+	Find(dir string, spec procfind.Spec) []int
+	FindMany(dirs []string, spec procfind.Spec) map[string][]int
+	Running(dir string, spec procfind.Spec) bool
+}
+
+func procfsScanner() processScanner { return procfind.Scanner{Root: procRoot} }
 
 // listenerName is the path of the listener executable relative to the install directory.
 // run-helper.sh launches it as `"$DIR"/bin/Runner.Listener run $*`, so argv[0] is that path.
@@ -99,4 +107,14 @@ func FindMany(installDirs []string) map[string][]int {
 // Running reports whether a runner process is alive under installDir
 func Running(installDir string) bool {
 	return scanner().Running(installDir, runnerSpec())
+}
+
+// WorkerRunning reports whether a job is running under installDir: the listener starts one
+// Runner.Worker per job and it exits with the job.
+func WorkerRunning(installDir string) bool {
+	name := "Runner.Worker"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return scanner().Running(installDir, procfind.Spec{Executables: []string{filepath.Join("bin", name)}})
 }

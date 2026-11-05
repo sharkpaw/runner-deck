@@ -32,6 +32,7 @@ func newGuardFixture(t *testing.T) *guardFixture {
 	t.Helper()
 	useEventStore(t)
 	f := &guardFixture{now: time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC), cfg: &config.Config{}}
+	f.cfg.Runners.ContainerMode = true
 	f.w = NewWatcher(nil)
 	f.w.now = func() time.Time { return f.now }
 	origUsage, origDocker := diskUsageOf, dockerRunCombined
@@ -137,5 +138,15 @@ func TestGuardDisk_WaitsForARunningCleanup(t *testing.T) {
 func TestUsedPercent(t *testing.T) {
 	if usedPercent(nil) != 0 || usedPercent(&SystemDisk{}) != 0 {
 		t.Error("an unknown disk must not trigger cleanup")
+	}
+}
+
+func TestGuardDisk_LeavesAMachineWithoutContainerModeAlone(t *testing.T) {
+	f := newGuardFixture(t)
+	f.cfg.Runners.ContainerMode = false
+	f.used = []uint64{99}
+	f.w.guardDisk(context.Background(), f.cfg)
+	if len(f.calls) != 0 {
+		t.Fatalf("calls = %v", f.calls)
 	}
 }

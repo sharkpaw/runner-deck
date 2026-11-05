@@ -157,6 +157,7 @@ func TestCollectSystem_JoinsDockerNumbers(t *testing.T) {
 		return []byte(`{"Type":"Images","TotalCount":"1","Size":"1GB","Reclaimable":"0B"}` + "\n"), nil
 	})
 	cfg := &config.Config{}
+	cfg.Runners.ContainerMode = true
 	cfg.Runners.BasePath = t.TempDir()
 	list := []runner.RunnerInfo{{Name: "a", Target: "o/r", InstallDir: cfg.Runners.BasePath}}
 
@@ -173,9 +174,23 @@ func TestCollectSystem_JoinsDockerNumbers(t *testing.T) {
 	}
 }
 
+func TestCollectSystem_ProcessRunnersNeedNoDocker(t *testing.T) {
+	stubDocker(t, func(args ...string) ([]byte, error) {
+		t.Errorf("docker called: %v", args)
+		return nil, errors.New("no docker")
+	})
+	cfg := &config.Config{}
+	cfg.Runners.BasePath = t.TempDir()
+	got := collectSystem(cfg, []runner.RunnerInfo{{Name: "a", Running: true, InstallDir: cfg.Runners.BasePath}})
+	if got.StatsError != "" || len(got.Runners) != 1 || !got.Runners[0].Running || got.Disk == nil {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestCollectSystem_DockerFailureKeepsThePage(t *testing.T) {
 	stubDocker(t, func(...string) ([]byte, error) { return nil, errors.New("no daemon") })
 	cfg := &config.Config{}
+	cfg.Runners.ContainerMode = true
 	cfg.Runners.BasePath = t.TempDir()
 	got := collectSystem(cfg, []runner.RunnerInfo{{Name: "a", InstallDir: cfg.Runners.BasePath}})
 	if got.StatsError == "" || len(got.Runners) != 1 || got.Runners[0].HasStats || got.Disk == nil {
@@ -239,7 +254,7 @@ func TestSystemInfo_ServesTheConfiguredRunners(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Runners) != 1 || got.Runners[0].Name != "a" || got.StatsError == "" {
+	if len(got.Runners) != 1 || got.Runners[0].Name != "a" {
 		t.Fatalf("got %+v", got)
 	}
 }
