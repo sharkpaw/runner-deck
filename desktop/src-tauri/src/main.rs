@@ -21,6 +21,8 @@ pub struct AppState {
     pub manager: Manager,
     // One login attempt per opening, so a wrong password cannot loop.
     login_tried: AtomicBool,
+    // One attempt per opening, for the same reason.
+    resume_tried: AtomicBool,
     booted: AtomicBool,
     pub quitting: AtomicBool,
 }
@@ -79,21 +81,63 @@ fn open_local(app: AppHandle, state: tauri::State<AppState>) -> Result<(), Strin
 // Can wait minutes for the person to sign in, so it runs off the main thread.
 #[tauri::command(async)]
 fn open_server(app: AppHandle, state: tauri::State<AppState>, id: String) -> Result<(), String> {
-    let (url, saved) = {
+    let (url, signed_in) = {
         let store = state.store.lock().unwrap();
         let server = store.servers.iter().find(|s| s.id == id).ok_or_else(|| "unknown server".to_string())?;
-        (server.url.clone(), store.refresh_token(&server.id))
+        (server.url.clone(), server.signed_in)
     };
+    remember(&state, &id);
+    // The window's own cookie lasts as long as the session, so usually no token is needed at all, and
+    // neither is the Keychain. If the cookie has gone, the page load below signs it in again.
+    if signed_in {
+        state.resume_tried.store(false, Ordering::SeqCst);
+        return main_window(&app)?.navigate(Url::parse(&url).map_err(|e| e.to_string())?).map_err(|e| e.to_string());
+    }
     let done = if is_turkish() {
         "Giriş tamamlandı, Runner Deck'e dönebilirsin."
     } else {
         "Signed in. You can go back to Runner Deck."
     };
-    let opened = oauth::open(&url, saved.as_deref(), &open_external, done)?;
+    let opened = oauth::open(&url, None, &open_external, done)?;
     state.store.lock().unwrap().set_refresh_token(&id, opened.refresh_token)?;
-    remember(&state, &id);
     show_main(&app);
     main_window(&app)?.navigate(Url::parse(&opened.url).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+// A signed-in server showing its login page has lost the window's cookie. Logging out also lands
+// here, and then the server refuses the token, so the login page stays and no browser opens.
+fn resume_session(app: &AppHandle, page: &Url) {
+    let state = app.state::<AppState>();
+    let found = {
+        let store = state.store.lock().unwrap();
+        store.servers.iter().find(|s| s.signed_in && same_origin(&s.url, page)).map(|s| (s.id.clone(), s.url.clone()))
+    };
+    let Some((id, url)) = found else { return };
+    if state.resume_tried.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let token = state.store.lock().unwrap().refresh_token(&id);
+        let Some(token) = token else { return };
+        match oauth::resume(&url, &token) {
+            Ok(Some(opened)) => {
+                let _ = state.store.lock().unwrap().set_refresh_token(&id, opened.refresh_token);
+                if let (Ok(window), Ok(target)) = (main_window(&app), Url::parse(&opened.url)) {
+                    let _ = window.navigate(target);
+                }
+            }
+            Ok(None) => {
+                let _ = state.store.lock().unwrap().set_refresh_token(&id, None);
+            }
+            Err(e) => eprintln!("cannot resume the session: {e}"),
+        }
+    });
+}
+
+fn same_origin(server: &str, page: &Url) -> bool {
+    Url::parse(server).is_ok_and(|s| s.origin() == page.origin())
 }
 
 #[tauri::command]
@@ -322,6 +366,8 @@ fn main() {
                 let _ = webview.eval(store::login_script(&password));
             } else if url.host_str() == Some("127.0.0.1") && url.path() != "/login" {
                 state.login_tried.store(false, Ordering::SeqCst);
+            } else if url.path() == "/login" {
+                resume_session(webview.app_handle(), url);
             }
         })
         .setup(|app| {
@@ -332,6 +378,7 @@ fn main() {
                 store: Mutex::new(store),
                 manager,
                 login_tried: AtomicBool::new(false),
+                resume_tried: AtomicBool::new(false),
                 booted: AtomicBool::new(false),
                 quitting: AtomicBool::new(false),
             });

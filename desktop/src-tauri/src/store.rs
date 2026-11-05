@@ -7,7 +7,6 @@ use std::sync::Arc;
 use crate::vault::Vault;
 
 const DEFAULT_PORT: u16 = 18484;
-const PASSWORD_KEY: &str = "local-password";
 
 fn token_key(server_id: &str) -> String {
     format!("server-{server_id}")
@@ -30,11 +29,10 @@ pub struct Server {
 pub struct Store {
     #[serde(skip)]
     pub dir: PathBuf,
-    #[serde(skip)]
+    /// Guards only the panel on this computer, whose runners and files anything running as this
+    /// user can reach anyway. In the file, so that opening the app never stops at a Keychain prompt.
+    #[serde(default)]
     pub password: String,
-    /// Only where the credential store refused it, or in a file from before it was used.
-    #[serde(default, rename = "password", skip_serializing_if = "String::is_empty")]
-    file_password: String,
     #[serde(skip)]
     vault: Option<Arc<dyn Vault>>,
     #[serde(default = "free_port_or_default")]
@@ -133,7 +131,6 @@ impl Store {
             Err(_) => Ok(Store {
                 dir: dir.to_path_buf(),
                 password: String::new(),
-                file_password: String::new(),
                 vault: None,
                 port: free_port()?,
                 servers: vec![],
@@ -146,29 +143,9 @@ impl Store {
         self.vault.as_deref().expect("set by load")
     }
 
-    /// Moves a password out of the file. When the credential store cannot be used the app still has
-    /// to run: a new password stays in the file, which only this user can read, and one that exists
-    /// but was declined is replaced for this run only, which signs the local panel in again.
     fn settle_password(&mut self) -> Result<(), String> {
-        if !self.file_password.is_empty() {
-            self.password = self.file_password.clone();
-            if self.vault().set(PASSWORD_KEY, &self.password).is_ok() {
-                self.file_password.clear();
-            }
-            return Ok(());
-        }
-        match self.vault().get(PASSWORD_KEY) {
-            Ok(Some(password)) => self.password = password,
-            Ok(None) => {
-                self.password = random_hex(24)?;
-                if self.vault().set(PASSWORD_KEY, &self.password).is_err() {
-                    self.file_password = self.password.clone();
-                }
-            }
-            Err(e) => {
-                eprintln!("cannot read the local password from the credential store: {e}");
-                self.password = random_hex(24)?;
-            }
+        if self.password.is_empty() {
+            self.password = random_hex(24)?;
         }
         Ok(())
     }
@@ -285,17 +262,16 @@ mod tests {
     }
 
     #[test]
-    fn a_new_install_keeps_secrets_out_of_the_file() {
+    fn server_sessions_stay_out_of_the_file() {
         let dir = temp_dir("new");
         let vault = Arc::new(Memory::default());
         let mut store = Store::load_from(dir.clone(), vault.clone()).unwrap();
         assert!(!store.password.is_empty());
-        assert_eq!(vault.get(PASSWORD_KEY).unwrap().as_deref(), Some(store.password.as_str()));
         let id = store.add_server("s", "https://deck.example.com").unwrap().id;
         store.set_refresh_token(&id, Some("refresh-secret".to_string())).unwrap();
 
         let text = file_text(&dir);
-        assert!(!text.contains(&store.password) && !text.contains("refresh-secret"), "{text}");
+        assert!(!text.contains("refresh-secret"), "{text}");
         assert!(text.contains("\"signed_in\": true"), "{text}");
         assert_eq!(store.refresh_token(&id).as_deref(), Some("refresh-secret"));
 
@@ -312,7 +288,21 @@ mod tests {
     }
 
     #[test]
-    fn an_old_file_moves_into_the_vault() {
+    fn starting_the_app_never_touches_the_vault() {
+        // Broken stands in for a Keychain that would prompt: load must not need it.
+        let dir = temp_dir("start");
+        fs::write(dir.join("desktop.json"), r#"{"port":18555,"servers":[{"id":"a","name":"n","url":"https://x/","signed_in":true}]}"#).unwrap();
+        let store = Store::load_from(dir.clone(), Arc::new(Broken)).unwrap();
+        assert!(!store.password.is_empty());
+        assert_eq!(store.refresh_token("a"), None);
+        assert!(store.servers[0].signed_in);
+        let again = Store::load_from(dir.clone(), Arc::new(Broken)).unwrap();
+        assert_eq!(again.password, store.password);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_old_token_moves_into_the_vault() {
         let dir = temp_dir("old");
         fs::write(
             dir.join("desktop.json"),
@@ -322,38 +312,24 @@ mod tests {
         let vault = Arc::new(Memory::default());
         let store = Store::load_from(dir.clone(), vault.clone()).unwrap();
         assert_eq!(store.password, "old-password");
-        assert_eq!(store.port, 18555);
-        assert_eq!(vault.get(PASSWORD_KEY).unwrap().as_deref(), Some("old-password"));
         assert_eq!(store.refresh_token("a").as_deref(), Some("old-token"));
-        let text = file_text(&dir);
-        assert!(!text.contains("old-password") && !text.contains("old-token"), "{text}");
+        assert!(!file_text(&dir).contains("old-token"));
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn a_refusing_vault_loses_nothing() {
+    fn a_refusing_vault_loses_no_session() {
         let dir = temp_dir("refuse");
         fs::write(
             dir.join("desktop.json"),
-            r#"{"password":"old-password","port":18555,"servers":[{"id":"a","name":"n","url":"https://x/","refresh_token":"old-token"}]}"#,
+            r#"{"port":18555,"servers":[{"id":"a","name":"n","url":"https://x/","refresh_token":"old-token"}]}"#,
         )
         .unwrap();
         let mut store = Store::load_from(dir.clone(), Arc::new(Broken)).unwrap();
-        assert_eq!(store.password, "old-password");
         assert_eq!(store.refresh_token("a").as_deref(), Some("old-token"));
         store.set_refresh_token("a", Some("newer".to_string())).unwrap();
         assert_eq!(store.refresh_token("a").as_deref(), Some("newer"));
-        let text = file_text(&dir);
-        assert!(text.contains("old-password") && text.contains("newer"), "{text}");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_declined_password_is_replaced_for_this_run_only() {
-        let dir = temp_dir("declined");
-        let store = Store::load_from(dir.clone(), Arc::new(Broken)).unwrap();
-        assert!(!store.password.is_empty());
-        assert!(!file_text(&dir).contains(&store.password));
+        assert!(file_text(&dir).contains("newer"));
         let _ = fs::remove_dir_all(&dir);
     }
 

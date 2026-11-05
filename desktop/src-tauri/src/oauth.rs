@@ -216,6 +216,15 @@ fn open_with_wait(
     Ok(Opened { url, refresh_token: Some(tokens.refresh_token) })
 }
 
+/// Signs the window in again from a saved session, never opening a browser. `Ok(None)` means the
+/// server has ended the session, as after logging out.
+pub fn resume(server: &str, token: &str) -> Result<Option<Opened>, String> {
+    let agent = agent();
+    let Some(tokens) = refresh(&agent, server, token)? else { return Ok(None) };
+    let url = ticket_url(&agent, server, &tokens.access_token)?;
+    Ok(Some(Opened { url, refresh_token: Some(tokens.refresh_token) }))
+}
+
 /// Ends the session on the server. A failure leaves it to expire there.
 pub fn revoke(server: &str, token: &str) {
     let _ = agent().post(endpoint(server, "/oauth/revoke")).send_form([("token", token)]);
@@ -346,6 +355,12 @@ mod tests {
         let res = agent().get(&first.url).call().unwrap();
         assert_eq!(res.status(), 303);
         assert!(res.headers().get("set-cookie").is_some(), "the ticket must sign the window in");
+
+        // Resuming needs no browser, and reports a session that has ended.
+        let resumed = resume(&server, &token).unwrap().unwrap();
+        assert!(resumed.url.contains("/login/ticket?t="));
+        let token = resumed.refresh_token.unwrap();
+        assert!(resume(&server, "gone.token").unwrap().is_none());
 
         // A saved session needs no browser, and its refresh token rotates.
         let second = open_with_wait(&server, Some(&token), &approve, Duration::from_secs(20), "done").unwrap();
