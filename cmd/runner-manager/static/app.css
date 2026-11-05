@@ -485,3 +485,5 @@ form button:hover, .btn-parse:hover { background: var(--accent-strong); opacity:
 .stats-empty { margin: 0; padding: 0 16px 16px; }
 .chart-range { justify-content: flex-end; }
 .clean-work { margin-left: 8px; }
+.limits-row > .limits-wide { flex-basis: 300px; }
+.limits-hint { margin: 10px 0 0; }

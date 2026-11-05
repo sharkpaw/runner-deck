@@ -345,5 +345,8 @@
   "system.volumes_note": "볼륨은 여기서 정리하지 않습니다. 서비스가 중지되면 사용되지 않는 것처럼 보이지만 데이터베이스가 있을 수 있습니다.",
   "event.work_cleaned": "작업 디렉터리 정리됨",
   "event.docker_cleaned": "Docker 정리 완료, {{detail}} 확보",
-  "event.clean_failed": "정리 실패: {{detail}}"
+  "event.clean_failed": "정리 실패: {{detail}}",
+  "system.limit_autoclean": "유휴 러너 정리 (일, 0: 끔)",
+  "system.autoclean_hint": "러너에 이 기간 동안 작업이 없으면 작업 디렉터리를 비웁니다. 도구 캐시는 유지되며 실행 중인 작업은 건드리지 않습니다.",
+  "event.work_auto_cleaned": "{{detail}}일 유휴 후 작업 디렉터리 자동 정리됨"
 }

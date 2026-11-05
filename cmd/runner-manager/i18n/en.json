@@ -345,5 +345,8 @@
   "system.volumes_note": "Volumes are never cleaned from here: a volume looks unused while its service is stopped, and it may hold a database.",
   "event.work_cleaned": "Work directory cleaned",
   "event.docker_cleaned": "Docker cleaned, {{detail}} freed",
-  "event.clean_failed": "Cleanup failed: {{detail}}"
+  "event.clean_failed": "Cleanup failed: {{detail}}",
+  "system.limit_autoclean": "Clean idle runners after (days, 0: off)",
+  "system.autoclean_hint": "Empties the work directory when a runner has had no job for this long. The tool cache stays, and a running job is never touched.",
+  "event.work_auto_cleaned": "Work directory cleaned automatically after {{detail}} idle days"
 }

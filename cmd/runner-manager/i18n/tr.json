@@ -345,5 +345,8 @@
   "system.volumes_note": "Volume'lar buradan temizlenmez: servisi durunca kullanılmıyor görünür ama içinde veritabanı olabilir.",
   "event.work_cleaned": "Work dizini temizlendi",
   "event.docker_cleaned": "Docker temizlendi, {{detail}} boşaldı",
-  "event.clean_failed": "Temizleme başarısız: {{detail}}"
+  "event.clean_failed": "Temizleme başarısız: {{detail}}",
+  "system.limit_autoclean": "Boştaki runner'ı temizle (gün, 0: kapalı)",
+  "system.autoclean_hint": "Bir runner bu süre iş almazsa work dizini boşaltılır. Araç önbelleği kalır, çalışan işe dokunulmaz.",
+  "event.work_auto_cleaned": "{{detail}} gün boşta kaldığı için work dizini otomatik temizlendi"
 }

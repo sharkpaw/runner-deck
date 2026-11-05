@@ -176,8 +176,10 @@
         <div class="limits-row">
           <div><label for="limitCpus">{{index .T "system.limit_cpus"}}</label><input id="limitCpus" name="cpus" inputmode="decimal" required></div>
           <div><label for="limitMemory">{{index .T "system.limit_memory"}}</label><input id="limitMemory" name="memory" required></div>
+          <div class="limits-wide"><label for="limitAutoClean">{{index .T "system.limit_autoclean"}}</label><input id="limitAutoClean" name="auto_clean_days" type="number" min="0" max="365" required></div>
           <button type="submit">{{index .T "system.limit_save"}}</button>
         </div>
+        <p class="card-hint limits-hint">{{index .T "system.autoclean_hint"}}</p>
       </form>
     </div>
     <div class="filter-row chart-range">

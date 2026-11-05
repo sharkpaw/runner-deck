@@ -153,6 +153,8 @@ type RunnersConfig struct {
 	// Resources are the resource limits applied when creating Runner containers in container mode.
 	// Without limits, a single runaway job (such as a Gradle daemon) can exhaust the machine's memory and take the Manager down with it.
 	Resources ResourceLimits `yaml:"resources,omitempty"`
+	// Days without a job before a runner's work directory is cleaned; 0 turns it off.
+	AutoCleanDays *int `yaml:"auto_clean_days,omitempty"`
 	// DockerGID is only used when job_docker_backend=host-socket: the docker group GID added when creating the Runner container (--group-add),
 	// so the in-container app (UID 1001) can access the mounted docker.sock; 0 means auto-detect the group that owns docker.sock
 	DockerGID int `yaml:"docker_gid"`
@@ -300,6 +302,20 @@ func (c *Config) ResourcesFor(runnerName string) ResourceLimits {
 		}
 	}
 	return limits
+}
+
+// DefaultAutoCleanDays is used when runners.auto_clean_days is not set.
+const DefaultAutoCleanDays = 3
+
+// MaxAutoCleanDays is the largest accepted runners.auto_clean_days.
+const MaxAutoCleanDays = 365
+
+// AutoCleanAfter returns the days without a job before a work directory is cleaned; 0 means never.
+func (c *Config) AutoCleanAfter() int {
+	if c.Runners.AutoCleanDays == nil {
+		return DefaultAutoCleanDays
+	}
+	return *c.Runners.AutoCleanDays
 }
 
 // applyDefaultResources fills in the default limits for fields nobody has set.
@@ -460,6 +476,9 @@ func Validate(c *Config) error {
 		if err := validator.ValidatePort(c.Server.Port); err != nil {
 			return fmt.Errorf("server.port must be between 1 and 65535, got %d (it may also come from MANAGER_PORT/SERVER_PORT)", c.Server.Port)
 		}
+	}
+	if d := c.AutoCleanAfter(); d < 0 || d > MaxAutoCleanDays {
+		return fmt.Errorf("runners.auto_clean_days must be between 0 and %d, got %d", MaxAutoCleanDays, d)
 	}
 	if err := c.Runners.Resources.Validate(); err != nil {
 		return err

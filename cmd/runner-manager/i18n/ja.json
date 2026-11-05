@@ -345,5 +345,8 @@
   "system.volumes_note": "ボリュームはここではクリーンアップしません。サービス停止中は未使用に見えますが、データベースが入っている場合があります。",
   "event.work_cleaned": "作業ディレクトリをクリーンアップ",
   "event.docker_cleaned": "Docker をクリーンアップ、{{detail}} 解放",
-  "event.clean_failed": "クリーンアップ失敗: {{detail}}"
+  "event.clean_failed": "クリーンアップ失敗: {{detail}}",
+  "system.limit_autoclean": "アイドルのランナーを整理（日、0: オフ）",
+  "system.autoclean_hint": "この期間ジョブがないランナーの作業ディレクトリを空にします。ツールキャッシュは残り、実行中のジョブには触れません。",
+  "event.work_auto_cleaned": "{{detail}} 日間アイドルのため作業ディレクトリを自動整理"
 }

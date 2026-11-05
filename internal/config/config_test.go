@@ -1397,3 +1397,18 @@ func TestResourcesFor_DropsGlobalSwapWhenMemoryIsOverridden(t *testing.T) {
 		t.Errorf("swap = %q would be smaller than memory", got.MemorySwap)
 	}
 }
+
+func TestAutoCleanAfter(t *testing.T) {
+	cfg := &Config{}
+	cfg.Runners.BasePath = t.TempDir()
+	if got := cfg.AutoCleanAfter(); got != DefaultAutoCleanDays {
+		t.Errorf("default = %d", got)
+	}
+	for days, ok := range map[int]bool{0: true, 7: true, MaxAutoCleanDays: true, -1: false, MaxAutoCleanDays + 1: false} {
+		d := days
+		cfg.Runners.AutoCleanDays = &d
+		if err := Validate(cfg); (err == nil) != ok {
+			t.Errorf("%d: %v", days, err)
+		}
+	}
+}

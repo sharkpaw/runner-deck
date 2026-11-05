@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -266,5 +267,86 @@ func TestRunnerLogs(t *testing.T) {
 	}
 	if _, err := call("a", ""); err == nil {
 		t.Error("process mode has no container logs")
+	}
+}
+
+func TestWatcher_AutoCleansIdleRunners(t *testing.T) {
+	var store *eventlog.Store
+	useEventStore(t)
+	useWatchConfig(t, true)
+	var calls int
+	var fail error
+	cleanFixture2 := func(_ context.Context, args ...string) ([]byte, error) {
+		calls++
+		return []byte("oops"), fail
+	}
+	orig := dockerRunCombined
+	dockerRunCombined = cleanFixture2
+	t.Cleanup(func() { dockerRunCombined = orig })
+	store = Events
+
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	w := NewWatcher(nil)
+	w.now = func() time.Time { return now }
+	st := &watchedRunner{dirtySince: now.Add(-2 * 24 * time.Hour)}
+
+	w.autoClean(context.Background(), "a", st, 3)
+	if calls != 0 {
+		t.Fatal("two idle days are not three")
+	}
+	w.autoClean(context.Background(), "a", st, 0)
+	if calls != 0 {
+		t.Fatal("0 turns it off")
+	}
+	now = now.Add(2 * 24 * time.Hour)
+
+	fail = exec.Command("sh", "-c", "exit 3").Run()
+	w.autoClean(context.Background(), "a", st, 3)
+	if calls != 1 || st.dirtySince.IsZero() {
+		t.Fatalf("a busy runner stays dirty: calls=%d %+v", calls, st)
+	}
+
+	fail = errors.New("no such container")
+	w.autoClean(context.Background(), "a", st, 3)
+	if st.dirtySince != now {
+		t.Errorf("a failure must wait for the next period: %+v", st)
+	}
+	if evs := store.Read(eventlog.Query{Level: eventlog.LevelError}); len(evs) != 1 || evs[0].Code != "clean_failed" {
+		t.Errorf("events = %+v", evs)
+	}
+
+	fail = nil
+	st.dirtySince = now.Add(-4 * 24 * time.Hour)
+	w.autoClean(context.Background(), "a", st, 3)
+	if !st.dirtySince.IsZero() {
+		t.Errorf("a clean runner must not be cleaned again: %+v", st)
+	}
+	if evs := store.Read(eventlog.Query{Limit: 1}); evs[0].Code != "work_auto_cleaned" || evs[0].Detail != "3" {
+		t.Errorf("events = %+v", evs)
+	}
+	before := calls
+	w.autoClean(context.Background(), "a", st, 3)
+	if calls != before {
+		t.Error("cleaned twice")
+	}
+}
+
+func TestWatcher_LastActivity(t *testing.T) {
+	store := useEventStore(t)
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	w := NewWatcher(nil)
+	w.now = func() time.Time { return now }
+	if got := w.lastActivity("a"); !got.Equal(now) {
+		t.Errorf("no history = %v", got)
+	}
+	at := now.Add(-time.Hour)
+	store.Append(eventlog.Event{Time: at, Runner: "a", Level: eventlog.LevelInfo, Code: "started"})
+	store.Append(eventlog.Event{Time: at, Runner: "a", Level: eventlog.LevelInfo, Code: "job_succeeded"})
+	if got := w.lastActivity("a"); !got.Equal(at) {
+		t.Errorf("after a job = %v", got)
+	}
+	store.Append(eventlog.Event{Time: now, Runner: "a", Level: eventlog.LevelInfo, Code: "work_auto_cleaned"})
+	if got := w.lastActivity("a"); !got.IsZero() {
+		t.Errorf("after a clean = %v", got)
 	}
 }

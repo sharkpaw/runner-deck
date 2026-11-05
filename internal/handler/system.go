@@ -83,6 +83,8 @@ type SystemOthers struct {
 type SystemLimits struct {
 	CPUs   string `json:"cpus"`
 	Memory string `json:"memory"`
+	// Nil in a request leaves the value as it is.
+	AutoCleanDays *int `json:"auto_clean_days,omitempty"`
 }
 
 // cgroupStats says whether a runner has hit its limits since its container started.
@@ -385,12 +387,17 @@ func buildSystemRunners(cfg *config.Config, list []runner.RunnerInfo, stats []co
 	return runners, others
 }
 
+func systemLimitsOf(cfg *config.Config) SystemLimits {
+	days := cfg.AutoCleanAfter()
+	return SystemLimits{CPUs: cfg.Runners.Resources.CPUs, Memory: cfg.Runners.Resources.Memory, AutoCleanDays: &days}
+}
+
 func collectSystem(cfg *config.Config, list []runner.RunnerInfo) SystemResponse {
 	resp := SystemResponse{
 		ContainerMode: cfg.Runners.ContainerMode,
 		HostCPUs:      runtime.NumCPU(),
 		Disk:          diskUsage(cfg.Runners.BasePath),
-		Limits:        SystemLimits{CPUs: cfg.Runners.Resources.CPUs, Memory: cfg.Runners.Resources.Memory},
+		Limits:        systemLimitsOf(cfg),
 	}
 
 	dirs := make(map[string]string, len(list))
@@ -484,7 +491,13 @@ func UpdateResourceLimits(c echo.Context) error {
 	if err := (config.ResourceLimits{CPUs: req.CPUs, Memory: req.Memory}).Validate(); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if d := req.AutoCleanDays; d != nil && (*d < 0 || *d > config.MaxAutoCleanDays) {
+		return echo.NewHTTPError(http.StatusBadRequest, trf(c, "api.bad_request", *d))
+	}
 	if err := config.LoadAndSave(ConfigPath, func(cfg *config.Config) error {
+		if req.AutoCleanDays != nil {
+			cfg.Runners.AutoCleanDays = req.AutoCleanDays
+		}
 		cfg.Runners.Resources.CPUs = req.CPUs
 		cfg.Runners.Resources.Memory = req.Memory
 		// A swap total below the new memory would make docker refuse every container.

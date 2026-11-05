@@ -363,6 +363,18 @@ func TestUpdateResourceLimits(t *testing.T) {
 	if cfg.Runners.Resources.CPUs != "2" || cfg.Runners.Resources.Memory != "4g" {
 		t.Fatalf("%+v", cfg.Runners.Resources)
 	}
+	if cfg.AutoCleanAfter() != config.DefaultAutoCleanDays {
+		t.Errorf("a request without the field must keep the value: %d", cfg.AutoCleanAfter())
+	}
+	if code, err := put(`{"cpus":"2","memory":"4g","auto_clean_days":0}`); err != nil || code != http.StatusOK {
+		t.Fatalf("code=%d err=%v", code, err)
+	}
+	if cfg, err = config.Load(path); err != nil || cfg.AutoCleanAfter() != 0 {
+		t.Errorf("days=%d err=%v", cfg.AutoCleanAfter(), err)
+	}
+	if _, err := put(`{"cpus":"2","memory":"4g","auto_clean_days":-1}`); err == nil {
+		t.Error("negative days accepted")
+	}
 }
 
 func TestUpdateResourceLimits_ReportsContainersItCouldNotUpdate(t *testing.T) {

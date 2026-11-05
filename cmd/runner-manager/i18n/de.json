@@ -345,5 +345,8 @@
   "system.volumes_note": "Volumes werden hier nie bereinigt: Ein Volume wirkt unbenutzt, wenn sein Dienst gestoppt ist, kann aber eine Datenbank enthalten.",
   "event.work_cleaned": "Arbeitsverzeichnis bereinigt",
   "event.docker_cleaned": "Docker bereinigt, {{detail}} frei",
-  "event.clean_failed": "Bereinigung fehlgeschlagen: {{detail}}"
+  "event.clean_failed": "Bereinigung fehlgeschlagen: {{detail}}",
+  "system.limit_autoclean": "Inaktive Runner bereinigen nach (Tage, 0: aus)",
+  "system.autoclean_hint": "Leert das Arbeitsverzeichnis, wenn ein Runner so lange keinen Job hatte. Der Tool-Cache bleibt, laufende Jobs bleiben unberührt.",
+  "event.work_auto_cleaned": "Arbeitsverzeichnis nach {{detail}} inaktiven Tagen automatisch bereinigt"
 }

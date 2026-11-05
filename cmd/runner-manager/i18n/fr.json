@@ -345,5 +345,8 @@
   "system.volumes_note": "Les volumes ne sont jamais nettoyés ici : un volume semble inutilisé quand son service est arrêté, et peut contenir une base de données.",
   "event.work_cleaned": "Répertoire de travail nettoyé",
   "event.docker_cleaned": "Docker nettoyé, {{detail}} libérés",
-  "event.clean_failed": "Échec du nettoyage : {{detail}}"
+  "event.clean_failed": "Échec du nettoyage : {{detail}}",
+  "system.limit_autoclean": "Nettoyer les runners inactifs après (jours, 0 : non)",
+  "system.autoclean_hint": "Vide le répertoire de travail d'un runner sans job pendant cette durée. Le cache d'outils reste et un job en cours n'est jamais touché.",
+  "event.work_auto_cleaned": "Répertoire de travail nettoyé automatiquement après {{detail}} jours d'inactivité"
 }

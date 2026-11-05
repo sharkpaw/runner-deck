@@ -149,6 +149,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | `runners.items[].container_image` | Runner별 이미지 재정의(컨테이너 모드), 비우면 전역값 | 비움 |
 | `runners.items[].job_docker_backend` | Runner별 Docker 백엔드 재정의(컨테이너 모드), 비우면 전역값 | 비움 |
 | `runners.resources` | Runner 컨테이너 리소스 상한(`cpus` / `memory` / `memory_swap` / `pids_limit`), `docker create`로 전달하며 시작 시 `docker update`로 기존 컨테이너에도 적용 | 비움(무제한) |
+| `runners.auto_clean_days` | 작업이 없는 기간(일)이 지나면 러너의 작업 디렉터리를 정리합니다. `0`은 끔. 시스템 리소스에서 변경 가능 | `3` |
 
 위 표에서 컨테이너 배포가 바꿔야 하는 필드는 모두 환경 변수로도 줄 수 있어, 전체 컨테이너 구성은 `.env`만 건드리면 됩니다 — 아래 [환경 변수](#환경-변수) 참조.
 
