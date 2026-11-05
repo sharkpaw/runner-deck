@@ -10,6 +10,9 @@ Closing the window leaves the app in the menu bar with the runners working. The 
 and memory, counted over the Manager, its runners and their jobs, plus the disk `~/.runner-deck` takes.
 Its menu stops and starts the runners, opens the app at login, and quits, which asks first.
 
+Opening a server signs in with OAuth in your browser the first time. The session then stays for 180
+days after its last use, shows up on the server's Sessions page, and ends when you remove the server.
+
 ## Build
 
 Needs Go, Rust and Bun.

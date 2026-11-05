@@ -10,6 +10,9 @@ pub struct Server {
     pub id: String,
     pub name: String,
     pub url: String,
+    /// Kept in desktop.json, which only this user can read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -128,10 +131,18 @@ impl Store {
             id: random_hex(8)?,
             name: if name.is_empty() { url.clone() } else { name.to_string() },
             url,
+            refresh_token: None,
         };
         self.servers.push(server.clone());
         self.save()?;
         Ok(server)
+    }
+
+    pub fn set_refresh_token(&mut self, id: &str, token: Option<String>) -> Result<(), String> {
+        if let Some(server) = self.servers.iter_mut().find(|s| s.id == id) {
+            server.refresh_token = token;
+        }
+        self.save()
     }
 
     pub fn remove_server(&mut self, id: &str) -> Result<(), String> {

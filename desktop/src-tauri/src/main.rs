@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod manager;
+mod oauth;
 mod store;
 mod tray;
 mod usage;
@@ -22,9 +23,18 @@ pub struct AppState {
     quitting: AtomicBool,
 }
 
+// What the connections page sees of a server, which never includes its token.
+#[derive(serde::Serialize)]
+struct ServerView {
+    id: String,
+    name: String,
+    url: String,
+    signed_in: bool,
+}
+
 #[derive(serde::Serialize)]
 struct Connections {
-    servers: Vec<Server>,
+    servers: Vec<ServerView>,
     last: String,
     first_load: bool,
 }
@@ -42,7 +52,11 @@ fn connections_url() -> Url {
 fn connections(state: tauri::State<AppState>) -> Connections {
     let store = state.store.lock().unwrap();
     Connections {
-        servers: store.servers.clone(),
+        servers: store
+            .servers
+            .iter()
+            .map(|s| ServerView { id: s.id.clone(), name: s.name.clone(), url: s.url.clone(), signed_in: s.refresh_token.is_some() })
+            .collect(),
         last: store.last.clone(),
         first_load: !state.booted.swap(true, Ordering::SeqCst),
     }
@@ -60,22 +74,42 @@ fn open_local(app: AppHandle, state: tauri::State<AppState>) -> Result<(), Strin
     main_window(&app)?.navigate(url).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+// Can wait minutes for the person to sign in, so it runs off the main thread.
+#[tauri::command(async)]
 fn open_server(app: AppHandle, state: tauri::State<AppState>, id: String) -> Result<(), String> {
-    let url = state.store.lock().unwrap().servers.iter().find(|s| s.id == id).map(|s| s.url.clone());
-    let url = url.ok_or_else(|| "unknown server".to_string())?;
+    let (url, saved) = {
+        let store = state.store.lock().unwrap();
+        let server = store.servers.iter().find(|s| s.id == id).ok_or_else(|| "unknown server".to_string())?;
+        (server.url.clone(), server.refresh_token.clone())
+    };
+    let done = if is_turkish() {
+        "Giriş tamamlandı, Runner Deck'e dönebilirsin."
+    } else {
+        "Signed in. You can go back to Runner Deck."
+    };
+    let opened = oauth::open(&url, saved.as_deref(), &open_external, done)?;
+    state.store.lock().unwrap().set_refresh_token(&id, opened.refresh_token)?;
     remember(&state, &id);
-    main_window(&app)?.navigate(Url::parse(&url).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    show_main(&app);
+    main_window(&app)?.navigate(Url::parse(&opened.url).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn add_server(state: tauri::State<AppState>, name: String, url: String) -> Result<Server, String> {
-    state.store.lock().unwrap().add_server(&name, &url)
+fn add_server(state: tauri::State<AppState>, name: String, url: String) -> Result<String, String> {
+    state.store.lock().unwrap().add_server(&name, &url).map(|server: Server| server.id)
 }
 
 #[tauri::command]
 fn remove_server(state: tauri::State<AppState>, id: String) -> Result<(), String> {
-    state.store.lock().unwrap().remove_server(&id)
+    let mut store = state.store.lock().unwrap();
+    // Forgetting a server also signs out of it, so no live session is left behind.
+    if let Some(server) = store.servers.iter().find(|s| s.id == id) {
+        if let Some(token) = server.refresh_token.clone() {
+            let url = server.url.clone();
+            std::thread::spawn(move || oauth::revoke(&url, &token));
+        }
+    }
+    store.remove_server(&id)
 }
 
 fn remember(state: &AppState, id: &str) {
