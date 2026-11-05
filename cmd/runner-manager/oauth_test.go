@@ -493,3 +493,108 @@ func TestBufferWriter_ImplicitStatus(t *testing.T) {
 		t.Errorf("status %d", apiStatus)
 	}
 }
+
+// signInClient registers a client and signs it in with the given access choice.
+func signInClient(t *testing.T, h http.Handler, cookie *http.Cookie, scope, access string) tokenResponse {
+	t.Helper()
+	redirect := "https://client.example/cb"
+	rec := send(h, http.MethodPost, "/oauth/register", `{"client_name":"Agent","redirect_uris":["`+redirect+`"]}`, map[string]string{"Content-Type": "application/json"})
+	var client struct {
+		ID string `json:"client_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &client); err != nil {
+		t.Fatal(err)
+	}
+	values := authorizeValues(client.ID, redirect)
+	values.Set("scope", scope)
+	values.Set("access", access)
+	values.Set("decision", "approve")
+	loc, _ := url.Parse(form(h, "/oauth/authorize", values, cookie).Header().Get("Location"))
+	rec = form(h, "/oauth/token", url.Values{
+		"grant_type": {"authorization_code"}, "code": {loc.Query().Get("code")}, "code_verifier": {testVerifier},
+		"client_id": {client.ID}, "redirect_uri": {redirect},
+	})
+	var tok tokenResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &tok); err != nil || tok.Access == "" {
+		t.Fatalf("%s", rec.Body)
+	}
+	return tok
+}
+
+func TestConsent_OffersTheChoiceWhenThereIsOne(t *testing.T) {
+	h := oauthServer(t)
+	cookie := signedInCookie(t, h)
+	rec := send(h, http.MethodPost, "/oauth/register", `{"client_name":"Agent","redirect_uris":["https://client.example/cb"]}`, map[string]string{"Content-Type": "application/json"})
+	var client struct {
+		ID string `json:"client_id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &client)
+	page := func(clientID, redirect, scope string) string {
+		values := authorizeValues(clientID, redirect)
+		values.Set("scope", scope)
+		return send(h, http.MethodGet, "/oauth/authorize?"+values.Encode(), "", nil, cookie).Body.String()
+	}
+	both := page(client.ID, "https://client.example/cb", "runners:read runners:write")
+	if !strings.Contains(both, `value="runners:write"`) || !strings.Contains(both, `value="runners:read" checked`) {
+		t.Error("the choice must be offered, starting on read only")
+	}
+	if strings.Contains(page(client.ID, "https://client.example/cb", "runners:read"), `name="access"`) {
+		t.Error("a client asking only to read has nothing to choose")
+	}
+	if strings.Contains(page(auth.DesktopClientID, "http://127.0.0.1:5000/callback", ""), `name="access"`) {
+		t.Error("the desktop app needs the whole panel")
+	}
+}
+
+func TestReadOnlyToken_CanLookButNotTouch(t *testing.T) {
+	useTestConfig(t)
+	h := oauthServer(t)
+	useTestConfig(t)
+	tok := signInClient(t, h, signedInCookie(t, h), "", "runners:read")
+	if rec := send(h, http.MethodGet, "/api/runners", "", bearer(tok.Access)); rec.Code != http.StatusOK {
+		t.Errorf("read: %d", rec.Code)
+	}
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/api/runners"},
+		{http.MethodPost, "/api/runners/a/stop"},
+		{http.MethodDelete, "/api/runners/a"},
+		{http.MethodPut, "/api/settings/resources"},
+		{http.MethodPost, "/api/docker/clean"},
+		{http.MethodGet, "/api/sessions"},
+		{http.MethodDelete, "/api/sessions/x"},
+		{http.MethodPost, "/oauth/ticket"},
+	} {
+		rec := send(h, c.method, c.path, "", bearer(tok.Access))
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Header().Get("WWW-Authenticate"), "insufficient_scope") {
+			t.Errorf("%s %s: %d", c.method, c.path, rec.Code)
+		}
+	}
+	list := mcpCall(h, tok.Access, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`).Body.String()
+	if strings.Contains(list, "stop_runner") || !strings.Contains(list, "list_runners") {
+		t.Errorf("tools: %s", list)
+	}
+	call := mcpCall(h, tok.Access, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"remove_runner","arguments":{"name":"a"}}}`).Body.String()
+	if !strings.Contains(call, `"isError":true`) || !strings.Contains(call, "read-only") {
+		t.Errorf("call: %s", call)
+	}
+}
+
+func TestGrant_FormCannotWidenWhatWasAskedFor(t *testing.T) {
+	useTestConfig(t)
+	h := oauthServer(t)
+	useTestConfig(t)
+	cookie := signedInCookie(t, h)
+	tok := signInClient(t, h, cookie, "runners:read", "runners:write")
+	if rec := send(h, http.MethodPost, "/api/runners/a/stop", "", bearer(tok.Access)); rec.Code != http.StatusForbidden {
+		t.Errorf("asked to read, got to write: %d", rec.Code)
+	}
+	full := signInClient(t, h, cookie, "", "runners:write")
+	list := mcpCall(h, full.Access, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`).Body.String()
+	if !strings.Contains(list, "stop_runner") {
+		t.Errorf("full access: %s", list)
+	}
+	rec := send(h, http.MethodGet, "/api/sessions", "", nil, cookie)
+	if !strings.Contains(rec.Body.String(), `"scope":"runners:read"`) || !strings.Contains(rec.Body.String(), `"scope":"runners:write"`) {
+		t.Errorf("sessions: %s", rec.Body)
+	}
+}

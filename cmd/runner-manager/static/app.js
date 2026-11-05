@@ -1512,7 +1512,7 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
       device.appendChild(mark);
     }
     tr.appendChild(device);
-    [s.ip || '-', new Date(s.last_used_at).toLocaleString(lang), new Date(s.expires_at).toLocaleDateString(lang)].forEach(function (text) {
+    [t(s.scope === 'runners:read' ? 'consent.read' : 'consent.write'), s.ip || '-', new Date(s.last_used_at).toLocaleString(lang), new Date(s.expires_at).toLocaleDateString(lang)].forEach(function (text) {
       var td = document.createElement('td');
       td.textContent = text;
       tr.appendChild(td);

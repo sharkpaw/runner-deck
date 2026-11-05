@@ -369,9 +369,14 @@
   "api.session_not_found": "이 세션은 더 이상 없습니다",
   "consent.page_title": "액세스 허용 - Runner Deck",
   "consent.title": "액세스를 허용할까요?",
-  "consent.body": "이 Manager의 러너를 보고, 추가하고, 시작·중지하고, 제거할 수 있습니다.",
   "consent.redirect": "로그인 후 돌아갈 곳:",
   "consent.approve": "허용",
   "consent.deny": "거부",
-  "consent.invalid": "이 로그인 요청은 유효하지 않습니다."
+  "consent.invalid": "이 로그인 요청은 유효하지 않습니다.",
+  "consent.access": "액세스",
+  "consent.read": "읽기 전용",
+  "consent.read_hint": "러너, 로그, 기록, 리소스 사용량을 볼 수 있지만 아무것도 변경할 수 없습니다.",
+  "consent.write": "전체 액세스",
+  "consent.write_hint": "러너를 추가, 시작, 중지, 제거할 수도 있으며, 이 경우 실행 중인 작업이 취소됩니다.",
+  "sessions.col_access": "액세스"
 }

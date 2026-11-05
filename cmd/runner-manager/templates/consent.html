@@ -21,7 +21,7 @@
     <img src="/static/logo.svg" alt="" width="48" height="48">
     <h1>{{index .T "consent.title"}}</h1>
     <p class="consent-client">{{.ClientName}}</p>
-    <p>{{index .T "consent.body"}}</p>
+    {{if .FullAccessOnly}}<p>{{index .T "consent.write_hint"}}</p>{{else if not .CanChoose}}<p>{{index .T "consent.read_hint"}}</p>{{end}}
     <p class="consent-target">{{index .T "consent.redirect"}} <code>{{.RedirectHost}}</code></p>
     <form method="post" action="/oauth/authorize">
       <input type="hidden" name="client_id" value="{{.Request.ClientID}}">
@@ -30,6 +30,14 @@
       <input type="hidden" name="code_challenge" value="{{.Request.Challenge}}">
       <input type="hidden" name="code_challenge_method" value="{{.Request.Method}}">
       <input type="hidden" name="state" value="{{.Request.State}}">
+      <input type="hidden" name="scope" value="{{.Request.Scope}}">
+      {{if .CanChoose}}
+      <fieldset class="consent-access">
+        <legend>{{index .T "consent.access"}}</legend>
+        <label><input type="radio" name="access" value="runners:read" checked><span><b>{{index .T "consent.read"}}</b>{{index .T "consent.read_hint"}}</span></label>
+        <label><input type="radio" name="access" value="runners:write"><span><b>{{index .T "consent.write"}}</b>{{index .T "consent.write_hint"}}</span></label>
+      </fieldset>
+      {{end}}
       <div class="consent-actions">
         <button type="submit" name="decision" value="deny" class="btn-secondary">{{index .T "consent.deny"}}</button>
         <button type="submit" name="decision" value="approve">{{index .T "consent.approve"}}</button>

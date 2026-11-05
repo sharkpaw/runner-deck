@@ -37,7 +37,7 @@ func newStore(t *testing.T) (*Store, *clock) {
 
 func signIn(t *testing.T, s *Store) Tokens {
 	t.Helper()
-	code, err := s.NewCode(DesktopClientID, "http://127.0.0.1:5000/callback", challenge(verifier))
+	code, err := s.NewCode(DesktopClientID, "http://127.0.0.1:5000/callback", challenge(verifier), ScopeWrite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,21 +51,21 @@ func signIn(t *testing.T, s *Store) Tokens {
 func TestExchange_RequiresTheRightVerifierAndIsSingleUse(t *testing.T) {
 	s, _ := newStore(t)
 	redirect := "http://127.0.0.1:5000/callback"
-	code, _ := s.NewCode(DesktopClientID, redirect, challenge(verifier))
+	code, _ := s.NewCode(DesktopClientID, redirect, challenge(verifier), ScopeWrite)
 	if _, err := s.ExchangeCode(code, "wrong", DesktopClientID, redirect, Meta{}); !errors.Is(err, ErrInvalidGrant) {
 		t.Fatalf("wrong verifier: %v", err)
 	}
 	if _, err := s.ExchangeCode(code, verifier, DesktopClientID, redirect, Meta{}); !errors.Is(err, ErrInvalidGrant) {
 		t.Fatalf("a failed attempt must spend the code: %v", err)
 	}
-	code, _ = s.NewCode(DesktopClientID, redirect, challenge(verifier))
+	code, _ = s.NewCode(DesktopClientID, redirect, challenge(verifier), ScopeWrite)
 	if _, err := s.ExchangeCode(code, verifier, DesktopClientID, "http://127.0.0.1:6000/callback", Meta{}); !errors.Is(err, ErrInvalidGrant) {
 		t.Fatalf("another redirect: %v", err)
 	}
 	if _, err := s.ExchangeCode("x", verifier, "nobody", redirect, Meta{}); !errors.Is(err, ErrInvalidClient) {
 		t.Fatalf("unknown client: %v", err)
 	}
-	if _, err := s.NewCode(DesktopClientID, redirect, "short"); err == nil {
+	if _, err := s.NewCode(DesktopClientID, redirect, "short", ScopeWrite); err == nil {
 		t.Fatal("a code needs PKCE")
 	}
 }
@@ -73,7 +73,7 @@ func TestExchange_RequiresTheRightVerifierAndIsSingleUse(t *testing.T) {
 func TestExchange_ExpiredCode(t *testing.T) {
 	s, c := newStore(t)
 	redirect := "http://127.0.0.1:5000/callback"
-	code, _ := s.NewCode(DesktopClientID, redirect, challenge(verifier))
+	code, _ := s.NewCode(DesktopClientID, redirect, challenge(verifier), ScopeWrite)
 	c.t = c.t.Add(codeTTL)
 	if _, err := s.ExchangeCode(code, verifier, DesktopClientID, redirect, Meta{}); !errors.Is(err, ErrInvalidGrant) {
 		t.Fatal(err)
@@ -367,7 +367,7 @@ func TestWrites_ReportAStoreThatCannotBeSaved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, _ := s.NewCode(DesktopClientID, "http://127.0.0.1:1/callback", challenge(verifier))
+	code, _ := s.NewCode(DesktopClientID, "http://127.0.0.1:1/callback", challenge(verifier), ScopeWrite)
 	s.path = filepath.Join(path, "not-a-directory", "auth.json")
 	if _, err := s.StartBrowserSession(Meta{}); err == nil {
 		t.Error("browser session")
@@ -383,10 +383,10 @@ func TestWrites_ReportAStoreThatCannotBeSaved(t *testing.T) {
 func TestExpiredCodesAndTicketsAreForgotten(t *testing.T) {
 	s, c := newStore(t)
 	tok := signIn(t, s)
-	_, _ = s.NewCode(DesktopClientID, "http://127.0.0.1:1/callback", challenge(verifier))
+	_, _ = s.NewCode(DesktopClientID, "http://127.0.0.1:1/callback", challenge(verifier), ScopeWrite)
 	_, _ = s.NewTicket(tok.SessionID)
 	c.t = c.t.Add(time.Hour)
-	_, _ = s.NewCode(DesktopClientID, "http://127.0.0.1:1/callback", challenge(verifier))
+	_, _ = s.NewCode(DesktopClientID, "http://127.0.0.1:1/callback", challenge(verifier), ScopeWrite)
 	_, _ = s.NewTicket(tok.SessionID)
 	if len(s.codes) != 1 || len(s.tickets) != 1 {
 		t.Fatalf("codes %d, tickets %d", len(s.codes), len(s.tickets))
@@ -427,5 +427,51 @@ func TestRedirectAllowed_BadURL(t *testing.T) {
 	c := Client{RedirectURIs: []string{"https://a/cb", "http://[bad"}}
 	if c.RedirectAllowed("http://[bad:1/") || c.RedirectAllowed("https://b/cb") {
 		t.Error("accepted")
+	}
+}
+
+func TestScope_NeverMoreThanAsked(t *testing.T) {
+	for raw, want := range map[string]string{
+		"": ScopeWrite, ScopeRead: ScopeRead, ScopeWrite: ScopeWrite,
+		ScopeRead + " " + ScopeWrite: ScopeWrite, "something else": ScopeRead,
+	} {
+		if got := RequestedScope(raw); got != want {
+			t.Errorf("%q: %s", raw, got)
+		}
+	}
+	for _, c := range []struct{ requested, chosen, want string }{
+		{ScopeWrite, ScopeWrite, ScopeWrite},
+		{ScopeWrite, ScopeRead, ScopeRead},
+		{ScopeRead, ScopeWrite, ScopeRead},
+		{ScopeWrite, "", ScopeRead},
+	} {
+		if got := GrantedScope(c.requested, c.chosen); got != c.want {
+			t.Errorf("%+v: %s", c, got)
+		}
+	}
+}
+
+func TestScope_LastsThroughRefresh(t *testing.T) {
+	s, _ := newStore(t)
+	redirect := "http://127.0.0.1:1/callback"
+	code, _ := s.NewCode(DesktopClientID, redirect, challenge(verifier), ScopeRead)
+	tok, err := s.ExchangeCode(code, verifier, DesktopClientID, redirect, Meta{})
+	if err != nil || tok.Scope != ScopeRead {
+		t.Fatalf("%+v %v", tok, err)
+	}
+	v, err := s.VerifyAccess(tok.Access)
+	if err != nil || v.CanWrite() {
+		t.Fatalf("%+v %v", v, err)
+	}
+	next, err := s.Refresh(tok.Refresh, DesktopClientID, Meta{})
+	if err != nil || next.Scope != ScopeRead {
+		t.Fatalf("%+v %v", next, err)
+	}
+	if v, _ := s.VerifyAccess(next.Access); v.CanWrite() {
+		t.Error("a refresh must not widen the grant")
+	}
+	cookie, _ := s.StartBrowserSession(Meta{})
+	if v, _ := s.VerifyCookie(cookie); !v.CanWrite() {
+		t.Error("a password sign-in has full access")
 	}
 }

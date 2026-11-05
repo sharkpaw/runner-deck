@@ -23,7 +23,7 @@ func newServer(status int, out string, err error) (*Server, *call) {
 
 func rpc(t *testing.T, s *Server, body string) map[string]any {
 	t.Helper()
-	resp := s.Handle(context.Background(), []byte(body))
+	resp := s.Handle(context.Background(), []byte(body), true)
 	if resp == nil {
 		t.Fatal("no response")
 	}
@@ -71,7 +71,7 @@ func TestHandle_ProtocolErrors(t *testing.T) {
 			t.Errorf("%s: code %v", body, got)
 		}
 	}
-	if s.Handle(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)) != nil {
+	if s.Handle(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`), true) != nil {
 		t.Error("a notification gets no reply")
 	}
 	if rpc(t, s, `{"jsonrpc":"2.0","id":"a","method":"ping"}`)["id"] != "a" {
@@ -150,5 +150,36 @@ func first(s *Server, _ *call) *Server { return s }
 func TestArgString(t *testing.T) {
 	if argString(true) != "true" || argString(1.5) != "1.5" || argString("x") != "x" {
 		t.Error("argString")
+	}
+}
+
+func TestReadOnly_HidesAndRefusesWrites(t *testing.T) {
+	s, got := newServer(200, `{}`, nil)
+	reply := func(body string) map[string]any {
+		raw, _ := json.Marshal(s.Handle(context.Background(), []byte(body), false))
+		var out map[string]any
+		_ = json.Unmarshal(raw, &out)
+		return out["result"].(map[string]any)
+	}
+	for _, item := range reply(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)["tools"].([]any) {
+		tool := item.(map[string]any)
+		if tool["annotations"].(map[string]any)["readOnlyHint"] != true {
+			t.Errorf("%v listed", tool["name"])
+		}
+	}
+	res := reply(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stop_runner","arguments":{"name":"a"}}}`)
+	if res["isError"] != true || got.method != "" {
+		t.Fatalf("a write ran: %v %+v", res, *got)
+	}
+	if res = reply(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_runners"}}`); res["isError"] != false {
+		t.Fatalf("a read was refused: %v", res)
+	}
+}
+
+func TestEveryWriteToolIsMarked(t *testing.T) {
+	for _, tl := range tools {
+		if tl.ReadOnly != (tl.Method == http.MethodGet) {
+			t.Errorf("%s: read only %v, method %s", tl.Name, tl.ReadOnly, tl.Method)
+		}
 	}
 }

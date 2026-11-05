@@ -54,7 +54,7 @@ Two copy-and-go deployments live in [`examples/deploy/`](examples/deploy/): `sta
 
 ## MCP
 
-Add `https://your-manager/mcp` to Claude or another MCP client. It signs in with OAuth, and you can see and end it on the Sessions page.
+Add `https://your-manager/mcp` to Claude or another MCP client. It signs in with OAuth, where you choose read-only or full access, and you can see and end it on the Sessions page.
 
 ## Desktop app
 

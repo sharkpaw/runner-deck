@@ -369,9 +369,14 @@
   "api.session_not_found": "Diese Sitzung existiert nicht mehr",
   "consent.page_title": "Zugriff erlauben - Runner Deck",
   "consent.title": "Zugriff erlauben?",
-  "consent.body": "Er kann Runner auf diesem Manager sehen, hinzufügen, starten, stoppen und entfernen.",
   "consent.redirect": "Die Anmeldung kehrt zurück zu:",
   "consent.approve": "Erlauben",
   "consent.deny": "Ablehnen",
-  "consent.invalid": "Diese Anmeldeanfrage ist ungültig."
+  "consent.invalid": "Diese Anmeldeanfrage ist ungültig.",
+  "consent.access": "Zugriff",
+  "consent.read": "Nur lesen",
+  "consent.read_hint": "Er kann Runner, Logs, Verlauf und Ressourcen sehen, aber nichts ändern.",
+  "consent.write": "Vollzugriff",
+  "consent.write_hint": "Er kann auch Runner hinzufügen, starten, stoppen und entfernen, was laufende Jobs abbricht.",
+  "sessions.col_access": "Zugriff"
 }

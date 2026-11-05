@@ -45,7 +45,7 @@ Başka bir ortama kurulum için [Kullanım Kılavuzu](docs/guide.md) ve [örnekl
 
 ## MCP
 
-`https://yöneticin/mcp` adresini Claude veya başka bir MCP istemcisine ekle. OAuth ile giriş yapar; Oturumlar sayfasından görüp sonlandırabilirsin.
+`https://yöneticin/mcp` adresini Claude veya başka bir MCP istemcisine ekle. OAuth ile giriş yaparken salt okunur veya tam erişimi seçersin; Oturumlar sayfasından görüp sonlandırabilirsin.
 
 ## Masaüstü uygulaması
 

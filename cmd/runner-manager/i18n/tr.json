@@ -369,9 +369,14 @@
   "api.session_not_found": "Bu oturum artık yok",
   "consent.page_title": "Erişime izin ver - Runner Deck",
   "consent.title": "Erişime izin verilsin mi?",
-  "consent.body": "Bu yöneticideki runner'ları görebilir, ekleyebilir, başlatıp durdurabilir ve silebilir.",
   "consent.redirect": "Giriş şuraya dönecek:",
   "consent.approve": "İzin ver",
   "consent.deny": "Reddet",
-  "consent.invalid": "Bu giriş isteği geçerli değil."
+  "consent.invalid": "Bu giriş isteği geçerli değil.",
+  "consent.access": "Erişim",
+  "consent.read": "Salt okunur",
+  "consent.read_hint": "Runner'ları, logları, geçmişi ve kaynak kullanımını görebilir, hiçbir şeyi değiştiremez.",
+  "consent.write": "Tam erişim",
+  "consent.write_hint": "Ayrıca runner ekleyebilir, başlatıp durdurabilir ve silebilir; bu, süren işleri iptal eder.",
+  "sessions.col_access": "Erişim"
 }

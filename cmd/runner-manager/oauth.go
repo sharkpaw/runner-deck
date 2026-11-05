@@ -23,7 +23,6 @@ import (
 
 const (
 	authFileName = "auth.json"
-	oauthScope   = "runners"
 	sessionIDKey = "session_id"
 )
 
@@ -114,6 +113,20 @@ func unauthorizedBearer(c echo.Context) error {
 	return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
 }
 
+func insufficientScope(c echo.Context) error {
+	c.Response().Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="insufficient_scope", scope="%s"`, auth.ScopeWrite))
+	return c.JSON(http.StatusForbidden, map[string]string{"error": "insufficient_scope"})
+}
+
+// bearerAllows decides what a token may do on the API. Reading the sessions list shows where the
+// owner signs in from, so it takes full access too.
+func bearerAllows(v auth.Verified, r *http.Request) bool {
+	if v.CanWrite() {
+		return true
+	}
+	return safeMethods[r.Method] && !strings.HasPrefix(r.URL.Path, "/api/sessions")
+}
+
 // cookieSession returns the session behind a valid cookie, renewing an old cookie along the way.
 func cookieSession(c echo.Context) (string, bool) {
 	ck, err := c.Cookie(sessionCookie)
@@ -151,7 +164,7 @@ func authServerMetadata(c echo.Context) error {
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": []string{"none"},
-		"scopes_supported":                      []string{oauthScope},
+		"scopes_supported":                      []string{auth.ScopeRead, auth.ScopeWrite},
 	})
 }
 
@@ -163,7 +176,7 @@ func protectedResourceMetadata(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"resource":                 base + "/mcp",
 		"authorization_servers":    []string{base},
-		"scopes_supported":         []string{oauthScope},
+		"scopes_supported":         []string{auth.ScopeRead, auth.ScopeWrite},
 		"bearer_methods_supported": []string{"header"},
 	})
 }
@@ -205,7 +218,7 @@ func oauthRegister(c echo.Context) error {
 
 // authorizeRequest is what /oauth/authorize receives, by query or by the consent form.
 type authorizeRequest struct {
-	ClientID, RedirectURI, ResponseType, Challenge, Method, State string
+	ClientID, RedirectURI, ResponseType, Challenge, Method, State, Scope string
 }
 
 func readAuthorize(c echo.Context) authorizeRequest {
@@ -216,6 +229,7 @@ func readAuthorize(c echo.Context) authorizeRequest {
 		Challenge:    c.FormValue("code_challenge"),
 		Method:       c.FormValue("code_challenge_method"),
 		State:        c.FormValue("state"),
+		Scope:        c.FormValue("scope"),
 	}
 }
 
@@ -267,6 +281,10 @@ func oauthAuthorizePage(c echo.Context) error {
 	data["ClientName"] = client.Name
 	data["RedirectHost"] = redirectLabel(a.RedirectURI)
 	data["Request"] = a
+	// The desktop app shows the whole panel, so it has no use for less. A client asking only to read
+	// has nothing to choose. Anything else starts on the narrower choice.
+	data["FullAccessOnly"] = a.ClientID == auth.DesktopClientID
+	data["CanChoose"] = a.ClientID != auth.DesktopClientID && auth.RequestedScope(a.Scope) == auth.ScopeWrite
 	return c.Render(http.StatusOK, "consent.html", data)
 }
 
@@ -293,7 +311,11 @@ func oauthAuthorizeSubmit(c echo.Context) error {
 	if c.FormValue("decision") != "approve" {
 		return a.redirect(c, url.Values{"error": {"access_denied"}})
 	}
-	code, err := authStore.NewCode(a.ClientID, a.RedirectURI, a.Challenge)
+	scope := auth.GrantedScope(auth.RequestedScope(a.Scope), c.FormValue("access"))
+	if a.ClientID == auth.DesktopClientID {
+		scope = auth.ScopeWrite
+	}
+	code, err := authStore.NewCode(a.ClientID, a.RedirectURI, a.Challenge, scope)
 	if err != nil {
 		return a.redirect(c, url.Values{"error": {"invalid_request"}, "error_description": {"PKCE with S256 is required"}})
 	}
@@ -334,7 +356,7 @@ func oauthToken(c echo.Context) error {
 		"token_type":    "Bearer",
 		"expires_in":    tokens.ExpiresIn,
 		"refresh_token": tokens.Refresh,
-		"scope":         oauthScope,
+		"scope":         tokens.Scope,
 	})
 }
 
@@ -356,6 +378,10 @@ func oauthTicket(c echo.Context) error {
 	v, err := authStore.VerifyAccess(bearerToken(c.Request()))
 	if err != nil {
 		return unauthorizedBearer(c)
+	}
+	// A ticket opens the whole panel, so a read-only token must not get one.
+	if !v.CanWrite() {
+		return insufficientScope(c)
 	}
 	ticket, _ := authStore.NewTicket(v.SessionID)
 	c.Response().Header().Set("Cache-Control", "no-store")
@@ -439,10 +465,13 @@ func apiCaller(e *echo.Echo) mcp.Caller {
 func mcpHandler(e *echo.Echo) echo.HandlerFunc {
 	server := &mcp.Server{Name: "runner-deck", Version: handler.Version, Call: apiCaller(e)}
 	return func(c echo.Context) error {
+		canWrite := true
 		if authEnabled() {
-			if _, err := authStore.VerifyAccess(bearerToken(c.Request())); err != nil {
+			v, err := authStore.VerifyAccess(bearerToken(c.Request()))
+			if err != nil {
 				return unauthorizedBearer(c)
 			}
+			canWrite = v.CanWrite()
 		}
 		if c.Request().Method != http.MethodPost {
 			c.Response().Header().Set("Allow", http.MethodPost)
@@ -452,7 +481,7 @@ func mcpHandler(e *echo.Echo) echo.HandlerFunc {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest)
 		}
-		reply := server.Handle(c.Request().Context(), body)
+		reply := server.Handle(c.Request().Context(), body, canWrite)
 		if reply == nil {
 			return c.NoContent(http.StatusAccepted)
 		}

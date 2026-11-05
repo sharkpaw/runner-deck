@@ -90,8 +90,9 @@ func failure(id json.RawMessage, code int, message string) *response {
 	return &response{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: message}}
 }
 
-// Handle answers one HTTP body. It returns nil when no reply is due, as for a notification.
-func (s *Server) Handle(ctx context.Context, body []byte) *response {
+// Handle answers one HTTP body. It returns nil when no reply is due, as for a notification. Without
+// canWrite, only read-only tools are listed or run.
+func (s *Server) Handle(ctx context.Context, body []byte, canWrite bool) *response {
 	var req request
 	if err := json.Unmarshal(body, &req); err != nil {
 		return failure(nil, codeParse, "invalid JSON")
@@ -102,14 +103,14 @@ func (s *Server) Handle(ctx context.Context, body []byte) *response {
 	if len(req.ID) == 0 {
 		return nil
 	}
-	result, rpcErr := s.dispatch(ctx, req)
+	result, rpcErr := s.dispatch(ctx, req, canWrite)
 	if rpcErr != nil {
 		return failure(req.ID, rpcErr.Code, rpcErr.Message)
 	}
 	return &response{JSONRPC: "2.0", ID: req.ID, Result: result}
 }
 
-func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
+func (s *Server) dispatch(ctx context.Context, req request, canWrite bool) (any, *rpcError) {
 	switch req.Method {
 	case "initialize":
 		var params struct {
@@ -133,11 +134,13 @@ func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
 	case "tools/list":
 		list := make([]map[string]any, 0, len(tools))
 		for _, t := range tools {
-			list = append(list, t.describe())
+			if canWrite || t.ReadOnly {
+				list = append(list, t.describe())
+			}
 		}
 		return map[string]any{"tools": list}, nil
 	case "tools/call":
-		return s.callTool(ctx, req.Params)
+		return s.callTool(ctx, req.Params, canWrite)
 	}
 	return nil, &rpcError{Code: codeMethodNotFound, Message: "unknown method: " + req.Method}
 }
@@ -208,7 +211,7 @@ func (t tool) request(args map[string]any) (path string, body []byte, err error)
 	return path + "?" + query.Encode(), nil, nil
 }
 
-func (s *Server) callTool(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
+func (s *Server) callTool(ctx context.Context, raw json.RawMessage, canWrite bool) (any, *rpcError) {
 	var params struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -219,6 +222,9 @@ func (s *Server) callTool(ctx context.Context, raw json.RawMessage) (any, *rpcEr
 	for _, t := range tools {
 		if t.Name != params.Name {
 			continue
+		}
+		if !canWrite && !t.ReadOnly {
+			return textResult("This connection has read-only access, so "+t.Name+" is not allowed. Sign in again with full access to use it.", true), nil
 		}
 		path, body, err := t.request(params.Arguments)
 		if err != nil {

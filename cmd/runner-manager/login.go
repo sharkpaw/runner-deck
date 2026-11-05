@@ -108,6 +108,9 @@ func basicAuthMiddleware() (echo.MiddlewareFunc, string) {
 				if err != nil {
 					return unauthorizedBearer(c)
 				}
+				if !bearerAllows(v, c.Request()) {
+					return insufficientScope(c)
+				}
 				c.Set(sessionIDKey, v.SessionID)
 				return next(c)
 			}

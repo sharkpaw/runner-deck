@@ -369,9 +369,14 @@
   "api.session_not_found": "This session no longer exists",
   "consent.page_title": "Allow access - Runner Deck",
   "consent.title": "Allow access?",
-  "consent.body": "It will be able to see, add, start, stop and remove runners on this Manager.",
   "consent.redirect": "Sign-in goes back to:",
   "consent.approve": "Allow",
   "consent.deny": "Deny",
-  "consent.invalid": "This sign-in request is not valid."
+  "consent.invalid": "This sign-in request is not valid.",
+  "consent.access": "Access",
+  "consent.read": "Read only",
+  "consent.read_hint": "It can see runners, logs, history and resource use, and change nothing.",
+  "consent.write": "Full access",
+  "consent.write_hint": "It can also add, start, stop and remove runners, which cancels running jobs.",
+  "sessions.col_access": "Access"
 }

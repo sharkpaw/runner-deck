@@ -369,9 +369,14 @@
   "api.session_not_found": "Cette session n'existe plus",
   "consent.page_title": "Autoriser l'accès - Runner Deck",
   "consent.title": "Autoriser l'accès ?",
-  "consent.body": "Il pourra voir, ajouter, démarrer, arrêter et supprimer les runners de ce Manager.",
   "consent.redirect": "La connexion revient vers :",
   "consent.approve": "Autoriser",
   "consent.deny": "Refuser",
-  "consent.invalid": "Cette demande de connexion n'est pas valide."
+  "consent.invalid": "Cette demande de connexion n'est pas valide.",
+  "consent.access": "Accès",
+  "consent.read": "Lecture seule",
+  "consent.read_hint": "Il peut voir les runners, journaux, historique et ressources, sans rien modifier.",
+  "consent.write": "Accès complet",
+  "consent.write_hint": "Il peut aussi ajouter, démarrer, arrêter et supprimer des runners, ce qui annule les jobs en cours.",
+  "sessions.col_access": "Accès"
 }

@@ -42,6 +42,10 @@ const (
 	maxClients = 200
 	audience   = "runner-deck"
 
+	// ScopeRead can look at everything and change nothing. ScopeWrite can do what the panel can.
+	ScopeRead  = "runners:read"
+	ScopeWrite = "runners:write"
+
 	KindBrowser = "browser"
 	KindOAuth   = "oauth"
 
@@ -60,6 +64,7 @@ var (
 type Session struct {
 	ID              string    `json:"id"`
 	Kind            string    `json:"kind"`
+	Scope           string    `json:"scope,omitempty"`
 	ClientID        string    `json:"client_id,omitempty"`
 	ClientName      string    `json:"client_name,omitempty"`
 	UserAgent       string    `json:"user_agent,omitempty"`
@@ -86,6 +91,7 @@ type Tokens struct {
 	Refresh   string
 	ExpiresIn int
 	SessionID string
+	Scope     string
 }
 
 // Meta describes where a sign-in came from.
@@ -98,6 +104,7 @@ type grant struct {
 	clientID  string
 	redirect  string
 	challenge string
+	scope     string
 	expires   time.Time
 }
 
@@ -151,6 +158,29 @@ func Open(path, user, password string) (*Store, error) {
 }
 
 // randomToken cannot fail: crypto/rand.Read never returns an error, it crashes the program instead.
+// RequestedScope reads an OAuth scope parameter. Asking for nothing leaves the choice open, so it
+// counts as asking for everything; the person still decides on the consent page.
+func RequestedScope(raw string) string {
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return ScopeWrite
+	}
+	for _, f := range fields {
+		if f == ScopeWrite {
+			return ScopeWrite
+		}
+	}
+	return ScopeRead
+}
+
+// GrantedScope is what a client gets: what the person chose, but never more than it asked for.
+func GrantedScope(requested, chosen string) string {
+	if requested == ScopeWrite && chosen == ScopeWrite {
+		return ScopeWrite
+	}
+	return ScopeRead
+}
+
 func randomToken(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
@@ -193,10 +223,10 @@ func (s *Store) dropExpired(now time.Time) {
 	s.data.Sessions = kept
 }
 
-func (s *Store) newSession(kind, clientID, clientName string, meta Meta, now time.Time) *Session {
+func (s *Store) newSession(kind, scope, clientID, clientName string, meta Meta, now time.Time) *Session {
 	s.dropExpired(now)
 	sess := &Session{
-		ID: randomToken(16), Kind: kind, ClientID: clientID, ClientName: clientName,
+		ID: randomToken(16), Kind: kind, Scope: scope, ClientID: clientID, ClientName: clientName,
 		UserAgent: truncate(meta.UserAgent, 300), IP: meta.IP,
 		CreatedAt: now, LastUsedAt: now, ExpiresAt: now.Add(SessionTTL),
 	}
@@ -225,7 +255,7 @@ func (s *Store) StartBrowserSession(meta Meta) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	sess := s.newSession(KindBrowser, "", "", meta, now)
+	sess := s.newSession(KindBrowser, ScopeWrite, "", "", meta, now)
 	if err := s.save(); err != nil {
 		return "", err
 	}
@@ -236,7 +266,11 @@ func (s *Store) StartBrowserSession(meta Meta) (string, error) {
 type Verified struct {
 	SessionID string
 	IssuedAt  time.Time
+	Scope     string
 }
+
+// CanWrite reports whether the token may change anything.
+func (v Verified) CanWrite() bool { return v.Scope == ScopeWrite }
 
 func (s *Store) verify(token, typ string) (Verified, error) {
 	claims := jwt.MapClaims{}
@@ -262,7 +296,8 @@ func (s *Store) verify(token, typ string) (Verified, error) {
 		_ = s.save()
 	}
 	issued, _ := claims.GetIssuedAt()
-	v := Verified{SessionID: sid}
+	// From the session rather than the token, which keeps the grant in one place.
+	v := Verified{SessionID: sid, Scope: sess.Scope}
 	if issued != nil {
 		v.IssuedAt = issued.Time
 	}
@@ -410,7 +445,7 @@ func (c Client) RedirectAllowed(raw string) bool {
 }
 
 // NewCode issues a single-use authorization code. PKCE S256 is required.
-func (s *Store) NewCode(clientID, redirect, challenge string) (string, error) {
+func (s *Store) NewCode(clientID, redirect, challenge, scope string) (string, error) {
 	if len(challenge) < 43 {
 		return "", ErrInvalidGrant
 	}
@@ -423,7 +458,7 @@ func (s *Store) NewCode(clientID, redirect, challenge string) (string, error) {
 			delete(s.codes, k)
 		}
 	}
-	s.codes[code] = grant{clientID: clientID, redirect: redirect, challenge: challenge, expires: now.Add(codeTTL)}
+	s.codes[code] = grant{clientID: clientID, redirect: redirect, challenge: challenge, scope: scope, expires: now.Add(codeTTL)}
 	return code, nil
 }
 
@@ -438,7 +473,7 @@ func (s *Store) issue(sess *Session, now time.Time) (Tokens, error) {
 	if err := s.save(); err != nil {
 		return Tokens{}, err
 	}
-	return Tokens{Access: access, Refresh: sess.ID + "." + refresh, ExpiresIn: int(AccessTTL / time.Second), SessionID: sess.ID}, nil
+	return Tokens{Access: access, Refresh: sess.ID + "." + refresh, ExpiresIn: int(AccessTTL / time.Second), SessionID: sess.ID, Scope: sess.Scope}, nil
 }
 
 // ExchangeCode turns a code into tokens and a new session.
@@ -459,7 +494,7 @@ func (s *Store) ExchangeCode(code, verifier, clientID, redirect string, meta Met
 	if subtle.ConstantTimeCompare([]byte(base64.RawURLEncoding.EncodeToString(sum[:])), []byte(g.challenge)) != 1 {
 		return Tokens{}, ErrInvalidGrant
 	}
-	return s.issue(s.newSession(KindOAuth, clientID, client.Name, meta, now), now)
+	return s.issue(s.newSession(KindOAuth, g.scope, clientID, client.Name, meta, now), now)
 }
 
 // Refresh rotates a refresh token. Reuse of an old one ends the session.

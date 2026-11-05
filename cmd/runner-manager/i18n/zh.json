@@ -369,9 +369,14 @@
   "api.session_not_found": "此会话已不存在",
   "consent.page_title": "允许访问 - Runner Deck",
   "consent.title": "允许访问？",
-  "consent.body": "它将能够查看、添加、启动、停止和删除此 Manager 上的 Runner。",
   "consent.redirect": "登录后返回：",
   "consent.approve": "允许",
   "consent.deny": "拒绝",
-  "consent.invalid": "此登录请求无效。"
+  "consent.invalid": "此登录请求无效。",
+  "consent.access": "访问权限",
+  "consent.read": "只读",
+  "consent.read_hint": "可以查看 Runner、日志、历史和资源使用情况，但不能更改任何内容。",
+  "consent.write": "完全访问",
+  "consent.write_hint": "还可以添加、启动、停止和删除 Runner，这会取消正在运行的任务。",
+  "sessions.col_access": "访问权限"
 }
