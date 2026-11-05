@@ -283,7 +283,6 @@
   "system.custom_limit": "개별 제한",
   "modal.label_cpus": "CPU 제한 (비움: 기본값)",
   "modal.label_memory": "메모리 제한 (비움: 기본값)",
-  "api.logs_container_mode_only": "러너 출력은 컨테이너 모드에서만 볼 수 있습니다",
   "api.logs_failed": "러너 출력을 읽을 수 없음: %s",
   "nav.events": "활동 기록",
   "events.subtitle": "러너에 언제 무슨 일이 있었는지 보여 줍니다. 재시작해도 유지됩니다.",

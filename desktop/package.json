@@ -1,0 +1,12 @@
+{
+  "name": "runner-deck-desktop",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build --bundles dmg",
+    "manager": "sh scripts/build-manager.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

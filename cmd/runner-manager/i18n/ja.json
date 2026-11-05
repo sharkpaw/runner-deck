@@ -283,7 +283,6 @@
   "system.custom_limit": "個別の制限",
   "modal.label_cpus": "CPU 制限（空: 既定）",
   "modal.label_memory": "メモリ制限（空: 既定）",
-  "api.logs_container_mode_only": "ランナーの出力はコンテナモードでのみ確認できます",
   "api.logs_failed": "ランナーの出力を読み取れません: %s",
   "nav.events": "アクティビティログ",
   "events.subtitle": "ランナーにいつ何が起きたかを表示します。再起動後も保持されます。",

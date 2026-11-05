@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -50,6 +51,21 @@ func forgetDiskCaches() {
 	dirSizesMu.Unlock()
 }
 
+// cleanContainerWork empties a runner container's work directory.
+func cleanContainerWork(ctx context.Context, name string) error {
+	out, err := dockerRunCombined(ctx, "exec", "-u", "0", runner.ContainerName(name), "sh", "-c", cleanWorkScript)
+	if err == nil {
+		return nil
+	}
+	if exitCodeOf(err) == cleanBusyExit {
+		return runner.ErrWorkBusy
+	}
+	if msg := strings.TrimSpace(string(out)); msg != "" {
+		return fmt.Errorf("%s", msg)
+	}
+	return err
+}
+
 // CleanRunnerWork serves POST /api/runners/:name/clean. It runs inside the container as root,
 // because a job may have left root-owned files that the Manager cannot delete.
 func CleanRunnerWork(c echo.Context) error {
@@ -61,22 +77,23 @@ func CleanRunnerWork(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := cfg.FindItem(name); !ok {
+	item, ok := cfg.FindItem(name)
+	if !ok {
 		return echo.NewHTTPError(http.StatusNotFound, tr(c, "api.runner_not_found"))
-	}
-	if !cfg.Runners.ContainerMode {
-		return echo.NewHTTPError(http.StatusBadRequest, tr(c, "api.logs_container_mode_only"))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cleanTimeout)
 	defer cancel()
-	out, err := dockerRunCombined(ctx, "exec", "-u", "0", runner.ContainerName(name), "sh", "-c", cleanWorkScript)
+	if cfg.Runners.ContainerMode {
+		err = cleanContainerWork(ctx, name)
+	} else {
+		err = runner.CleanWork(item.InstallPath(cfg.Runners.BasePath))
+	}
 	if err != nil {
-		if exitCodeOf(err) == cleanBusyExit {
+		if errors.Is(err, runner.ErrWorkBusy) {
 			return echo.NewHTTPError(http.StatusConflict, tr(c, "api.clean_busy"))
 		}
-		msg := strings.TrimSpace(string(out))
-		recordEvent(name, eventlog.LevelError, "clean_failed", msg)
-		return echo.NewHTTPError(http.StatusBadGateway, trf(c, "api.clean_failed", msg))
+		recordEvent(name, eventlog.LevelError, "clean_failed", err.Error())
+		return echo.NewHTTPError(http.StatusBadGateway, trf(c, "api.clean_failed", err.Error()))
 	}
 	recordEvent(name, eventlog.LevelInfo, "work_cleaned", "")
 	forgetDiskCaches()

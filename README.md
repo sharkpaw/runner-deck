@@ -52,6 +52,10 @@ Open http://localhost:8080. The default image tag is the stable release (e.g. v2
 
 Two copy-and-go deployments live in [`examples/deploy/`](examples/deploy/): `standalone/` (single container, runner processes inside the Manager — `docker run` or Compose) and `fleet/` (one container per runner, image and toolchain caches shared, build caches isolated).
 
+## Desktop app
+
+For builds that need a real Mac, the [desktop app](desktop/README.md) runs the Manager on your computer and runners as normal processes, with no Docker. The same window opens the panels of your servers. Download it for [Apple Silicon](https://github.com/sharkpaw/runner-deck/releases/download/desktop-latest/RunnerDeck-macos-arm64.dmg) or [Intel](https://github.com/sharkpaw/runner-deck/releases/download/desktop-latest/RunnerDeck-macos-x64.dmg).
+
 ## Documentation
 
 - **[User Guide](docs/guide.md)** — deployment, configuration, adding runners, operations, security & troubleshooting

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Desktop app for macOS: the Manager runs on your own computer, runners work as normal processes with no Docker, so Xcode and iOS builds work. The same window opens the panels of your servers.
+- Without container mode, runner output is kept in `runner.log`, so logs, job results and work cleanup work there too.
 - Runners get 4 CPUs and 8 GB by default, editable from the panel, globally or per runner, without a restart.
 - Warnings when a runner hits its memory or CPU limit.
 - Activity log: starts, stops, job results, memory kills and errors, kept with their times.

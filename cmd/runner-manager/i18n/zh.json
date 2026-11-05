@@ -283,7 +283,6 @@
   "system.custom_limit": "单独限制",
   "modal.label_cpus": "CPU 限制（留空：默认）",
   "modal.label_memory": "内存限制（留空：默认）",
-  "api.logs_container_mode_only": "Runner 输出仅在容器模式下可用",
   "api.logs_failed": "无法读取 Runner 输出：%s",
   "nav.events": "活动日志",
   "events.subtitle": "Runner 发生了什么以及何时发生。重启后仍保留。",

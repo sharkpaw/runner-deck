@@ -45,7 +45,8 @@ func runPrune(ctx context.Context, args ...string) {
 func (w *Watcher) guardDisk(ctx context.Context, cfg *config.Config) {
 	limit := cfg.DiskGuardAt()
 	now := w.now()
-	if limit <= 0 || now.Sub(w.guard.lastCheck) < diskGuardEvery {
+	// Without container mode this is someone's own machine, and its Docker images are not ours to remove.
+	if !cfg.Runners.ContainerMode || limit <= 0 || now.Sub(w.guard.lastCheck) < diskGuardEvery {
 		return
 	}
 	w.guard.lastCheck = now

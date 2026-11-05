@@ -283,7 +283,6 @@
   "system.custom_limit": "own limit",
   "modal.label_cpus": "CPU limit (empty: default)",
   "modal.label_memory": "Memory limit (empty: default)",
-  "api.logs_container_mode_only": "Runner output is only available in container mode",
   "api.logs_failed": "Could not read the runner output: %s",
   "nav.events": "Activity log",
   "events.subtitle": "What happened to your runners and when. Kept across restarts.",

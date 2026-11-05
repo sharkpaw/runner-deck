@@ -24,6 +24,7 @@ import (
 	"github.com/sharkpaw/runner-deck/internal/runner"
 	"github.com/sharkpaw/runner-deck/internal/runnerproc"
 	"github.com/sharkpaw/runner-deck/internal/secrets"
+	"github.com/sharkpaw/runner-deck/scripts"
 	secure "github.com/soulteary/secure-kit/v2"
 )
 
@@ -225,11 +226,34 @@ func shortRandomSuffix() string {
 	return s
 }
 
+// installRunnerScript returns the script in the image, or outside it a temporary copy of the embedded one.
+func installRunnerScript() (string, func(), error) {
+	if _, err := os.Stat(installRunnerScriptPath); err == nil {
+		return installRunnerScriptPath, func() {}, nil
+	}
+	dir, err := os.MkdirTemp("", "runner-deck-install-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	path := filepath.Join(dir, "install-runner.sh")
+	if err := os.WriteFile(path, scripts.InstallRunner, 0o700); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return path, cleanup, nil
+}
+
 // runInstallRunnerScript runs install-runner.sh inside the container, downloading and extracting the runner to basePath/runnerName; returns an error on timeout
 func runInstallRunnerScript(basePath, runnerName string, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, installRunnerScriptPath, runnerName)
+	script, cleanup, err := installRunnerScript()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	cmd := exec.CommandContext(ctx, script, runnerName)
 	cmd.Env = append(childenv.Environ(), "RUNNERS_BASE_PATH="+basePath)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {

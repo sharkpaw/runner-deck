@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Runner Deck</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main>
+    <header><img src="logo.svg" alt="" width="44" height="44"><h1>Runner Deck</h1></header>
+    <p id="error" class="error" role="alert" hidden></p>
+    <section>
+      <h2 data-t="connections"></h2>
+      <ul id="list"></ul>
+    </section>
+    <section>
+      <h2 data-t="add_server"></h2>
+      <form id="add">
+        <label><span data-t="name"></span><input id="name" autocomplete="off"></label>
+        <label><span data-t="address"></span><input id="url" type="url" placeholder="https://" autocomplete="off" required></label>
+        <button type="submit" data-t="add"></button>
+      </form>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

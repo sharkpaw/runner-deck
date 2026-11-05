@@ -6,6 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
+COPY scripts ./scripts
 ARG VERSION=dev
 # Empty when not passed; version-kit leaves empty fields out of its output
 ARG COMMIT=
