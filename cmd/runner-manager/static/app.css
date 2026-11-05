@@ -487,3 +487,16 @@ form button:hover, .btn-parse:hover { background: var(--accent-strong); opacity:
 .clean-work { margin-left: 8px; }
 .limits-row > .limits-wide { flex-basis: 300px; }
 .limits-hint { margin: 10px 0 0; }
+
+.session-device { max-width: 420px; overflow-wrap: anywhere; }
+.session-current { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.mcp-url { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mcp-url code { overflow-wrap: anywhere; }
+.consent-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
+.consent { width: 100%; max-width: 440px; background: var(--surface, transparent); border: 1px solid var(--border); border-radius: 14px; padding: 28px; }
+.consent h1 { font-size: 20px; margin: 14px 0 6px; }
+.consent-client { font-size: 17px; font-weight: 600; margin: 0 0 10px; overflow-wrap: anywhere; }
+.consent-target { color: var(--text-2); font-size: 14px; overflow-wrap: anywhere; }
+.consent-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.btn-secondary { padding: 6px 12px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.btn-secondary:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }

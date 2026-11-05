@@ -403,14 +403,14 @@ func Start(installDir string) error {
 	output := &stampWriter{out: log, now: time.Now}
 	cmd.Stdout, cmd.Stderr = output, output
 	if err := cmd.Start(); err != nil {
-		log.Close()
+		_ = log.Close()
 		return err
 	}
 	// The child process must be waited on, otherwise an exited run.sh becomes a zombie process when running inside a container (where the main process is PID 1).
 	// Wait in a background goroutine, so Start returns without blocking.
 	go func() {
 		_ = cmd.Wait()
-		log.Close()
+		_ = log.Close()
 	}()
 	return nil
 }

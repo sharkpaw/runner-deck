@@ -176,6 +176,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | 변수 | 역할 | 기본값 |
 |---|---|---|
 | `BASIC_AUTH_PASSWORD` | 설정하면 Basic 인증이 켜집니다 | 비움(인증 없음) |
+| `PUBLIC_URL` | 클라이언트가 이 Manager에 접속하는 주소로, OAuth와 MCP에 쓰입니다. 비우면 프록시가 알려 주는 주소를 씁니다 | 비어 있음 |
 | `BASIC_AUTH_USER` | Basic 인증 사용자 이름 | `admin` |
 | `TRUSTED_ORIGINS` | 교차 사이트 검사를 면제할 출처(쉼표 구분). [4. 보안 및 검증](#4-보안-및-검증) 참조 | 비움 |
 | `LOG_LEVEL` | `trace` / `debug` / `info` / `warn` / `error` | `info` |

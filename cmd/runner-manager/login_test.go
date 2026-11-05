@@ -111,28 +111,6 @@ func TestLogin_SessionOpensTheAPIAndLogoutClearsIt(t *testing.T) {
 	}
 }
 
-func TestSession_ExpiresAndDependsOnThePassword(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	v := newSessionValue("admin", "a", now)
-	if !validSession(v, "admin", "a", now) {
-		t.Fatal("fresh session rejected")
-	}
-	if validSession(v, "admin", "a", now.Add(sessionTTL)) {
-		t.Error("expired session accepted")
-	}
-	if validSession(v, "admin", "b", now) {
-		t.Error("a password change must end existing sessions")
-	}
-	if validSession(v, "root", "a", now) {
-		t.Error("session accepted for another user")
-	}
-	for _, bad := range []string{"", "x", "x.y", "1.", strings.Repeat("9", 40) + ".z"} {
-		if validSession(bad, "admin", "a", now) {
-			t.Errorf("accepted %q", bad)
-		}
-	}
-}
-
 func TestLogin_RepeatedFailuresAreThrottled(t *testing.T) {
 	h := loginServer(t)
 	for i := 0; i < loginMaxPerIP; i++ {

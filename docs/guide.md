@@ -176,6 +176,7 @@ These have no config-file counterpart:
 | Variable | What it does | Default |
 |---|---|---|
 | `BASIC_AUTH_PASSWORD` | Setting it enables Basic Auth | empty (no auth) |
+| `PUBLIC_URL` | Address clients reach this Manager at, for OAuth and MCP; empty uses what the proxy reports | empty |
 | `BASIC_AUTH_USER` | Basic Auth user name | `admin` |
 | `TRUSTED_ORIGINS` | Comma-separated origins exempt from the cross-site check; see [4. Security and validation](#4-security-and-validation) | empty |
 | `LOG_LEVEL` | `trace` / `debug` / `info` / `warn` / `error` | `info` |

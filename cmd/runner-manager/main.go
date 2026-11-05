@@ -400,7 +400,7 @@ func csrfGuardMiddleware(trusted []string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			req := c.Request()
-			if safeMethods[req.Method] {
+			if safeMethods[req.Method] || isTokenEndpoint(req.URL.Path) {
 				return next(c)
 			}
 			origin := strings.TrimRight(strings.TrimSpace(req.Header.Get("Origin")), "/")
@@ -466,6 +466,7 @@ func newEchoServer() *echo.Echo {
 	if len(trusted) > 0 {
 		log.Printf("CSRF trusted origins: %s", strings.Join(trusted, ", "))
 	}
+	authStore = openAuthStore()
 	if mw, user := basicAuthMiddleware(); mw != nil {
 		e.Use(mw)
 		log.Printf("Login enabled (user: %s)", user)
@@ -492,6 +493,7 @@ func registerRoutes(e *echo.Echo) {
 	e.GET("/login", loginPage)
 	e.POST("/login", loginSubmit)
 	e.POST("/logout", logoutSubmit)
+	registerAuthRoutes(e)
 	// Register HEAD too: if only GET is mounted, health-check scripts or proxies sending HEAD to static assets get a 405
 	staticH := staticHandler()
 	e.GET("/static/*", staticH)

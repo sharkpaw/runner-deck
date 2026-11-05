@@ -176,6 +176,7 @@ mkdir -p config && cp config.yaml.example config/config.yaml
 | 変数 | 役割 | 既定値 |
 |---|---|---|
 | `BASIC_AUTH_PASSWORD` | 設定すると Basic 認証が有効になる | 空（認証なし） |
+| `PUBLIC_URL` | クライアントがこの Manager に接続するアドレスで、OAuth と MCP に使います。空の場合はプロキシの報告を使います | 空 |
 | `BASIC_AUTH_USER` | Basic 認証のユーザー名 | `admin` |
 | `TRUSTED_ORIGINS` | クロスサイト判定を免除するオリジン（カンマ区切り）。[4. セキュリティと検証](#4-セキュリティと検証)を参照 | 空 |
 | `LOG_LEVEL` | `trace` / `debug` / `info` / `warn` / `error` | `info` |
