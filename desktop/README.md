@@ -4,7 +4,7 @@ Runs the Manager on your own computer, so runners work as normal processes with 
 that means Xcode and iOS builds. The same window can also open the panel of any Runner Deck server.
 
 Data lives in `~/.runner-deck`: `config/`, `runners/`, `manager.log` and `desktop.json`, which holds
-the generated password for the local panel and the list of servers.
+the list of servers. The local panel's generated password and the server sessions are in the Keychain.
 
 Closing the window leaves the app in the menu bar with the runners working. The icon there shows CPU
 and memory, counted over the Manager, its runners and their jobs, plus the disk `~/.runner-deck` takes.
@@ -24,6 +24,8 @@ xattr -dr com.apple.quarantine "/Applications/Runner Deck.app"
 ```
 
 Or open it, then choose Open Anyway under System Settings → Privacy & Security.
+
+macOS may ask to allow Keychain access after each update until the app is signed with a Developer ID.
 
 ## Release
 

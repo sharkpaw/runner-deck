@@ -5,6 +5,7 @@ mod oauth;
 mod store;
 mod tray;
 mod usage;
+mod vault;
 
 use manager::Manager;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,7 +56,7 @@ fn connections(state: tauri::State<AppState>) -> Connections {
         servers: store
             .servers
             .iter()
-            .map(|s| ServerView { id: s.id.clone(), name: s.name.clone(), url: s.url.clone(), signed_in: s.refresh_token.is_some() })
+            .map(|s| ServerView { id: s.id.clone(), name: s.name.clone(), url: s.url.clone(), signed_in: s.signed_in })
             .collect(),
         last: store.last.clone(),
         first_load: !state.booted.swap(true, Ordering::SeqCst),
@@ -80,7 +81,7 @@ fn open_server(app: AppHandle, state: tauri::State<AppState>, id: String) -> Res
     let (url, saved) = {
         let store = state.store.lock().unwrap();
         let server = store.servers.iter().find(|s| s.id == id).ok_or_else(|| "unknown server".to_string())?;
-        (server.url.clone(), server.refresh_token.clone())
+        (server.url.clone(), store.refresh_token(&server.id))
     };
     let done = if is_turkish() {
         "Giriş tamamlandı, Runner Deck'e dönebilirsin."
@@ -103,11 +104,9 @@ fn add_server(state: tauri::State<AppState>, name: String, url: String) -> Resul
 fn remove_server(state: tauri::State<AppState>, id: String) -> Result<(), String> {
     let mut store = state.store.lock().unwrap();
     // Forgetting a server also signs out of it, so no live session is left behind.
-    if let Some(server) = store.servers.iter().find(|s| s.id == id) {
-        if let Some(token) = server.refresh_token.clone() {
-            let url = server.url.clone();
-            std::thread::spawn(move || oauth::revoke(&url, &token));
-        }
+    let url = store.servers.iter().find(|s| s.id == id).map(|s| s.url.clone());
+    if let (Some(url), Some(token)) = (url, store.refresh_token(&id)) {
+        std::thread::spawn(move || oauth::revoke(&url, &token));
     }
     store.remove_server(&id)
 }
@@ -324,7 +323,7 @@ fn main() {
             }
         })
         .setup(|app| {
-            let store = Store::load()?;
+            let store = Store::load(std::sync::Arc::new(vault::Keychain))?;
             let manager = Manager::new(store.dir.clone(), store.port, store.password.clone());
             manager.start()?;
             app.manage(AppState {

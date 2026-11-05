@@ -156,7 +156,8 @@ fn login(
         .append_pair("response_type", "code")
         .append_pair("code_challenge", &challenge(&verifier))
         .append_pair("code_challenge_method", "S256")
-        .append_pair("state", &state);
+        .append_pair("state", &state)
+        .append_pair("scope", "runners:write");
     open_browser(&authorize);
     let code = wait_for_code(&listener, port, &state, wait, done_text)?;
     let res = agent
