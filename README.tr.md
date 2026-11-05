@@ -49,7 +49,7 @@ Başka bir ortama kurulum için [Kullanım Kılavuzu](docs/guide.md) ve [örnekl
 
 ## Masaüstü uygulaması
 
-Gerçek Mac gerektiren derlemeler için [masaüstü uygulaması](desktop/README.md) yöneticiyi kendi bilgisayarında, runner'ları da Docker olmadan normal süreç olarak çalıştırır. Aynı pencereden sunucularının panelleri de açılır.
+Gerçek Mac gerektiren derlemeler için [masaüstü uygulaması](desktop/README.md) yöneticiyi kendi bilgisayarında, runner'ları da Docker olmadan normal süreç olarak çalıştırır. Aynı pencereden sunucularının panelleri de açılır. [Apple Silicon](https://github.com/sharkpaw/runner-deck/releases/download/desktop-latest/RunnerDeck-macos-arm64.dmg) veya [Intel](https://github.com/sharkpaw/runner-deck/releases/download/desktop-latest/RunnerDeck-macos-x64.dmg) için indir.
 
 ## Güvenlik
 

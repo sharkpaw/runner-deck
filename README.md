@@ -58,7 +58,7 @@ Add `https://your-manager/mcp` to Claude or another MCP client. It signs in with
 
 ## Desktop app
 
-For builds that need a real Mac, the [desktop app](desktop/README.md) runs the Manager on your computer and runners as normal processes, with no Docker. The same window opens the panels of your servers.
+For builds that need a real Mac, the [desktop app](desktop/README.md) runs the Manager on your computer and runners as normal processes, with no Docker. The same window opens the panels of your servers. Download it for [Apple Silicon](https://github.com/sharkpaw/runner-deck/releases/download/desktop-latest/RunnerDeck-macos-arm64.dmg) or [Intel](https://github.com/sharkpaw/runner-deck/releases/download/desktop-latest/RunnerDeck-macos-x64.dmg).
 
 ## Documentation
 
