@@ -1072,7 +1072,16 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
         tr.appendChild(textCell('—', 'row-sub'));
         tr.appendChild(textCell('—', 'row-sub'));
       }
-      tr.appendChild(textCell(fmtBytes(r.disk_bytes), 'tabular'));
+      var diskCell = textCell(fmtBytes(r.disk_bytes) + ' ', 'tabular');
+      if (r.running && data.container_mode) {
+        var cleanBtn = document.createElement('button');
+        cleanBtn.type = 'button';
+        cleanBtn.className = 'btn-neutral clean-work';
+        cleanBtn.dataset.name = r.name;
+        cleanBtn.textContent = t('system.clean');
+        diskCell.appendChild(cleanBtn);
+      }
+      tr.appendChild(diskCell);
       var status = document.createElement('td');
       var badge = document.createElement('span');
       badge.className = 'badge ' + (r.running ? 'ok' : 'off');
@@ -1111,35 +1120,46 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
       tr.appendChild(textCell(row.count, 'tabular'));
       tr.appendChild(textCell(row.size, 'tabular'));
       tr.appendChild(textCell(row.reclaimable, 'tabular'));
+      var action = document.createElement('td');
+      var target = row.type === 'Images' ? 'images' : row.type === 'Build Cache' ? 'build-cache' : '';
+      if (target) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-neutral clean-docker';
+        btn.dataset.target = target;
+        btn.textContent = t('system.clean');
+        action.appendChild(btn);
+      }
+      tr.appendChild(action);
       body.appendChild(tr);
     });
   }
 
-  function renderChart(id, field, format) {
+  // series: [{ name, points: [{ x: 0..1, y }] }]. A null point breaks the line.
+  function drawChart(id, series, format, emptyText) {
     var host = el(id);
     host.textContent = '';
-    var names = Object.keys(history).filter(function (n) { return history[n].some(function (p) { return p; }); });
-    if (sampleCount < 2 || !names.length) {
+    if (!series.length) {
       var empty = document.createElement('div');
       empty.className = 'chart-empty';
-      empty.textContent = t('system.chart_empty');
+      empty.textContent = emptyText;
       host.appendChild(empty);
       return;
     }
     var legend = document.createElement('div');
     legend.className = 'chart-legend';
-    names.forEach(function (name, i) {
+    series.forEach(function (s, i) {
       var item = document.createElement('span');
       var swatch = document.createElement('i');
       swatch.style.background = 'var(' + SERIES[i % SERIES.length] + ')';
       item.appendChild(swatch);
-      item.appendChild(document.createTextNode(name));
+      item.appendChild(document.createTextNode(s.name));
       legend.appendChild(item);
     });
     host.appendChild(legend);
 
     var max = 0;
-    names.forEach(function (n) { history[n].forEach(function (p) { if (p && p[field] > max) max = p[field]; }); });
+    series.forEach(function (s) { s.points.forEach(function (p) { if (p && p.y > max) max = p.y; }); });
     max = max > 0 ? max * 1.15 : 1;
     var W = 600, H = 190, L = 56, B = 6, T = 6;
     var plotW = W - L, plotH = H - B - T;
@@ -1162,13 +1182,13 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
       label.textContent = format(max * (4 - g) / 4);
       svg.appendChild(label);
     }
-    names.forEach(function (name, i) {
+    series.forEach(function (s, i) {
       var d = '';
       var pen = false;
-      history[name].forEach(function (p, idx) {
+      s.points.forEach(function (p) {
         if (!p) { pen = false; return; }
-        var x = L + plotW * idx / (MAX_SAMPLES - 1);
-        var yy = T + plotH * (1 - p[field] / max);
+        var x = L + plotW * p.x;
+        var yy = T + plotH * (1 - p.y / max);
         d += (pen ? 'L' : 'M') + x.toFixed(1) + ' ' + yy.toFixed(1);
         pen = true;
       });
@@ -1179,6 +1199,60 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
     });
     host.appendChild(svg);
   }
+
+  function renderChart(id, field, format) {
+    var names = Object.keys(history).filter(function (n) { return history[n].some(function (p) { return p; }); });
+    var series = sampleCount < 2 ? [] : names.map(function (name) {
+      return {
+        name: name,
+        points: history[name].map(function (p, idx) { return p ? { x: idx / (MAX_SAMPLES - 1), y: p[field] } : null; })
+      };
+    });
+    drawChart(id, series, format, t('system.chart_empty'));
+  }
+
+  // ===== Saved history =====
+  var chartRange = el('chartRange');
+  function renderSavedHistory(data) {
+    var now = Date.now();
+    var span = data.hours * 3600 * 1000;
+    var bucketGap = data.hours <= 24 ? 15 * 60 * 1000 : data.hours <= 168 ? 3 * 3600 * 1000 : 18 * 3600 * 1000;
+    var byRunner = {};
+    (data.points || []).forEach(function (p) {
+      (byRunner[p.r] = byRunner[p.r] || []).push(p);
+    });
+    function seriesFor(field) {
+      return Object.keys(byRunner).sort().map(function (name) {
+        var pts = [];
+        var last = null;
+        byRunner[name].forEach(function (p) {
+          var at = new Date(p.t).getTime();
+          // A gap means the runner was stopped: do not draw a line across it.
+          if (last !== null && at - last > bucketGap) pts.push(null);
+          pts.push({ x: Math.max(0, 1 - (now - at) / span), y: p[field] });
+          last = at;
+        });
+        return { name: name, points: pts };
+      });
+    }
+    drawChart('sysChartCpu', seriesFor('c'), function (v) { return fmtPct(v); }, t('system.history_empty'));
+    drawChart('sysChartMem', seriesFor('m'), fmtBytes, t('system.history_empty'));
+  }
+  function loadSavedHistory() {
+    if (chartRange.value === 'session') return;
+    fetch('/api/metrics?hours=' + encodeURIComponent(chartRange.value))
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) { if (data) renderSavedHistory(data); })
+      .catch(function () {});
+  }
+  chartRange.addEventListener('change', function () {
+    if (this.value === 'session') {
+      renderChart('sysChartCpu', 'cpu', function (v) { return fmtPct(v); });
+      renderChart('sysChartMem', 'mem', fmtBytes);
+    } else {
+      loadSavedHistory();
+    }
+  });
 
   function record(data) {
     sampleCount++;
@@ -1221,10 +1295,43 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
     }
     renderRunners(data);
     renderDocker(data);
-    renderChart('sysChartCpu', 'cpu', function (v) { return fmtPct(v); });
-    renderChart('sysChartMem', 'mem', fmtBytes);
+    if (chartRange.value === 'session') {
+      renderChart('sysChartCpu', 'cpu', function (v) { return fmtPct(v); });
+      renderChart('sysChartMem', 'mem', fmtBytes);
+    }
   }
 
+  function runCleanup(btn, url, body) {
+    btn.disabled = true;
+    btn.textContent = t('btn.working');
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function (res) { return res.json().catch(function () { return {}; }).then(function (b) { return { ok: res.ok, body: b }; }); })
+      .then(function (r) {
+        showToast(r.body.message || t('msg.request_failed'), r.ok ? 'ok' : 'err');
+        pollSystem();
+      })
+      .catch(function () { showToast(t('msg.request_failed'), 'err'); });
+  }
+  el('sysRows').addEventListener('click', function (e) {
+    var btn = e.target.closest('.clean-work');
+    if (!btn) return;
+    var name = btn.dataset.name;
+    confirmDialog(fillVars(t('system.confirm_clean_work'), { name: name })).then(function (ok) {
+      if (ok) runCleanup(btn, '/api/runners/' + encodeURIComponent(name) + '/clean', {});
+    });
+  });
+  el('sysDocker').addEventListener('click', function (e) {
+    var btn = e.target.closest('.clean-docker');
+    if (!btn) return;
+    var target = btn.dataset.target;
+    confirmDialog(t(target === 'images' ? 'system.confirm_clean_images' : 'system.confirm_clean_cache')).then(function (ok) {
+      if (ok) runCleanup(btn, '/api/docker/clean', { target: target });
+    });
+  });
   var limitsDirty = false;
   el('limitsForm').addEventListener('input', function () { limitsDirty = true; });
   el('limitsForm').addEventListener('submit', function (e) {
@@ -1265,6 +1372,7 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
 
   // ===== Activity log =====
   var eventsTimer = null;
+  var historyTick = 0;
   var eventsRunner = el('eventsRunner');
   var eventsErrors = el('eventsErrors');
   function eventText(e) {
@@ -1305,7 +1413,53 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
     });
     eventsRunner.value = names.indexOf(current) >= 0 ? current : '';
   }
+  function fmtDuration(seconds) {
+    if (!seconds) return '—';
+    var s = Math.round(seconds);
+    if (s < 60) return s + 's';
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ' + (s % 60) + 's';
+    return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+  }
+  function successRate(c) {
+    var decided = c.succeeded + c.failed;
+    return decided ? c.succeeded * 100 / decided : null;
+  }
+  function renderStats(s) {
+    var rate = successRate(s);
+    el('statsTotal').textContent = s.total;
+    el('statsTotalSub').textContent = tfill('stats.succeeded_of', { ok: s.succeeded, canceled: s.canceled });
+    el('statsRate').textContent = rate === null ? '—' : fmtPct(rate);
+    var bar = el('statsRateMeter');
+    bar.style.width = (rate || 0) + '%';
+    bar.className = rate !== null && rate < 70 ? 'bad' : rate !== null && rate < 90 ? 'warn' : '';
+    el('statsFailed').textContent = s.failed;
+    el('statsAvg').textContent = fmtDuration(s.avg_seconds);
+    el('statsEmpty').hidden = s.total > 0;
+    el('statsTableWrap').hidden = s.total === 0;
+    var body = el('statsRows');
+    body.textContent = '';
+    (s.runners || []).forEach(function (r) {
+      var tr = document.createElement('tr');
+      var runnerRate = successRate(r);
+      tr.appendChild(textCell(r.runner));
+      tr.appendChild(textCell(r.total, 'tabular'));
+      tr.appendChild(textCell(runnerRate === null ? '—' : fmtPct(runnerRate), 'tabular'));
+      tr.appendChild(textCell(r.failed, 'tabular'));
+      tr.appendChild(textCell(fmtDuration(r.avg_seconds), 'tabular'));
+      body.appendChild(tr);
+    });
+  }
+  function loadStats() {
+    fetch('/api/stats?days=' + encodeURIComponent(el('statsDays').value))
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (s) { if (s) renderStats(s); })
+      .catch(function () {});
+  }
+  el('statsDays').addEventListener('change', loadStats);
+
   function loadEvents() {
+    loadStats();
     var params = new URLSearchParams();
     if (eventsRunner.value) params.set('runner', eventsRunner.value);
     if (eventsErrors.checked) params.set('level', 'error');
@@ -1355,7 +1509,12 @@ document.getElementById('modalStopBtnFooter').addEventListener('click', function
     }
     if (view === 'system') {
       pollSystem();
-      pollTimer = setInterval(pollSystem, POLL_MS);
+      loadSavedHistory();
+      pollTimer = setInterval(function () {
+        pollSystem();
+        historyTick++;
+        if (historyTick % 12 === 0) loadSavedHistory();
+      }, POLL_MS);
     }
   }
   window.addEventListener('hashchange', showView);

@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Warnings when a runner hits its memory or CPU limit.
 - Activity log: starts, stops, job results, memory kills and errors, kept with their times.
 - Recreating a runner pulls its image first.
+- Job statistics: totals, success rate and average duration, overall and per runner.
+- Saved CPU and memory history for up to 30 days, in 5-minute summaries.
+- Clean a runner's work directory, old Docker build cache and unused images from the panel.
 
 ## [2.1.0] - 2026-11-05
 

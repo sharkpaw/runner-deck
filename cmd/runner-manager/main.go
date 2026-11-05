@@ -134,6 +134,7 @@ func main() {
 
 	handler.ConfigPath = *configPath
 	handler.Events = eventlog.ForConfig(*configPath)
+	handler.Metrics = eventlog.MetricsForConfig(*configPath)
 	store := secrets.NewStore(*configPath)
 	handler.Secrets = store
 	handler.StartRegistrationWorker()
@@ -497,7 +498,11 @@ func registerRoutes(e *echo.Echo) {
 	e.HEAD("/static/*", staticH)
 	e.GET("/api/system", handler.SystemInfo)
 	e.PUT("/api/settings/resources", handler.UpdateResourceLimits)
+	e.POST("/api/docker/clean", handler.CleanDocker)
+	e.POST("/api/runners/:name/clean", handler.CleanRunnerWork)
 	e.GET("/api/events", handler.ListEvents)
+	e.GET("/api/stats", handler.JobStatistics)
+	e.GET("/api/metrics", handler.MetricHistory)
 	e.GET("/api/runners/:name/logs", handler.RunnerLogs)
 	e.GET("/api/runners", handler.ListRunners)
 	e.GET("/api/runner-rows", handler.RunnerRows)

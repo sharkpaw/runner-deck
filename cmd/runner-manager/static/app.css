@@ -476,3 +476,12 @@ form button:hover, .btn-parse:hover { background: var(--accent-strong); opacity:
 .event-error .event-text { color: var(--danger); }
 .event-warn .event-text { color: var(--warn); }
 .output-body { max-height: 65vh; margin: 0; overflow: auto; padding: 12px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+
+/* ===== Statistics and history ===== */
+.stats-head { justify-content: space-between; }
+.stats-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.stats-grid { margin: 12px 16px; }
+.stats-grid .stat { background: var(--surface-2); }
+.stats-empty { margin: 0; padding: 0 16px 16px; }
+.chart-range { justify-content: flex-end; }
+.clean-work { margin-left: 8px; }

@@ -91,6 +91,7 @@ type Watcher struct {
 	cfg     func() (*config.Config, error)
 	state   map[string]*watchedRunner
 	started time.Time
+	metrics metricCollector
 }
 
 // NewWatcher returns a watcher reading the config through load.
@@ -190,6 +191,7 @@ func (w *Watcher) Pass(ctx context.Context) {
 		return
 	}
 	seen := make(map[string]bool, len(cfg.Runners.Items))
+	active := map[string]string{}
 	for _, info := range runner.List(cfg) {
 		seen[info.Name] = true
 		st, known := w.state[info.Name]
@@ -202,7 +204,11 @@ func (w *Watcher) Pass(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			w.checkContainer(ctx, info.Name, st, exists && status == "running", !known)
+			running := exists && status == "running"
+			w.checkContainer(ctx, info.Name, st, running, !known)
+			if running {
+				active[runner.ContainerName(info.Name)] = info.Name
+			}
 			continue
 		}
 		if known && info.Running != st.running {
@@ -219,6 +225,7 @@ func (w *Watcher) Pass(ctx context.Context) {
 			delete(w.state, name)
 		}
 	}
+	w.metrics.sampleMetrics(ctx, active, time.Now())
 }
 
 // Run calls Pass on an interval until ctx ends.

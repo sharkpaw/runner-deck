@@ -21,6 +21,8 @@ Her repo için ayrı compose dosyası tutmak yerine runner'larını tek arayüzd
 - **Repo bazında runner:** GitHub'ın verdiği `./config.sh` satırını yapıştır, form kendini doldursun.
 - **Sistem kaynakları:** runner başına CPU, bellek ve disk, oturum grafikleri ve Docker disk kullanımı.
 - **Kaynak sınırları:** varsayılan 4 CPU / 8 GB, panelden genel ve runner başına değişir; sınıra takılınca uyarı görünür.
+- **İstatistik ve geçmiş:** iş sayısı, başarı oranı, ortalama süre; 30 güne kadar CPU ve bellek geçmişi.
+- **Temizlik:** runner work dizini, eski derleme önbelleği ve kullanılmayan imajlar panelden temizlenir.
 - **Kayıtlar:** başlama, durma, iş sonucu, bellek taşması ve hatalar saatiyle kalıcı olarak tutulur.
 - **Her runner kendi konteynerinde:** work dizinleri ayrı, checkout'lar birbirini ezmez.
 - **Veritabanı yok:** tüm yapılandırma tek YAML dosyasında.
