@@ -101,7 +101,7 @@ func TestCleanRunnerWork_ProcessModeRefused(t *testing.T) {
 	}
 }
 
-// The script itself, against a fake /runner tree and process table.
+// The delete step of the script, against a fake /runner tree.
 func TestCleanWorkScript_KeepsToolCache(t *testing.T) {
 	dir := t.TempDir()
 	work := filepath.Join(dir, "_work")
@@ -110,7 +110,13 @@ func TestCleanWorkScript_KeepsToolCache(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	script := strings.ReplaceAll(cleanWorkScript, "/runner/_work", work)
+	// Only the delete step: on CI the test itself runs under a real Runner.Worker, which the guard
+	// at the top of the script rightly refuses.
+	_, remove, ok := strings.Cut(cleanWorkScript, "done\n")
+	if !ok {
+		t.Fatal("the script no longer has its guard")
+	}
+	script := strings.ReplaceAll(remove, "/runner/_work", work)
 	if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
