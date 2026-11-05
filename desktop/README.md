@@ -36,6 +36,10 @@ publishes the release, and the links above then give the new version. Installed 
 its `latest.json`. Publishing needs the `TAURI_SIGNING_PRIVATE_KEY` repository secret; losing that key
 means installed apps can no longer update.
 
+With these secrets as well, the build is signed with a Developer ID and notarized: `APPLE_CERTIFICATE`
+(the `.p12` in base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
+`APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`.
+
 ## Build
 
 Needs Go, Rust and Bun.
